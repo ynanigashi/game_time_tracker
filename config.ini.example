@@ -1,0 +1,3 @@
+[DEFAULT]
+limit_minutes = 60
+json_file_path = time.json

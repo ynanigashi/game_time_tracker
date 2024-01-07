@@ -6,3 +6,5 @@
 !*.py
 !*.md
 !*.txt
+!*.template
+!*.example
