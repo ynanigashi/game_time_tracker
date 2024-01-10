@@ -3,8 +3,12 @@ import datetime
 import json
 import configparser
 import os
+import threading
 
 import keyboard
+import tkinter as tk
+from tkinter import messagebox as mbox
+
 
 def main():
     gt = GameTimer()
@@ -59,6 +63,10 @@ class GameTimer():
         # 前回以前の経過時間を取得
         self.json_file_path = config.json_file_path
         self.elapsed_seconds = self._get_elapsed_seconds()
+
+        # メッセージボックスを表示するかどうかのフラグ
+        self.half_msg_flag = False
+        self.end_msg_flag = False
     
     # get elapsed minutes from json file
     def _get_elapsed_seconds(self):
@@ -106,6 +114,7 @@ class GameTimer():
         # 開始時間を取得
         start_time = datetime.datetime.now()
         print('Started the timer. Press Ctrl+Space to stop it.')
+
         while True:
             # 経過時間を取得
             time_diff = datetime.datetime.now() - start_time
@@ -116,6 +125,16 @@ class GameTimer():
             remain_time = self._format_seconds_to_hms(remain_seconds) if remain_seconds > 0 else 'Time limit exceeded!!'
             total_elapsed_time = self._format_seconds_to_hms(self.elapsed_seconds + time_diff_seconds)
             elapsed_time = self._format_seconds_to_hms(time_diff_seconds)
+
+            if remain_seconds <= self.limit_seconds / 2 and self.half_msg_flag == False:
+                self.half_msg_flag = True
+                message_thread = threading.Thread(target=self._show_messagebox, args=(f'remain time is {remain_seconds//60} minutes',)) 
+                message_thread.start()
+
+            if remain_seconds <= 0 and self.end_msg_flag == False:
+                self.end_msg_flag = True
+                message_thread = threading.Thread(target=self._show_messagebox, args=('Time limit exceeded!!',)) 
+                message_thread.start()
 
             # 表示
             print(f'\rremain:{remain_time} / total_elapsed:{total_elapsed_time} / elapsed:{elapsed_time}', end='')
@@ -133,6 +152,12 @@ class GameTimer():
 
         return start_time, end_time
 
+    def _show_messagebox(self, message):
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', 1) # 最前面に表示
+        mbox.showwarning('GameTimer', message)
+        root.destroy()
 
     # 秒数を時分秒形式に変換
     def _format_seconds_to_hms(self, seconds):
