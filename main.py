@@ -60,30 +60,36 @@ class GameTimer():
         # プレイ可能時間の読み込み
         self.limit_seconds = config.limit_seconds
         
-        # 前回以前の経過時間を取得
+        # 前回の情報があれば取得
         self.json_file_path = config.json_file_path
-        self.elapsed_seconds = self._get_elapsed_seconds()
-
-        # メッセージボックスを表示するかどうかのフラグ
-        self.half_msg_flag = False
-        self.end_msg_flag = False
+        
+        (self.elapsed_seconds,
+         self.half_msg_flag,
+         self.end_msg_flag,
+         ) = self._load_state()
     
     # get elapsed minutes from json file
-    def _get_elapsed_seconds(self):
+    def _load_state(self):
+        elapsed_seconds = 0
+        half_msg_flag = False
+        end_msg_flag = False
+        
         try:
             with open(self.json_file_path, 'r') as f:
                 json_data = json.load(f)
                 start_time = datetime.datetime.fromisoformat(json_data['start_time'])
-                # 日付が変わっていたら経過時間をリセット
-                if start_time.date() != datetime.datetime.now().date():
-                    elapsed_seconds = 0
-                else:
-                    elapsed_seconds = json_data['elasped_seconds']
 
+                # 日付が変わっていなければ経過時間やフラグデータを取得
+                if start_time.date() == datetime.datetime.now().date():
+                    elapsed_seconds = json_data['elasped_seconds']
+                    half_msg_flag = json_data['half_msg_flag']
+                    end_msg_flag = json_data['end_msg_flag']
+
+        # ファイルがない場合はデフォルト値を返す
         except (FileNotFoundError, KeyError):
-            elapsed_seconds = 0
+            pass
         
-        return elapsed_seconds
+        return elapsed_seconds, half_msg_flag, end_msg_flag
 
 
     def timer(self):
@@ -94,15 +100,17 @@ class GameTimer():
         self.elapsed_seconds += (end_time - start_time).total_seconds()
 
         # 経過時間を保存
-        self._seve_elapsed_seconds(start_time)
+        self._save_state(start_time)
 
         return start_time, end_time
 
-    def _seve_elapsed_seconds(self, start_time):
+    def _save_state(self, start_time):
         # 開始時間と経過時間をjsonファイルに保存
         json_data = {
             'start_time': start_time.isoformat(),
             'elasped_seconds': self.elapsed_seconds,
+            'half_msg_flag': self.half_msg_flag,
+            'end_msg_flag': self.end_msg_flag,
         }
 
         with open(self.json_file_path, 'w') as f:
