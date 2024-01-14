@@ -1,13 +1,14 @@
 import time
 import datetime
 import json
-import configparser
 import os
 import threading
 
-import keyboard
 import tkinter as tk
 from tkinter import messagebox as mbox
+import keyboard
+
+from config_loader import ConfigLoader
 
 
 def main():
@@ -36,20 +37,6 @@ def format_datetime_to_gss_style(datetime):
     return datetime.strftime("%Y/%m/%d %H:%M:%S")
 
 
-
-# 設定ファイルの読み込み
-class ConfigLoader:
-    def __init__(self):
-        self.config_file_path = 'config.ini'
-        self.config = configparser.ConfigParser()
-        self.config.read(self.config_file_path, encoding='utf-8')
-        self.load()
-
-    def load(self):
-        self.limit_seconds = int(self.config['GAMETIMER']['limit_minutes']) * 60
-        self.json_file_path = self.config['GAMETIMER']['json_file_path']
-
-
 # タイマー関連の処理
 class GameTimer():
     
@@ -57,12 +44,13 @@ class GameTimer():
         # 設定ファイルの読み込み
         config = ConfigLoader()
         
-        # プレイ可能時間の読み込み
-        self.limit_seconds = config.limit_seconds
+        # 設定ファイルから制限時間を取得
+        self.limit_seconds = config.game_timer['limit_seconds']
         
-        # 前回の情報があれば取得
-        self.json_file_path = config.json_file_path
+        # 設定ファイルからjsonファイルのパスを取得
+        self.json_file_path = config.game_timer['json_file_path']
         
+        # jsonファイルから経過時間とフラグデータを取得
         (self.elapsed_seconds,
          self.half_msg_flag,
          self.end_msg_flag,
@@ -70,6 +58,7 @@ class GameTimer():
     
     # get elapsed minutes from json file
     def _load_state(self):
+        # set default values
         elapsed_seconds = 0
         half_msg_flag = False
         end_msg_flag = False
