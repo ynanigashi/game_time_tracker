@@ -9,10 +9,19 @@ from tkinter import messagebox as mbox
 import keyboard
 
 from config_loader import ConfigLoader
-
+from log_handler import LogHandler
 
 def main():
     gt = GameTimer()
+    config = ConfigLoader()
+    # スプレッドシートを使用するか取得
+    use_spreadsheet = config.application_manager['use_spreadsheet']
+
+    if use_spreadsheet:
+        # スプレッドシートの設定
+        log_handler = LogHandler()
+
+    
     while True:
         print(f'本日の残り時間は{(gt.limit_seconds - gt.elapsed_seconds)//60}分です')
         input('Press Enter to start the timer.')
@@ -23,9 +32,15 @@ def main():
         # google spreadsheetのフォーマットに変換して表示
         formatted_start_time = format_datetime_to_gss_style(start_time)
         formatted_end_time = format_datetime_to_gss_style(end_time)
-        print('以下はgoogle spreadsheetのフォーマットに変換した時間')
-        print(f'start time:\n{formatted_start_time}')
-        print(f'end time:\n{formatted_end_time}')
+
+        if use_spreadsheet:
+            # スプレッドシートに保存
+            log_handler.save_record([formatted_start_time, formatted_end_time])
+            print('スプレッドシートにプレイ時間を保存しました')
+        else:
+            print('以下はgoogle spreadsheetのフォーマットに変換した時間')
+            print(f'start time:\n{formatted_start_time}')
+            print(f'end time:\n{formatted_end_time}')
 
 def clear_console():
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -44,10 +59,11 @@ class GameTimer():
         # 設定ファイルの読み込み
         config = ConfigLoader()
         
-        # 設定ファイルから制限時間を取得
+        ## 設定ファイルから各種設定を読み込む
+        # 制限時間を取得
         self.limit_seconds = config.game_timer['limit_seconds']
         
-        # 設定ファイルからjsonファイルのパスを取得
+        # jsonファイルのパスを取得
         self.json_file_path = config.game_timer['json_file_path']
         
         # jsonファイルから経過時間とフラグデータを取得

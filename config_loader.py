@@ -9,11 +9,16 @@ class ConfigLoader:
         self.load()
 
     def load(self):
+        self.application_manager = {
+            'use_spreadsheet': self.config.getboolean('APPLICATIONMANAGER', 'use_spreadsheet'),
+        }
+
         self.game_timer = {
             'limit_seconds': int(self.config['GAMETIMER']['limit_minutes']) * 60,
             'json_file_path': self.config['GAMETIMER']['json_file_path'],
         }
-        self.logger = {
-            'cert_file_path': self.config['LOGGER']['cert_file_path'],
-            'sheet_key': self.config['LOGGER']['sheet_key'],
+
+        self.log_handler = {
+            'cert_file_path': self.config['LOGHANDLER']['json_file_path'],
+            'sheet_key': self.config['LOGHANDLER']['sheet_key'],
         }
