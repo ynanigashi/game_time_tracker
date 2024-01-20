@@ -1,3 +1,5 @@
+from datetime import datetime
+
 # https://docs.gspread.org/en/v5.12.1/
 import gspread
 
@@ -16,6 +18,30 @@ class LogHandler():
     def get_all_values(self):
         return self.sheet.get_all_values()
     
+    def get_titles(self):
+        records = self.get_all_records()
+        return {record['title'] for record in records}
+    
+    def get_5_titles_of_recently(self):
+        records = self.get_all_records()
+        recent_of_titles = {}
+        for record in records:
+            title = record['title']
+            start_time = self._gss_timestr_to_datetime(record['start_time'])
+            if title not in recent_of_titles or recent_of_titles[title] < start_time:
+                recent_of_titles[title] = start_time
+        
+        # 最新のdatetimeを持つレコードだけを残す
+        most_recent_records = [record for record in records if self._gss_timestr_to_datetime(record['start_time']) == recent_of_titles[record['title']]]
+
+        # ソートする
+        most_recent_records.sort(key=lambda record: record['start_time'], reverse=True)
+        
+        return most_recent_records[:5]
+
+    def _gss_timestr_to_datetime(self, timestr):
+        return datetime.strptime(timestr, '%Y/%m/%d %H:%M:%S')
+
     def save_record(self, values):
         try:
             self.sheet.append_row(values, value_input_option='USER_ENTERED')
@@ -25,8 +51,8 @@ class LogHandler():
             print(f'Exception occurred while appending row: {e}')
             
 def main():
-    pass
-
+    log_handler = LogHandler()
+    print(log_handler.get_recently5_titles())
 
 if __name__ == '__main__':
     main()
