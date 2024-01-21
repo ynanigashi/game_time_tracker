@@ -11,12 +11,18 @@ class LogHandler():
         config = ConfigLoader()
         gc = gspread.service_account(filename=config.log_handler['cert_file_path'])
         self.sheet = gc.open_by_key(config.log_handler['sheet_key']).sheet1
+        self.records = self.get_all_records()
+        self.index = len(self.records)
 
     def get_all_records(self):
         return self.sheet.get_all_records()
 
     def get_all_values(self):
         return self.sheet.get_all_values()
+    
+    def get_and_incremant_index(self):
+        self.index += 1
+        return self.index
     
     def get_titles(self):
         records = self.get_all_records()
@@ -51,8 +57,7 @@ class LogHandler():
             print(f'Exception occurred while appending row: {e}')
             
 def main():
-    log_handler = LogHandler()
-    print(log_handler.get_recently5_titles())
+    pass
 
 if __name__ == '__main__':
     main()
