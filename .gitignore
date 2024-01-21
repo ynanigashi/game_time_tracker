@@ -8,3 +8,4 @@
 !*.txt
 !*.template
 !*.example
+!*_prompts.json

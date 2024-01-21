@@ -1,5 +1,6 @@
 import os
 import time
+import json
 
 import keyboard
 
@@ -10,6 +11,8 @@ from log_handler import LogHandler
 def main():
     gt = GameTimer()
     config = ConfigLoader()
+    prompts = get_prompts()
+
     # スプレッドシートを使用するか取得
     use_spreadsheet = config.application_manager['use_spreadsheet']
 
@@ -20,19 +23,22 @@ def main():
     while True:
         playing_title = None
         if use_spreadsheet:
-            playing_title = select_game_title()
-            print(f'プレイするゲームは{playing_title}です')
-        print(f'本日の残り時間は{(gt.limit_seconds - gt.elapsed_seconds)//60}分です')
-        play_with_friends = True if input('友人とプレイする場合はyを入力してください: ') in ['y', 'Y', 'ｙ', 'Ｙ'] else False
+            playing_title = select_game_title(prompts['select_game_title'])
+            print(prompts['selected_title'].format(
+                        playing_title=playing_title))
+        remain_minutes = (gt.limit_seconds - gt.elapsed_seconds)//60
+        print(prompts['remain_minutes'].format(
+                    remain_minutes=remain_minutes))
+        play_with_friends = True if input(prompts['with_friends_input']) in ['y', 'Y', 'ｙ', 'Ｙ'] else False
         if play_with_friends:
-            print('友人とプレイします, 本日の残り時間は減少しません')
+            print(prompts['with_friends'])
         else:
-            print('一人でプレイします, 本日の残り時間が減少します')
+            print(prompts['without_friends'])
 
-        input('Enterを押すとタイマーが開始します:')
+        input(prompts['start_input'])
         clear_console()
         if use_spreadsheet:
-            print(f'プレイ中のゲームは{playing_title}です')
+            print(prompts['playing_title'].format(playing_title=playing_title))
         start_time, end_time = gt.timer(play_with_friends=play_with_friends)
         # print(f'開始時間:{start_time} / 終了時間:{end_time}')
 
@@ -47,11 +53,7 @@ def main():
                                      formatted_end_time, 
                                      playing_title, 
                                      play_with_friends])
-            print('スプレッドシートにプレイ時間を保存しました')
-        else:
-            print('プレイ時間は以下の通りです')
-            print(f'start time:\n{formatted_start_time}')
-            print(f'end time:\n{formatted_end_time}')
+            print(prompts['save_to_gss_done'])
 
 
 def clear_console():
@@ -61,24 +63,28 @@ def clear_console():
 def format_datetime_to_gss_style(datetime):
     return datetime.strftime("%Y/%m/%d %H:%M:%S")
 
-def select_game_title():
+def select_game_title(prompts):
     log_handler = LogHandler()
     titles = [
         record['title'] for record in
         log_handler.get_5_titles_of_recently()
         ] 
-    titles.append('新しいゲームを追加する')
+    titles.append(prompts['add_title_option'])
     selected = 0
     while True:
         clear_console()
-        print('プレイするゲームを上下で選択してください')
+        print(prompts['game_selection_guide'])
         for i, title in enumerate(titles):
             if i == selected:
                 print(f'\033[1;30;47m-> {title} \033[0m')
             else:
                 print(f'   {title}')
-        print('Enterで決定')
+        print(prompts['game_choice_guide'])
+        
+        # キー入力を取得
         key = keyboard.read_key()
+        
+        # キー入力に応じて処理
         if key == 'up':
             selected = selected - 1 if selected > 0 else len(titles) - 1
             time.sleep(0.1)
@@ -92,19 +98,28 @@ def select_game_title():
 
         time.sleep(0.05)
     
+    # ゲームを追加する場合
     if selected == len(titles) - 1:
+        add_title_prompt = prompts['add_title']
         while True:
             clear_console()
-            print('プレイするゲームの名前を入力してください')
-            title = input('ゲーム名: ')
+            print(add_title_prompt['input_title'])
+            title = input(add_title_prompt['title_input'])
 
-            print(f'上記の名前でよろしいですか？')
-            if input('y/n: ') in ['y', 'Y', 'ｙ', 'Ｙ']:
+            print(add_title_prompt['confirm_title'])
+            if input(add_title_prompt['yn_input']) in ['y', 'Y', 'ｙ', 'Ｙ']:
                 break
         
         return title
 
     return titles[selected]
+
+def get_prompts():
+    with open('jp_prompts.json', 'r', encoding='utf-8') as f:
+        prompts = json.load(f)
+    
+    return prompts
+
 
 if __name__ == '__main__':
     main()
