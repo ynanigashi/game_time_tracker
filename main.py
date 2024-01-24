@@ -1,5 +1,6 @@
 import os
 import time
+import datetime
 import json
 
 import keyboard
@@ -19,8 +20,10 @@ def main():
     if use_spreadsheet:
         # スプレッドシートの設定
         log_handler = LogHandler()
-    
+
     while True:
+        _ = input(prompts['start_guide'])
+        clear_console()
         playing_title = None
         if use_spreadsheet:
             playing_title = select_game_title(prompts['select_game_title'])
@@ -91,9 +94,7 @@ def select_game_title(prompts):
         if key == 'down':
             selected = selected + 1 if selected < len(titles) - 1 else 0
             time.sleep(0.1)
-        if key == 'enter':
-            # keaboard.read_key()でEnterが読み込まれてしまうのでここで使っておく
-            _ = input()
+        if keyboard.is_pressed('ctrl+space'):
             break
 
         time.sleep(0.05)
