@@ -46,8 +46,8 @@ def main():
         # print(f'開始時間:{start_time} / 終了時間:{end_time}')
 
         # google spreadsheetのフォーマットに変換
-        formatted_start_time = format_datetime_to_gss_style(start_time)
-        formatted_end_time = format_datetime_to_gss_style(end_time)
+        formatted_start_time = log_handler.format_datetime_to_gss_style(start_time)
+        formatted_end_time = log_handler.format_datetime_to_gss_style(end_time)
 
         if use_spreadsheet:
             # スプレッドシートに保存
@@ -63,14 +63,11 @@ def clear_console():
     os.system('cls' if os.name == 'nt' else 'clear')
 
 
-def format_datetime_to_gss_style(datetime):
-    return datetime.strftime("%Y/%m/%d %H:%M:%S")
-
 def select_game_title(prompts):
     log_handler = LogHandler()
     titles = [
         record['title'] for record in
-        log_handler.get_5_titles_of_recently()
+        log_handler.get_10_titles_of_recently()
         ] 
     titles.append(prompts['add_title_option'])
     selected = 0

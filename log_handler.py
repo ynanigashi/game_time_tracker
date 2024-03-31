@@ -29,6 +29,12 @@ class LogHandler():
         return {record['title'] for record in records}
     
     def get_5_titles_of_recently(self):
+        return self.get_n_titles_of_recently(5)
+
+    def get_10_titles_of_recently(self):
+        return self.get_n_titles_of_recently(10)
+
+    def get_n_titles_of_recently(self, num):
         records = self.get_all_records()
         recent_of_titles = {}
         for record in records:
@@ -43,10 +49,13 @@ class LogHandler():
         # ソートする
         most_recent_records.sort(key=lambda record: record['start_time'], reverse=True)
         
-        return most_recent_records[:5]
+        return most_recent_records[:num]
 
     def _gss_timestr_to_datetime(self, timestr):
         return datetime.strptime(timestr, '%Y/%m/%d %H:%M:%S')
+
+    def format_datetime_to_gss_style(self, datetime):
+        return datetime.strftime("%Y/%m/%d %H:%M:%S")
 
     def save_record(self, values):
         try:

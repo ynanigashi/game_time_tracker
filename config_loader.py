@@ -22,3 +22,8 @@ class ConfigLoader:
             'cert_file_path': self.config['LOGHANDLER']['json_file_path'],
             'sheet_key': self.config['LOGHANDLER']['sheet_key'],
         }
+
+        self.game_info = {
+            'sheet_key': self.config['GAMEINFO']['sheet_key'],
+            'sheet_gid': self.config['GAMEINFO']['sheet_gid'],
+        }
