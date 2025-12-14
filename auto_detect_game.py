@@ -38,9 +38,19 @@ def main():
                     if browser in title:
                         is_browser = True
                         break
-                if game['window_title'] in title and not is_browser:
-                    game_in_window_titles = True
-                    break
+                
+                # ゲームのウィンドウタイトルが含まれているかチェック
+                if game['window_title'] in title:
+                    # ブラウザゲームの場合：ブラウザでの実行を許可
+                    # 通常のゲームの場合：ブラウザでの実行を拒否
+                    if game['is_browser_game']:
+                        # ブラウザゲームとして登録されている場合は、ブラウザでも記録
+                        game_in_window_titles = True
+                        break
+                    elif not is_browser:
+                        # 通常のゲームの場合は、ブラウザ以外でのみ記録
+                        game_in_window_titles = True
+                        break
             
             if game_in_window_titles:
                 game['is_playing'] = True
@@ -51,14 +61,18 @@ def main():
             else:
                 if game['is_playing']:
                     game['end_time'] = datetime.now()
-                    start_time = log_handler.format_datetime_to_gss_style(game['start_time'])
-                    end_time = log_handler.format_datetime_to_gss_style(game['end_time'])
-                    log_handler.save_record([log_handler.get_and_incremant_index(), 
-                                             start_time, 
-                                             end_time, 
-                                             game['game_title'], 
-                                             game['play_with_friends']])
-                    print(f'{game["game_title"]}のプレイ時間を記録しました')
+                    play_duration = (game['end_time'] - game['start_time']).total_seconds() / 60
+                    if play_duration >= 5:
+                        start_time = log_handler.format_datetime_to_gss_style(game['start_time'])
+                        end_time = log_handler.format_datetime_to_gss_style(game['end_time'])
+                        log_handler.save_record([log_handler.get_and_incremant_index(), 
+                                                 start_time, 
+                                                 end_time, 
+                                                 game['game_title'], 
+                                                 game['play_with_friends']])
+                        print(f'{game["game_title"]}のプレイ時間を記録しました')
+                    else:
+                        print(f'{game["game_title"]}のプレイ時間が5分未満のため、記録されませんでした')
                     # reset
                     game['start_time'] = ''
                     game['end_time'] = ''
@@ -101,6 +115,7 @@ def get_games_info():
                 'start_time':'',
                 'end_time':'',
                 'play_with_friends':True if record['play_with_friends'] == 'TRUE' else False,
+                'is_browser_game':True if record.get('is_browser_game', 'FALSE') == 'TRUE' else False,
                 }
         games.append(game)
 
