@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 
 # https://docs.gspread.org/en/v5.12.1/
 import gspread
@@ -9,7 +10,7 @@ class LogHandler():
 
     def __init__(self):
         config = ConfigLoader()
-        gc = gspread.service_account(filename=config.log_handler['cert_file_path'])
+        gc = gspread.service_account(filename=Path(config.log_handler['cert_file_path']))
         self.sheet = gc.open_by_key(config.log_handler['sheet_key']).sheet1
         self.records = self.get_all_records()
         self.index = len(self.records)
