@@ -21,7 +21,7 @@ from log_handler import LogHandler
 # =============================================================================
 # 定数
 # =============================================================================
-POLL_INTERVAL_SECONDS = 10
+POLL_INTERVAL_SECONDS = 1
 MIN_PLAY_MINUTES = 5
 
 
@@ -29,6 +29,7 @@ class Messages:
     """ユーザー向けメッセージ定義."""
 
     GAME_PLAYING = '{game_title}をプレイ中'
+    GAME_PLAYING_WITH_ELAPSED = '{game_title}をプレイ中（経過: {elapsed}）'
     GAME_RECORDED = '{game_title}のプレイ時間を記録しました'
     GAME_TOO_SHORT = '{game_title}のプレイ時間が{min_minutes}分未満のため、記録されませんでした'
     NO_GAME_PLAYING = 'ゲームをプレイしていません'
@@ -148,12 +149,12 @@ class SessionRecorder:
         self.log_handler = log_handler
         self.min_play_minutes = min_play_minutes
 
-    def record(self, game: GameEntry) -> None:
-        """ゲームセッションを終了して記録."""
+    def record(self, game: GameEntry) -> Optional[float]:
+        """ゲームセッションを終了して記録し、保存した秒数を返す."""
         start_time, end_time = game.end_session()
 
         if start_time is None or end_time is None:
-            return
+            return None
 
         play_minutes = (end_time - start_time).total_seconds() / 60
 
@@ -162,10 +163,12 @@ class SessionRecorder:
                 game_title=game.game_title,
                 min_minutes=self.min_play_minutes,
             ))
-            return
+            return None
 
+        duration_seconds = (end_time - start_time).total_seconds()
         self._save_to_spreadsheet(game, start_time, end_time)
         print(Messages.GAME_RECORDED.format(game_title=game.game_title))
+        return duration_seconds
 
     def _save_to_spreadsheet(
         self,
@@ -250,7 +253,11 @@ class GameMonitor:
         """現在の状態を表示."""
         if active_games:
             for game in active_games:
-                print(Messages.GAME_PLAYING.format(game_title=game.game_title))
+                elapsed = _format_elapsed(game.start_time)
+                print(Messages.GAME_PLAYING_WITH_ELAPSED.format(
+                    game_title=game.game_title,
+                    elapsed=elapsed,
+                ))
         else:
             print(Messages.NO_GAME_PLAYING)
             print(Messages.CURRENT_WINDOWS)
@@ -270,6 +277,20 @@ class GameMonitor:
 def _parse_bool(value: object) -> bool:
     """文字列を bool に変換."""
     return str(value).upper() == 'TRUE'
+
+
+def _format_elapsed(start_time: Optional[datetime]) -> str:
+    """開始時刻からの経過時間を整形."""
+    if start_time is None:
+        return '0秒'
+    delta_seconds = int((datetime.now() - start_time).total_seconds())
+    minutes, seconds = divmod(delta_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f'{hours}時間{minutes}分{seconds}秒'
+    if minutes:
+        return f'{minutes}分{seconds}秒'
+    return f'{seconds}秒'
 
 
 def _clear_console() -> None:

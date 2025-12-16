@@ -89,6 +89,15 @@ pip install -r requirements.txt
 python main.py
 ```
 
+### GUI 版（PySide6）
+```powershell
+python gui.py
+```
+- プレイ中のゲームと経過時間、現在のウィンドウタイトルを一覧表示します。
+- スプレッドシートへの記録タイミングや検出ロジックは CLI 版と同じです。
+- 表示モードは左クリックでトグル（max=全表示、mid=ウィンドウタイトル非表示、min=今日のプレイ時間のみ）。モード・位置・サイズは `window_state.txt` に保存/復元されます。
+- ウィンドウ検出は 1 秒間隔、UI 更新は 0.1 秒間隔です。
+
 #### Windows バッチファイルでの起動（推奨）
 ```powershell
 .\game_time_tracker.bat
@@ -96,7 +105,7 @@ python main.py
 Windows タスクスケジューラで定期実行したい場合は、このバッチファイルを登録してください。
 
 #### 実行時の動作
-起動すると、10秒間隔（`POLL_INTERVAL_SECONDS`）で表示中のウィンドウをスキャンします：
+起動すると、1秒間隔（`POLL_INTERVAL_SECONDS`）で表示中のウィンドウをスキャンします：
 - ウィンドウタイトルが登録されたゲームと一致したら、プレイ開始として記録。
 - ウィンドウが消失したら、プレイ終了として記録。
 - 5分以上（`MIN_PLAY_MINUTES`）のプレイのみスプレッドシートに追記。
@@ -111,7 +120,7 @@ Windows タスクスケジューラで定期実行したい場合は、このバ
 
 ゲーム実行中（複数タイトルも出力可）：
 ```
-Terrarioをプレイ中
+Terrarioをプレイ中（経過: 3分12秒）
 ```
 
 プレイ終了時（5分以上）：
@@ -164,7 +173,7 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
 
 ## 開発向け
 - テスト実行: `python -m unittest`
-- 監視間隔や最小記録時間は `main.py` 冒頭の定数（`POLL_INTERVAL_SECONDS`, `MIN_PLAY_MINUTES`）で変更できます。
+- 監視間隔や最小記録時間は `main.py` 冒頭の定数（`POLL_INTERVAL_SECONDS`, `MIN_PLAY_MINUTES`）で変更できます（デフォルト 1 秒）。
 - 監視対象ブラウザ・除外ウィンドウは `config.ini` の `[WINDOW_SCAN]` で変更できます（未設定時は `config_loader.py` のデフォルト値）。
 
 ## 開発ガイド
