@@ -120,10 +120,10 @@ Terrariaのプレイ時間を記録しました
 ```
 
 ## ファイル構成
-- [main.py](main.py) : 自動検出メインループ。`GameMonitor` クラスがウィンドウスキャンとログ記録を担当。ブラウザ判定/除外タイトルは定数化。
+- [main.py](main.py) : 自動検出メインループ。`GameMonitor` クラスがウィンドウスキャンとログ記録を担当。
 - [game_time_tracker.bat](game_time_tracker.bat) : Windows バッチファイル。仮想環境を有効化して main.py を実行（日々の起動はこちらから）。
 - [log_handler.py](log_handler.py) : スプレッドシート操作（読み込み・追記・インデックス管理）。
-- [config_loader.py](config_loader.py) : `config.ini` の読み込みと設定値管理。
+- [config_loader.py](config_loader.py) : `config.ini` の読み込みと設定値管理。ブラウザ判定/除外タイトルはここで定義。
 - [config.ini](config.ini) : スプレッドシートのキーや認証情報を指定。
 - [service_account.json](service_account.json) : Google Cloud サービスアカウント秘密鍵（.gitignore で除外）。
 

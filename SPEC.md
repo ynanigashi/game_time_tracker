@@ -73,23 +73,31 @@ Windows PC で実行中のゲームをウィンドウタイトルから自動検
 ```python
 # 各ゲームについて
 for game in games:
-    game_in_window_titles = False
-    for title in window_titles:
-        # ブラウザ判定
-        is_browser = any(browser in title for browser in BROWSERS)
-        
-        # ウィンドウタイトルがゲームの window_title を含むか（部分一致）
-        if game['window_title'] in title:
-            if game['is_browser_game']:
-                # ブラウザゲーム：ブラウザでの実行を許可
-                game_in_window_titles = True
-                break
-            elif not is_browser:
-                # 通常ゲーム：ブラウザでの実行を除外
-                game_in_window_titles = True
-                break
+    detected = any(
+        game.matches_window(title, self.browsers)
+        for title in window_titles
+    )
     
-    game['is_playing'] = game_in_window_titles
+    if detected and not game.is_playing:
+        game.start_session()
+    elif not detected and game.is_playing:
+        self.recorder.record(game)
+```
+
+### GameEntry.matches_window()
+```python
+def matches_window(self, window_title: str, browsers: Sequence[str]) -> bool:
+    if self.window_title not in window_title:
+        return False
+
+    is_browser = any(browser in window_title for browser in browsers)
+
+    # ブラウザゲームの場合は常にマッチ
+    if self.is_browser_game:
+        return True
+
+    # 通常ゲームの場合はブラウザ以外でマッチ
+    return not is_browser
 ```
 
 ## 非機能要件・制約
