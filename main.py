@@ -1,11 +1,13 @@
+"""Game Time Tracker - ウィンドウタイトルからゲームプレイを自動検出し記録するツール."""
+
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-import gspread  # https://docs.gspread.org/en/v5.12.1/
+import gspread
 import pygetwindow as gw
 
 from config_loader import (
@@ -15,168 +17,296 @@ from config_loader import (
 )
 from log_handler import LogHandler
 
+
+# =============================================================================
+# 定数
+# =============================================================================
 POLL_INTERVAL_SECONDS = 10
 MIN_PLAY_MINUTES = 5
 
 
+class Messages:
+    """ユーザー向けメッセージ定義."""
+
+    GAME_PLAYING = '{game_title}をプレイ中'
+    GAME_RECORDED = '{game_title}のプレイ時間を記録しました'
+    GAME_TOO_SHORT = '{game_title}のプレイ時間が{min_minutes}分未満のため、記録されませんでした'
+    NO_GAME_PLAYING = 'ゲームをプレイしていません'
+    CURRENT_WINDOWS = '現在のウィンドウタイトルは以下です。'
+
+
+# =============================================================================
+# データクラス
+# =============================================================================
 @dataclass
 class GameEntry:
+    """ゲーム情報を保持するデータクラス."""
+
     game_title: str
     window_title: str
-    play_with_friends: bool
-    is_browser_game: bool
-    is_playing: bool = False
-    start_time: Optional[datetime] = None
+    play_with_friends: bool = False
+    is_browser_game: bool = False
+    is_playing: bool = field(default=False, compare=False)
+    start_time: Optional[datetime] = field(default=None, compare=False)
 
+    def matches_window(self, window_title: str, browsers: Sequence[str]) -> bool:
+        """ウィンドウタイトルがこのゲームに該当するか判定."""
+        if self.window_title not in window_title:
+            return False
 
-def main() -> None:
-    config = ConfigLoader()
-    monitor = GameMonitor(
-        log_handler=LogHandler(),
-        games=load_games_info(config),
-        browsers=config.window_scan.get('browsers', DEFAULT_BROWSERS),
-        excluded_titles=config.window_scan.get('excluded_titles', DEFAULT_EXCLUDED_TITLES),
-        poll_interval=POLL_INTERVAL_SECONDS,
-        min_play_minutes=MIN_PLAY_MINUTES,
-    )
-    monitor.run()
+        is_browser = any(browser in window_title for browser in browsers)
 
-
-def is_game_detected(game: GameEntry, window_titles: Sequence[str], browsers: Sequence[str] = DEFAULT_BROWSERS) -> bool:
-    for title in window_titles:
-        if game.window_title not in title:
-            continue
-
-        is_browser = any(browser in title for browser in browsers)
-        if game.is_browser_game:
+        # ブラウザゲームの場合は常にマッチ
+        if self.is_browser_game:
             return True
-        if not is_browser:
-            return True
-    return False
+
+        # 通常ゲームの場合はブラウザ以外でマッチ
+        return not is_browser
+
+    def start_session(self) -> None:
+        """ゲームセッションを開始."""
+        self.is_playing = True
+        self.start_time = datetime.now()
+
+    def end_session(self) -> tuple[Optional[datetime], Optional[datetime]]:
+        """ゲームセッションを終了し、開始・終了時刻を返す."""
+        start_time = self.start_time
+        end_time = datetime.now() if start_time else None
+        self.is_playing = False
+        self.start_time = None
+        return start_time, end_time
 
 
-def finalize_game_session(
-    game: GameEntry,
-    log_handler: LogHandler,
-    *,
-    min_play_minutes: int = MIN_PLAY_MINUTES,
-) -> None:
-    end_time = datetime.now()
-    start_time = game.start_time
-    game.is_playing = False
-    game.start_time = None
+# =============================================================================
+# ゲーム情報ローダー
+# =============================================================================
+class GameInfoLoader:
+    """スプレッドシートからゲーム情報を読み込むクラス."""
 
-    if start_time is None:
-        return
+    def __init__(self, config: ConfigLoader) -> None:
+        self.config = config
 
-    play_duration = (end_time - start_time).total_seconds() / 60
-    if play_duration < min_play_minutes:
-        print(f'{game.game_title}のプレイ時間が{min_play_minutes}分未満のため、記録されませんでした')
-        return
+    def load(self) -> List[GameEntry]:
+        """ゲーム情報をスプレッドシートから読み込む."""
+        try:
+            gc = gspread.service_account(
+                filename=Path(self.config.log_handler['cert_file_path'])
+            )
+            sheet = gc.open_by_key(
+                self.config.game_info['sheet_key']
+            ).get_worksheet_by_id(
+                self.config.game_info['sheet_gid']
+            )
+            records = sheet.get_all_records()
+        except gspread.exceptions.APIError as e:
+            print(f'スプレッドシートの読み込みに失敗しました: {e}')
+            return []
 
-    start = log_handler.format_datetime_to_gss_style(start_time)
-    end = log_handler.format_datetime_to_gss_style(end_time)
-    log_handler.save_record([
-        log_handler.get_and_increment_index(),
-        start,
-        end,
-        game.game_title,
-        game.play_with_friends,
-    ])
-    print(f'{game.game_title}のプレイ時間を記録しました')
+        return [self._record_to_entry(record) for record in records]
 
-
-def print_playing_games(games: Sequence[GameEntry]) -> None:
-    for game in games:
-        print(f'{game.game_title}をプレイ中')
-
-
-def print_window_titles(window_titles: Sequence[str]) -> None:
-    for title in window_titles:
-        print(f'- {title}')
-
-
-def clear_console() -> None:
-    os.system('cls' if os.name == 'nt' else 'clear')
-
-
-def load_games_info(config: Optional[ConfigLoader] = None) -> List[GameEntry]:
-    if config is None:
-        config = ConfigLoader()
-    gc = gspread.service_account(filename=Path(config.log_handler['cert_file_path']))
-    sheet = gc.open_by_key(config.game_info['sheet_key']).get_worksheet_by_id(config.game_info['sheet_gid'])
-    records = sheet.get_all_records()
-
-    games: List[GameEntry] = []
-    for record in records:
-        games.append(GameEntry(
+    @staticmethod
+    def _record_to_entry(record: dict) -> GameEntry:
+        """スプレッドシートのレコードを GameEntry に変換."""
+        return GameEntry(
             game_title=str(record['game_title']),
             window_title=str(record['window_title']),
-            play_with_friends=parse_bool(record['play_with_friends']),
-            is_browser_game=parse_bool(record.get('is_browser_game', 'FALSE')),
-        ))
-    return games
+            play_with_friends=_parse_bool(record.get('play_with_friends', 'FALSE')),
+            is_browser_game=_parse_bool(record.get('is_browser_game', 'FALSE')),
+        )
 
 
-def get_window_titles(excluded_titles: Sequence[str]) -> List[str]:
-    titles = {window.title for window in gw.getAllWindows() if window.title}
-    return [title for title in titles if title not in excluded_titles]
+# =============================================================================
+# ウィンドウスキャナー
+# =============================================================================
+class WindowScanner:
+    """アクティブなウィンドウタイトルを取得するクラス."""
+
+    def __init__(self, excluded_titles: Sequence[str]) -> None:
+        self.excluded_titles = set(excluded_titles)
+
+    def get_titles(self) -> List[str]:
+        """除外リストを考慮してウィンドウタイトルを取得."""
+        titles = {
+            window.title
+            for window in gw.getAllWindows()
+            if window.title and window.title not in self.excluded_titles
+        }
+        return list(titles)
 
 
-def parse_bool(value: object) -> bool:
-    return str(value).upper() == 'TRUE'
+# =============================================================================
+# ゲームセッション記録
+# =============================================================================
+class SessionRecorder:
+    """ゲームセッションをスプレッドシートに記録するクラス."""
 
-
-class GameMonitor:
     def __init__(
         self,
-        *,
         log_handler: LogHandler,
-        games: List[GameEntry],
-        browsers: Sequence[str],
-        excluded_titles: Sequence[str],
-        poll_interval: int = POLL_INTERVAL_SECONDS,
         min_play_minutes: int = MIN_PLAY_MINUTES,
     ) -> None:
         self.log_handler = log_handler
-        self.games = games
-        self.browsers = browsers
-        self.excluded_titles = excluded_titles
-        self.poll_interval = poll_interval
         self.min_play_minutes = min_play_minutes
 
+    def record(self, game: GameEntry) -> None:
+        """ゲームセッションを終了して記録."""
+        start_time, end_time = game.end_session()
+
+        if start_time is None or end_time is None:
+            return
+
+        play_minutes = (end_time - start_time).total_seconds() / 60
+
+        if play_minutes < self.min_play_minutes:
+            print(Messages.GAME_TOO_SHORT.format(
+                game_title=game.game_title,
+                min_minutes=self.min_play_minutes,
+            ))
+            return
+
+        self._save_to_spreadsheet(game, start_time, end_time)
+        print(Messages.GAME_RECORDED.format(game_title=game.game_title))
+
+    def _save_to_spreadsheet(
+        self,
+        game: GameEntry,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> None:
+        """スプレッドシートに記録を保存."""
+        self.log_handler.save_record([
+            self.log_handler.get_and_increment_index(),
+            self.log_handler.format_datetime_to_gss_style(start_time),
+            self.log_handler.format_datetime_to_gss_style(end_time),
+            game.game_title,
+            game.play_with_friends,
+        ])
+
+
+# =============================================================================
+# ゲームモニター
+# =============================================================================
+class GameMonitor:
+    """ゲームプレイを監視するメインクラス."""
+
+    def __init__(
+        self,
+        *,
+        games: List[GameEntry],
+        scanner: WindowScanner,
+        recorder: SessionRecorder,
+        browsers: Sequence[str] = DEFAULT_BROWSERS,
+        poll_interval: int = POLL_INTERVAL_SECONDS,
+    ) -> None:
+        self.games = games
+        self.scanner = scanner
+        self.recorder = recorder
+        self.browsers = browsers
+        self.poll_interval = poll_interval
+
     def run(self) -> None:
-        while True:
-            clear_console()
-            window_titles = get_window_titles(self.excluded_titles)
-            active_games = self._process_games(window_titles)
+        """監視ループを開始."""
+        print('Game Time Tracker を開始しました。Ctrl+C で終了します。')
+        try:
+            while True:
+                self._tick()
+                time.sleep(self.poll_interval)
+        except KeyboardInterrupt:
+            print('\n終了します。')
+            self._finalize_all_sessions()
 
-            if active_games:
-                print_playing_games(active_games)
-            else:
-                print('ゲームをプレイしていません')
-                print('現在のウィンドウタイトルは以下です。')
-                print_window_titles(window_titles)
+    def _tick(self) -> None:
+        """1回の監視サイクルを実行."""
+        _clear_console()
+        window_titles = self.scanner.get_titles()
+        active_games = self._update_game_states(window_titles)
+        self._display_status(active_games, window_titles)
 
-            time.sleep(self.poll_interval)
-
-    def _process_games(self, window_titles: Sequence[str]) -> List[GameEntry]:
+    def _update_game_states(self, window_titles: List[str]) -> List[GameEntry]:
+        """全ゲームの状態を更新し、アクティブなゲームを返す."""
         active_games: List[GameEntry] = []
+
         for game in self.games:
-            detected = is_game_detected(game, window_titles, self.browsers)
+            detected = any(
+                game.matches_window(title, self.browsers)
+                for title in window_titles
+            )
+
             if detected and not game.is_playing:
-                game.is_playing = True
-                game.start_time = datetime.now()
+                game.start_session()
             elif not detected and game.is_playing:
-                finalize_game_session(
-                    game,
-                    self.log_handler,
-                    min_play_minutes=self.min_play_minutes,
-                )
+                self.recorder.record(game)
 
             if game.is_playing:
                 active_games.append(game)
+
         return active_games
+
+    def _display_status(
+        self,
+        active_games: List[GameEntry],
+        window_titles: List[str],
+    ) -> None:
+        """現在の状態を表示."""
+        if active_games:
+            for game in active_games:
+                print(Messages.GAME_PLAYING.format(game_title=game.game_title))
+        else:
+            print(Messages.NO_GAME_PLAYING)
+            print(Messages.CURRENT_WINDOWS)
+            for title in window_titles:
+                print(f'- {title}')
+
+    def _finalize_all_sessions(self) -> None:
+        """全てのアクティブセッションを終了."""
+        for game in self.games:
+            if game.is_playing:
+                self.recorder.record(game)
+
+
+# =============================================================================
+# ユーティリティ関数
+# =============================================================================
+def _parse_bool(value: object) -> bool:
+    """文字列を bool に変換."""
+    return str(value).upper() == 'TRUE'
+
+
+def _clear_console() -> None:
+    """コンソールをクリア."""
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+
+# =============================================================================
+# エントリーポイント
+# =============================================================================
+def main() -> None:
+    """アプリケーションのエントリーポイント."""
+    config = ConfigLoader()
+
+    # コンポーネントの初期化
+    games = GameInfoLoader(config).load()
+    if not games:
+        print('ゲーム情報が取得できませんでした。config.ini を確認してください。')
+        return
+
+    scanner = WindowScanner(
+        excluded_titles=config.window_scan.get('excluded_titles', DEFAULT_EXCLUDED_TITLES)
+    )
+    recorder = SessionRecorder(
+        log_handler=LogHandler(),
+        min_play_minutes=MIN_PLAY_MINUTES,
+    )
+
+    # モニター開始
+    monitor = GameMonitor(
+        games=games,
+        scanner=scanner,
+        recorder=recorder,
+        browsers=config.window_scan.get('browsers', DEFAULT_BROWSERS),
+        poll_interval=POLL_INTERVAL_SECONDS,
+    )
+    monitor.run()
 
 
 if __name__ == '__main__':
