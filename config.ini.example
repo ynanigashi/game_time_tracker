@@ -1,10 +1,7 @@
-[APPLICATIONMANAGER]
-use_spreadsheet = True
-
-[GAMETIMER]
-limit_minutes = 60
-json_file_path = state.json
-
 [LOGHANDLER]
-json_file_path = ./src/service_account.json
+json_file_path = service_account.json
 sheet_key = XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+[GAMEINFO]
+sheet_key = XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+sheet_gid = 1198224769

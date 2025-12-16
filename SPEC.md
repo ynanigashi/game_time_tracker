@@ -1,77 +1,107 @@
 # Game Time Tracker 仕様書
 
 ## 目的
-- PC でのゲームプレイ開始/終了を記録し、日毎の累積時間を管理する。
-- プレイログを Google スプレッドシートへ送信して履歴を残す。
-- 手動操作 (タイマー開始/停止) とウィンドウタイトルからの自動検出の両方を提供する。
+Windows PC で実行中のゲームをウィンドウタイトルから自動検出し、プレイ時間を Google スプレッドシートに記録するツール。
 
 ## システム構成
-- `main.py` (手動記録)
-  - `ConfigLoader` で設定を読み込み。
-  - `LogHandler` でログシートを操作 (利用可否は `use_spreadsheet` で制御)。
-  - `GameTimer` で時間計測と残り時間表示を実行。
-  - `jp_prompts.json` の文言を使って CLI を表示し、矢印キー/`Ctrl+Space` でゲーム選択と開始/終了を受け付ける。
-- `auto_detect_game.py` (自動検出)
-  - `pygetwindow` で表示中ウィンドウのタイトルを取得し、ゲーム情報シートの `window_title` と部分一致したものをプレイ中と判定。
-  - ブラウザタイトルは `is_browser_game=True` のゲームのみ記録対象。それ以外はブラウザ上の実行を除外。
-  - ウィンドウが消失した時点で終了時刻を確定し、5分以上のプレイのみスプレッドシートへ追記。
-  - 10秒間隔でポーリングし、除外タイトル (`Program Manager` など) は無視。
-- `game_timer.py`
-  - 1日の上限時間 (`limit_minutes`) から残り時間を算出し表示。
-  - 日付が変わった場合は `state.json` を初期化。
-  - 残り時間が半分/0 を切った際に tkinter の警告ダイアログを表示。
-  - `Ctrl+Space` でタイマーを停止し、友人とプレイする場合は累積時間に加算しない。
-- `log_handler.py`
-  - サービスアカウント経由でスプレッドシートを読み書き。
-  - ログ行を末尾に追記し、全レコードから直近のタイトルを集計してゲーム選択に利用。
-- `config_loader.py`
-  - `config.ini` を読み込み、各機能で使う設定 (時間上限、ファイルパス、シートキーなど) を dict にして提供。
+- **[main.py](main.py)** (自動検出・ログ記録)
+  - `pygetwindow` でアクティブウィンドウのタイトルを取得。
+  - ゲーム情報シートから登録されたゲームを読み込み。
+  - ウィンドウタイトルの部分一致判定でゲーム検出。
+  - ブラウザタイトルは `is_browser_game=True` のゲームのみ記録対象。
+  - 10秒間隔でポーリング。ウィンドウ消失時に終了時刻を確定。
+  - 5分以上のプレイのみスプレッドシートへ追記。
+  
+- **[log_handler.py](log_handler.py)**
+  - サービスアカウント経由でスプレッドシートを操作。
+  - ログ行を末尾に追記。
+  - ゲーム情報シートから登録されたゲーム一覧を取得。
+
+- **[config_loader.py](config_loader.py)**
+  - `config.ini` を読み込み。
+  - スプレッドシートキー、ゲーム情報シートの gid、サービスアカウント JSON パスを提供。
 
 ## 設定・外部リソース
-- `config.ini`
-  - `APPLICATIONMANAGER.use_spreadsheet`: スプレッドシート連携のオン/オフ。
-  - `GAMETIMER.limit_minutes`: 1日のプレイ上限 (分)。
-  - `GAMETIMER.json_file_path`: 累積時間保存ファイル (`state.json`) のパス。
-  - `LOGHANDLER.json_file_path`: サービスアカウント JSON のパス。
-  - `LOGHANDLER.sheet_key`: ログシートのキー (sheet1 を使用)。
-  - `GAMEINFO.sheet_key` / `GAMEINFO.sheet_gid`: ゲーム情報シートのキーと gid。
-- スプレッドシート構造
-  - **ログシート (sheet1)**: `index,start_time,end_time,title,play_with_friends`
-  - **ゲーム情報シート**: `game_title,window_title,play_with_friends,is_browser_game`
-    - 真偽値は `"TRUE"` / `"FALSE"` を想定。
-- `state.json` (日次ステート)
-  ```json
-  {
-    "start_time": "2024-02-27T21:06:47.741741",
-    "elasped_seconds": 1484.108375,
-    "half_msg_flag": false,
-    "end_msg_flag": false
-  }
+- **[config.ini](config.ini)**
+  ```ini
+  [LOGHANDLER]
+  json_file_path = service_account.json    ; サービスアカウント JSON のパス
+  sheet_key = <スプレッドシートキー>        ; ログシートのキー
+
+  [GAMEINFO]
+  sheet_key = <スプレッドシートキー>        ; ゲーム情報シートのキー
+  sheet_gid = 1198224769                   ; ゲーム情報シートの gid
   ```
-  - 日付が変わると初期値に戻る。
 
-## 手動記録フロー (main.py)
-1. 起動時に設定とプロンプト文を読み込む。`use_spreadsheet=True` の場合はログシートに接続。
-2. Enter で開始案内を表示し、直近のプレイタイトル10件 (+新規追加) から矢印キーで選択。`Ctrl+Space` で決定。
-3. 友人とプレイするかを `y/n` で入力。`y` の場合、累積時間に加算せず警告も出さない。
-4. Enter でタイマー開始。コンソール上で残り時間/総経過時間を 0.05 秒間隔で更新表示。
-5. `Ctrl+Space` が押されると終了時刻を確定。開始・終了時刻をスプレッドシート形式 (`YYYY/MM/DD HH:MM:SS`) に整形し、ログシートへ追記 (use_spreadsheet=True の場合)。
-6. プレイ時間や警告フラグを `state.json` に保存して終了。
+- **スプレッドシート構造**
+  - **ログシート (sheet1)**: `index, start_time, end_time, title, play_with_friends`
+  - **ゲーム情報シート**: `game_title, window_title, play_with_friends, is_browser_game`
+    - 真偽値は `"TRUE"` / `"FALSE"` 文字列として保存。
 
-## 自動検出フロー (auto_detect_game.py)
+- **[service_account.json](service_account.json)**
+  - Google Cloud サービスアカウント秘密鍵。
+  - `.gitignore` で除外管理。
+
+## 自動検出フロー (main.py)
 1. 起動時にゲーム情報シートを読み込み、`game_title/window_title/play_with_friends/is_browser_game` をメモリに保持。
-2. 10秒間隔で全ウィンドウのタイトルを取得し、除外リストを外した上で各ゲームの `window_title` が部分一致するか判定。
-3. 一致したゲームは `is_playing=True` とし、初回一致時に開始時刻を記録。
-4. 一致がなくなった瞬間に終了時刻を記録し、(終了-開始) が5分以上なら `[index, start, end, game_title, play_with_friends]` をログシートへ追記。短い場合は破棄。
-5. ブラウザ上のウィンドウは `is_browser_game` が真のゲームのみ記録対象。そうでないゲームはブラウザタイトルを無視。
+2. 10秒間隔で以下を実行：
+   - 全ウィンドウのタイトルを取得（`pygetwindow.getAllWindows()`）。
+   - 除外リスト（Program Manager など）を外す。
+   - 各ゲームの `window_title` が部分一致するか判定。
+3. 一致したゲーム：
+   - `is_playing=True` とし、初回一致時に `start_time` を記録。
+   - ブラウザゲーム判定：
+     - `is_browser_game=True` の場合、ブラウザタイトルでも記録対象。
+     - `is_browser_game=False` の場合、ブラウザウィンドウを除外（ブラウザ名で判定）。
+4. 一致がなくなった瞬間：
+   - `is_playing=False` とし、`end_time` を記録。
+   - プレイ時間計算: `(end_time - start_time).total_seconds() / 60` (分単位)。
+   - **5分以上のプレイのみ** `[index, start, end, game_title, play_with_friends]` をログシートへ追記。
+   - 5分未満の場合は破棄。
+   - 開始・終了時刻は `YYYY/MM/DD HH:MM:SS` 形式に整形。
+5. ステート出力：
+   - ゲーム実行中: `{game_title}をプレイ中`
+   - ゲーム終了時（5分以上）: `{game_title}のプレイ時間を記録しました`
+   - ゲーム終了時（5分未満）: `{game_title}のプレイ時間が5分未満のため、記録されませんでした`
+
+## ウィンドウタイトル判定アルゴリズム
+
+```python
+# 各ゲームについて
+for game in games:
+    game_in_window_titles = False
+    for title in window_titles:
+        # ブラウザ判定
+        is_browser = any(browser in title for browser in BROWSERS)
+        
+        # ウィンドウタイトルがゲームの window_title を含むか（部分一致）
+        if game['window_title'] in title:
+            if game['is_browser_game']:
+                # ブラウザゲーム：ブラウザでの実行を許可
+                game_in_window_titles = True
+                break
+            elif not is_browser:
+                # 通常ゲーム：ブラウザでの実行を除外
+                game_in_window_titles = True
+                break
+    
+    game['is_playing'] = game_in_window_titles
+```
 
 ## 非機能要件・制約
-- 想定 OS は Windows (tkinter/keyboard/pygetwindow の挙動に依存)。
-- 時刻はローカルタイムで算出し、タイムゾーン変換は行わない。
-- キー操作は `Ctrl+Space` 固定。入力が取得できない場合は管理者権限での実行が必要になることがある。
-- 自動検出はウィンドウタイトルの部分一致に依存するため、タイトルが頻繁に変化するゲームでは共通する文字列を登録する必要がある。
+- **OS**: Windows（`tkinter` 不要、`pygetwindow/keyboard` に依存）。
+- **時刻**: ローカルタイムで算出、タイムゾーン変換なし。
+- **スキャン間隔**: 10秒固定。
+- **最小記録時間**: 5分以上。
+- **部分一致**: ウィンドウタイトルの部分一致に依存。共通する文字列を登録する必要がある（例: Terraria）。
 
 ## 起動エントリ
-- 手動計測: `python main.py`
-- 自動検出: `python auto_detect_game.py` または `game_time_tracker.bat`
+```powershell
+python main.py
+```
 
+## TODO の進捗
+- ✅ ログ取得機能_V1 (手動操作での取得は削除)
+- ✅ ログ取得機能_V3 (自動検出実装)
+  - ウィンドウタイトルから自動判別
+  - Google スプレッドシートへ自動保存

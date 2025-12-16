@@ -1,147 +1,145 @@
 # Game Time Tracker
 
-ゲームのプレイ時間を記録し、Google スプレッドシートへ送信するツールです。手動での計測と、ウィンドウタイトルからの自動検出の2通りを備え、日毎の累積時間と残り時間を確認できます。
+PC で起動しているアプリケーションのウィンドウタイトルからゲームプレイを自動検出し、Google スプレッドシートへプレイ時間を記録するツールです。
 
 ## 機能
-- 手動計測: `Ctrl+Space` で開始/停止。残り時間と経過時間を表示し、上限の半分/超過で警告ダイアログ (tkinter) を表示。
-- 自動検出: フォアグラウンドのウィンドウタイトルからゲームを判定。終了時に5分以上のプレイのみスプレッドシートへ追記。ブラウザゲームの記録可否を設定可能。
-- スプレッドシート連携: サービスアカウントでログを追記し、直近プレイタイトル10件を取得してゲーム選択に利用。
-- 日次残り時間管理: `state.json` に当日の累積時間と警告フラグを保存し、日付が変わるとリセット。
-- 日本語プロンプト: `jp_prompts.json` で CLI の案内文を管理し、自由に差し替え可能。
+- **自動検出**: フォアグラウンドのウィンドウタイトルからゲームを判定し、プレイ開始・終了を自動で記録。
+- **ブラウザゲーム対応**: ブラウザ上で実行されるゲームの記録可否を個別に設定可能。
+- **スプレッドシート連携**: サービスアカウント経由でプレイログを Google スプレッドシートに自動追記。
+- **最小記録時間**: 5分未満のプレイは記録対象外（誤検出防止）。
+- **柔軟な除外設定**: 設定画面など、記録から除外するウィンドウを指定可能。
 
 ## セットアップ
-1. **Python 環境**
+
+### 1. Python 環境の構築
+```powershell
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+```
+- `keyboard` はグローバルキー取得のため、Windows では管理者権限が必要な場合があります。
+- `pygetwindow` を Windows で利用するには `pywin32` が必要です（requirements に含めています）。
+
+### 2. Google スプレッドシートの準備
+1) **Google Cloud でサービスアカウントを作成**
+   - Google Cloud Console で新しいプロジェクトを作成。
+   - 「Google Sheets API」と「Google Drive API」を有効化。
+   - サービスアカウントを作成し、秘密鍵（JSON）をダウンロード。
+   - JSON ファイルを `service_account.json` として保存（パスは `config.ini` で変更可）。
+
+2) **スプレッドシートを作成**
+   - Google Sheets で新規スプレッドシートを作成。
+   - サービスアカウントのメールアドレスを共有先に追加（編集可）。
+
+3) **シート構成を設定**
+   - **ログシート (sheet1)**: ヘッダー行 `index,start_time,end_time,title,play_with_friends` を作成。
+   - **ゲーム情報シート**: 別シートを用意し、ヘッダー行 `game_title,window_title,play_with_friends,is_browser_game` を作成。
+
+4) **config.ini を設定**
+   - スプレッドシート URL から以下を確認：
+     - `<sheet_key>`: URL内の `https://docs.google.com/spreadsheets/d/<sheet_key>/edit#gid=0` から取得。
+     - `sheet_gid`: ゲーム情報シートの gid（URL末尾の `#gid=<gid>`）。
+   - `config.ini` に設定を記入：
+     ```ini
+     [LOGHANDLER]
+     json_file_path = service_account.json
+     sheet_key = <ログシートのキー>
+
+     [GAMEINFO]
+     sheet_key = <ゲーム情報シートのキー>
+     sheet_gid = <ゲーム情報シートの gid>
+     ```
+
+5) **接続確認（任意）**
    ```powershell
-   python -m venv .venv
-   .\.venv\Scripts\activate
-   pip install -r requirements.txt
+   python - <<'PY'
+   import gspread
+   gc = gspread.service_account(filename="service_account.json")
+   sh = gc.open_by_key("<sheet_key>")
+   print([ws.title for ws in sh.worksheets()])
+   PY
    ```
-   - `keyboard` はグローバルキー取得のため、環境によっては管理者権限が必要な場合があります。
-   - Windows で `pygetwindow` を使うために `pywin32` が必要です (requirements に含めています)。
-   - `tkinter` は Windows 版 Python では標準で含まれます。
 
-2. **Google スプレッドシートの準備**
-   1) Google Cloud でサービスアカウントを作成し、「Google Sheets API」と「Google Drive API」を有効化。秘密鍵 JSON をダウンロードして `service_account.json` (パスは `config.ini` で変更可) に保存。  
-   2) スプレッドシートを作成し、サービスアカウントのメールアドレスを共有先に追加 (閲覧可/編集可いずれか)。  
-   3) URL からキーと gid を取得し、`config.ini` に設定  
-      - URL 例: `https://docs.google.com/spreadsheets/d/<sheet_key>/edit#gid=0`  
-      - `<sheet_key>` を `LOGHANDLER.sheet_key` と `GAMEINFO.sheet_key` に設定。  
-      - 各シートの `gid` を `GAMEINFO.sheet_gid` (ゲーム情報シート) に設定。ログシートは通常 gid=0 の `sheet1` を使用。  
-   4) シート構成の例:
-      - **ログシート (sheet1)**: ヘッダー行に `index,start_time,end_time,title,play_with_friends`
-      - **ゲーム情報シート**: ヘッダー行に `game_title,window_title,play_with_friends,is_browser_game`
-        - 真偽値は文字列 `"TRUE"` / `"FALSE"` を想定。
-   5) 接続確認 (任意): `.venv` を有効化して以下を実行し、シート名が取得できれば OK。
-      ```powershell
-      python - <<'PY'
-      import gspread
-      gc = gspread.service_account(filename="service_account.json")
-      sh = gc.open_by_key("<sheet_key>")
-      print([ws.title for ws in sh.worksheets()])
-      PY
-      ```
+### 3. ゲーム情報の登録
+ゲーム情報シートに、プレイするゲームの情報を登録します：
 
-3. **設定ファイル `config.ini`**
-   ```ini
-   [APPLICATIONMANAGER]
-   use_spreadsheet = True  ; False にするとローカル計測のみ
+| game_title | window_title | play_with_friends | is_browser_game |
+|-----------|-------------|------------------|-----------------|
+| Terraria | Terraria | FALSE | FALSE |
+| Elden Ring | ELDEN RING | FALSE | FALSE |
+| ゲーム1 | GameSite - Google Chrome | TRUE | TRUE |
 
-   [GAMETIMER]
-   limit_minutes = 60      ; 1日のプレイ上限（分）
-   json_file_path = state.json
-
-   [LOGHANDLER]
-   json_file_path = service_account.json
-   sheet_key = <ログシートのキー>
-
-   [GAMEINFO]
-   sheet_key = <ゲーム情報シートのキー>
-   sheet_gid = <ゲーム情報シートの gid>
-   ```
-   - サンプルは `config.ini.example` を参照してください。
-   - ログシートとゲーム情報シートの `sheet_key` が同一でも問題ありません (gid で切り替え)。
-
-4. **初期ファイル**
-   - `state.json.example` を `state.json` にコピーして開始できます。日付が変わると自動でリセットされます。
-   - プロンプトを変更したい場合は `jp_prompts.json` を編集してください。
+- **game_title**: スプレッドシートに記録されるゲーム名。
+- **window_title**: 監視するウィンドウタイトルの一部（部分一致判定）。
+- **play_with_friends**: `"TRUE"` の場合、フレンドとのプレイ（記録対象）。
+- **is_browser_game**: `"TRUE"` の場合、ブラウザ上のプレイも記録対象。`"FALSE"` の場合はブラウザを除外。
 
 ## 使い方
-### 手動記録 (`main.py`)
-1. `python main.py` を実行。
-2. Enter で開始し、矢印キーでゲームタイトルを選択 (直近10件 + 新規追加)。`Ctrl+Space` で決定。
-3. 友人とプレイするかを `y/n` で入力 (`y` の場合、累積時間に加算せず警告なし)。
-4. Enter でタイマー開始。`Ctrl+Space` で停止すると開始/終了時刻を記録し、`use_spreadsheet=True` ならスプレッドシートへ追記します。
-5. 残り時間が半分/0 を切ると警告ダイアログを表示します (友人とプレイする場合は表示なし)。
 
-### 自動検出 (`auto_detect_game.py`)
-1. ゲーム情報シートに `window_title` と `game_title` を登録 (`is_browser_game` を `"TRUE"` にするとブラウザ上の実行も記録対象)。
-2. `python auto_detect_game.py` を実行するか、Windows は `game_time_tracker.bat` から起動。
-3. 10秒間隔で表示中のウィンドウを走査し、タイトルが一致するゲームがあれば開始として記録。ウィンドウが消えたら終了として記録し、5分以上なら `[index, start, end, title, play_with_friends]` をスプレッドシートへ追記します。
-4. 設定画面やストアなどの除外タイトルは `auto_detect_game.py` の `exclude_titles` で管理しています。
+### 自動検出モード（メイン機能）
+```powershell
+python main.py
+```
+起動すると、10秒間隔で表示中のウィンドウをスキャンします：
+- ウィンドウタイトルが登録されたゲームと一致したら、プレイ開始として記録。
+- ウィンドウが消失したら、プレイ終了として記録。
+- 5分以上のプレイのみスプレッドシートに追記。
 
-## アーキテクチャ (Mermaid)
-```mermaid
-graph TD
-  subgraph Config
-    ConfigLoader["ConfigLoader (config_loader.py)\n- load ini\n- expose settings"]
-    jp_prompts["jp_prompts.json\nUI texts"]
-    configIni["config.ini"]
-    stateJson["state.json\n(day state)"]
-  end
-
-  subgraph Spreadsheet
-    LogHandler["LogHandler (log_handler.py)\n- sheet append\n- recent titles"]
-    GameInfoSheet["Game info sheet\ncolumns: game_title,\nwindow_title,\nplay_with_friends,\nis_browser_game"]
-    LogSheet["Log sheet (sheet1)\ncolumns: index,start_time,\nend_time,title,\nplay_with_friends"]
-  end
-
-  subgraph ManualFlow["Manual mode (main.py)"]
-    Main["main()\n- prompts load\n- title select\n- timer start/stop\n- save log"]
-    SelectTitle["select_game_title()\n- recent titles (10)\n- add new title"]
-    Prompts["get_prompts()"]
-  end
-
-  subgraph Timer["Timer core (game_timer.py)"]
-    GameTimer["GameTimer\n- load/save state.json\n- timer()\n- _get_start_and_end_time()\n- tkinter alerts"]
-  end
-
-  subgraph AutoFlow["Auto detect (auto_detect_game.py)"]
-    AutoMain["main()\n- loop 10s\n- window scan\n- detect games\n- save log >=5min"]
-    WinTitles["get_window_titles()\n(pygetwindow)\n- exclude list"]
-    GamesInfo["get_games_info()\n- fetch game info sheet"]
-  end
-
-  configIni --> ConfigLoader
-  ConfigLoader --> Main
-  ConfigLoader --> GameTimer
-  ConfigLoader --> LogHandler
-  ConfigLoader --> GamesInfo
-
-  jp_prompts --> Prompts --> Main
-  stateJson --> GameTimer
-  GameTimer --> Main
-
-  Main --> SelectTitle --> LogHandler
-  Main --> LogHandler
-  LogHandler --> LogSheet
-
-  GamesInfo --> AutoMain
-  WinTitles --> AutoMain
-  AutoMain --> LogHandler
-  LogHandler --> GameInfoSheet
+出力例：
+```
+ゲームをプレイしていません
+現在のウィンドウタイトルは以下です。
+- Visual Studio Code
+- Windows Explorer
 ```
 
-## ファイル概要
-- `main.py` : 手動タイマーの CLI。スプレッドシートへの書き込みも担当。
-- `game_timer.py` : 時間計測と残り時間の表示、警告ダイアログの表示。
-- `auto_detect_game.py` : ウィンドウタイトルからゲームを自動検出し、プレイ時間を記録。
-- `log_handler.py` : スプレッドシートの読み書きとインデックス管理。
-- `config_loader.py` : `config.ini` の読み込みと設定値の提供。
-- `jp_prompts.json` : CLI の日本語プロンプト定義。
-- `state.json` : 当日の累積プレイ時間と警告表示フラグの保存先。
-- `game_time_tracker.bat` : Windows 用の自動検出モード起動スクリプト。
+ゲーム実行中：
+```
+Terrarioをプレイ中
+```
 
-## 注意・ヒント
-- 時刻はローカルタイムを使用します。タイムゾーン表示を変更したい場合はスプレッドシート側の表示形式を調整してください。
-- `keyboard` の入力取得が効かない場合は、管理者権限でコンソールを開くか、キーの組み合わせを変更してください。
-- 自動検出はウィンドウタイトルの部分一致で判定します。タイトルが頻繁に変化するゲームでは、共通する文字列を `window_title` に登録してください。
+プレイ終了時（5分以上）：
+```
+Terrariaのプレイ時間を記録しました
+```
+
+## ファイル構成
+- [main.py](main.py) : 自動検出メインループ。ウィンドウスキャンとログ記録を実行。
+- [log_handler.py](log_handler.py) : スプレッドシート操作（読み込み・追記・インデックス管理）。
+- [config_loader.py](config_loader.py) : `config.ini` の読み込みと設定値管理。
+- [config.ini](config.ini) : スプレッドシートのキーや認証情報を指定。
+- [service_account.json](service_account.json) : Google Cloud サービスアカウント秘密鍵（.gitignore で除外）。
+
+## 設定ファイル（config.ini）
+```ini
+[LOGHANDLER]
+json_file_path = service_account.json      ; サービスアカウント JSON のパス
+sheet_key = <スプレッドシートキー>         ; ログシートのキー
+
+[GAMEINFO]
+sheet_key = <スプレッドシートキー>         ; ゲーム情報シートのキー
+sheet_gid = 1198224769                     ; ゲーム情報シートの gid
+```
+
+## 注意・トラブルシューティング
+
+### ウィンドウタイトルが認識されない
+- [main.py](main.py) の `exclude_titles` リストを確認。不要なタイトルはここで除外されています。
+- ゲーム情報シートの `window_title` が、実際のウィンドウタイトル（の一部）と一致しているか確認してください。
+- 実際のウィンドウタイトルは実行中に出力されます。
+
+### ブラウザゲームが記録されない
+- ゲーム情報シートの `is_browser_game` が `"TRUE"` に設定されているか確認。
+- ウィンドウタイトルにブラウザ名（Chrome、Edge等）が含まれている場合、`window_title` にはゲーム固有の文字列を含める必要があります。
+
+### スプレッドシートへの接続エラー
+- `service_account.json` のパスが正しいか確認。
+- サービスアカウントのメールアドレスがスプレッドシートで共有されているか確認。
+- API キーが有効か確認（Google Cloud Console で確認）。
+
+### キー入力が効かない
+- Windows では管理者権限でコンソールを開いてください。
+- または、`keyboard` ライブラリの代替方法を検討してください。
+
+## ライセンス
+MIT License
