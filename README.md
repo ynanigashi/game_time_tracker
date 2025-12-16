@@ -145,7 +145,7 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
 ## 注意・トラブルシューティング
 
 ### ウィンドウタイトルが認識されない
-- [main.py](main.py) の `exclude_titles` リストを確認。不要なタイトルはここで除外されています。
+- [config.ini](config.ini) の `[WINDOW_SCAN]` セクションで `exclude_titles` を確認・編集してください（未設定時は `config_loader.py` のデフォルト値を使用）。
 - ゲーム情報シートの `window_title` が、実際のウィンドウタイトル（の一部）と一致しているか確認してください。
 - 実際のウィンドウタイトルは実行中に出力されます。
 
@@ -174,22 +174,38 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
 - テスト: 依存をスタブ化した単体テストを `python -m unittest` で実行
 - 拡張例:
   - ポーリング間隔・最小記録時間の変更は `POLL_INTERVAL_SECONDS`, `MIN_PLAY_MINUTES`
-  - 対応ブラウザや除外ウィンドウの追加は `BROWSERS`, `EXCLUDED_TITLES`
+  - 対応ブラウザや除外ウィンドウの追加は `config.ini` の `[WINDOW_SCAN]`（未設定時は `config_loader.py` のデフォルト値）
   - ゲーム情報の再読込や CLI/UI の追加は `GameMonitor` を拡張
 
-### メソッド/関数の関係図（Mermaid）
+### クラス/メソッドの関係図（Mermaid）
 ```mermaid
 flowchart LR
-    A[main()] --> B[GameMonitor.run]
-    B --> C[get_window_titles]
-    B --> D[GameMonitor._process_games]
-    D --> E[is_game_detected]
-    D --> F[finalize_game_session]
-    F --> G[LogHandler.save_record]
-    A --> H[load_games_info]
-    H --> I[ConfigLoader]
-    H --> J[gspread.service_account]
-    I --> K[config.ini]
+    subgraph Config
+        C[config.ini] --> CL[ConfigLoader]
+    end
+    subgraph Data
+        GIL[GameInfoLoader.load] --> GE[GameEntry<br/>matches_window / start_session / end_session]
+    end
+    subgraph Monitor
+        GM[GameMonitor.run/_tick]
+        WS[WindowScanner.get_titles]
+        US[_update_game_states]
+        DS[_display_status]
+        FS[_finalize_all_sessions]
+    end
+
+    GM --> WS
+    GM --> US
+    US --> GE
+    US --> SR[SessionRecorder.record]
+    SR --> LH[LogHandler<br/>format_datetime_to_gss_style<br/>get_and_increment_index<br/>save_record]
+    GM --> DS
+    GM --> FS
+
+    CL --> GM
+    CL --> GIL
+    CL --> WS
+    GM --> GIL
 ```
 
 ## ライセンス
