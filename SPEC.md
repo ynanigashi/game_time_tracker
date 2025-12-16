@@ -5,9 +5,9 @@ Windows PC で実行中のゲームをウィンドウタイトルから自動検
 
 ## システム構成
 - **[main.py](main.py)** (自動検出・ログ記録)
+  - `GameMonitor` がメインループを管理し、ポーリング間隔/最小記録時間を定数または引数で変更可能。
   - `pygetwindow` でアクティブウィンドウのタイトルを取得。
-  - ゲーム情報シートから登録されたゲームを読み込み。
-  - ウィンドウタイトルの部分一致判定でゲーム検出。
+  - ゲーム情報シートから登録されたゲームを読み込み、部分一致で検出。
   - ブラウザタイトルは `is_browser_game=True` のゲームのみ記録対象。
   - 10秒間隔でポーリング。ウィンドウ消失時に終了時刻を確定。
   - 5分以上のプレイのみスプレッドシートへ追記。
@@ -31,12 +31,16 @@ Windows PC で実行中のゲームをウィンドウタイトルから自動検
   [GAMEINFO]
   sheet_key = <スプレッドシートキー>        ; ゲーム情報シートのキー
   sheet_gid = 1198224769                   ; ゲーム情報シートの gid
+
+  [WINDOW_SCAN]
+  browsers = Google Chrome, Microsoft Edge, Mozilla Firefox, Opera, Brave, Vivaldi, Safari
+  exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Windows 入力エクスペリエンス, Microsoft Store, game_time_tracker.bat, Nahimic
   ```
 
 - **スプレッドシート構造**
   - **ログシート (sheet1)**: `index, start_time, end_time, title, play_with_friends`
   - **ゲーム情報シート**: `game_title, window_title, play_with_friends, is_browser_game`
-    - 真偽値は `"TRUE"` / `"FALSE"` 文字列として保存。
+    - 真偽値は `"TRUE"` / `"FALSE"` 文字列として保存。読込時は `parse_bool` で判定。
 
 - **[service_account.json](service_account.json)**
   - Google Cloud サービスアカウント秘密鍵。
@@ -105,3 +109,8 @@ python main.py
 - ✅ ログ取得機能_V3 (自動検出実装)
   - ウィンドウタイトルから自動判別
   - Google スプレッドシートへ自動保存
+
+## 開発
+- テスト: `python -m unittest`
+- ポーリング間隔・最小記録時間: `main.py` の `POLL_INTERVAL_SECONDS`, `MIN_PLAY_MINUTES` で調整。
+- 対応ブラウザ・除外ウィンドウ: `config.ini` の `[WINDOW_SCAN]` または `config_loader.DEFAULT_BROWSERS/DEFAULT_EXCLUDED_TITLES` で設定。

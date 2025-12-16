@@ -96,10 +96,10 @@ python main.py
 Windows タスクスケジューラで定期実行したい場合は、このバッチファイルを登録してください。
 
 #### 実行時の動作
-起動すると、10秒間隔で表示中のウィンドウをスキャンします：
+起動すると、10秒間隔（`POLL_INTERVAL_SECONDS`）で表示中のウィンドウをスキャンします：
 - ウィンドウタイトルが登録されたゲームと一致したら、プレイ開始として記録。
 - ウィンドウが消失したら、プレイ終了として記録。
-- 5分以上のプレイのみスプレッドシートに追記。
+- 5分以上（`MIN_PLAY_MINUTES`）のプレイのみスプレッドシートに追記。
 
 出力例：
 ```
@@ -109,7 +109,7 @@ Windows タスクスケジューラで定期実行したい場合は、このバ
 - Windows Explorer
 ```
 
-ゲーム実行中：
+ゲーム実行中（複数タイトルも出力可）：
 ```
 Terrarioをプレイ中
 ```
@@ -120,7 +120,7 @@ Terrariaのプレイ時間を記録しました
 ```
 
 ## ファイル構成
-- [main.py](main.py) : 自動検出メインループ。ウィンドウスキャンとログ記録を実行。
+- [main.py](main.py) : 自動検出メインループ。`GameMonitor` クラスがウィンドウスキャンとログ記録を担当。ブラウザ判定/除外タイトルは定数化。
 - [game_time_tracker.bat](game_time_tracker.bat) : Windows バッチファイル。仮想環境を有効化して main.py を実行（日々の起動はこちらから）。
 - [log_handler.py](log_handler.py) : スプレッドシート操作（読み込み・追記・インデックス管理）。
 - [config_loader.py](config_loader.py) : `config.ini` の読み込みと設定値管理。
@@ -136,6 +136,10 @@ sheet_key = <スプレッドシートキー>         ; ログシートのキー
 [GAMEINFO]
 sheet_key = <スプレッドシートキー>         ; ゲーム情報シートのキー
 sheet_gid = 1198224769                     ; ゲーム情報シートの gid
+
+[WINDOW_SCAN]
+browsers = Google Chrome, Microsoft Edge, Mozilla Firefox, Opera, Brave, Vivaldi, Safari  ; ブラウザ名（部分一致）
+exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Windows 入力エクスペリエンス, Microsoft Store, game_time_tracker.bat, Nahimic
 ```
 
 ## 注意・トラブルシューティング
@@ -157,6 +161,36 @@ sheet_gid = 1198224769                     ; ゲーム情報シートの gid
 ### キー入力が効かない
 - Windows では管理者権限でコンソールを開いてください。
 - または、`keyboard` ライブラリの代替方法を検討してください。
+
+## 開発向け
+- テスト実行: `python -m unittest`
+- 監視間隔や最小記録時間は `main.py` 冒頭の定数（`POLL_INTERVAL_SECONDS`, `MIN_PLAY_MINUTES`）で変更できます。
+- 監視対象ブラウザ・除外ウィンドウは `config.ini` の `[WINDOW_SCAN]` で変更できます（未設定時は `config_loader.py` のデフォルト値）。
+
+## 開発ガイド
+- 仮想環境: `python -m venv .venv && .\.venv\Scripts\activate && pip install -r requirements.txt`
+- 実行: `python main.py`（Google Sheets への書き込みが発生するため必要なら別シートで検証）
+- 設定: `config.ini` にログシート・ゲーム情報シートのキーと gid、サービスアカウント JSON のパスを指定
+- テスト: 依存をスタブ化した単体テストを `python -m unittest` で実行
+- 拡張例:
+  - ポーリング間隔・最小記録時間の変更は `POLL_INTERVAL_SECONDS`, `MIN_PLAY_MINUTES`
+  - 対応ブラウザや除外ウィンドウの追加は `BROWSERS`, `EXCLUDED_TITLES`
+  - ゲーム情報の再読込や CLI/UI の追加は `GameMonitor` を拡張
+
+### メソッド/関数の関係図（Mermaid）
+```mermaid
+flowchart LR
+    A[main()] --> B[GameMonitor.run]
+    B --> C[get_window_titles]
+    B --> D[GameMonitor._process_games]
+    D --> E[is_game_detected]
+    D --> F[finalize_game_session]
+    F --> G[LogHandler.save_record]
+    A --> H[load_games_info]
+    H --> I[ConfigLoader]
+    H --> J[gspread.service_account]
+    I --> K[config.ini]
+```
 
 ## ライセンス
 MIT License

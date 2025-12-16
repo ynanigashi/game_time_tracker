@@ -20,9 +20,13 @@ class LogHandler():
     def get_all_values(self):
         return self.sheet.get_all_values()
     
-    def get_and_incremant_index(self):
+    def get_and_increment_index(self):
         self.index += 1
         return self.index
+
+    # Backward compatibility for older callers
+    def get_and_incremant_index(self):
+        return self.get_and_increment_index()
     
     def get_titles(self):
         records = self.get_all_records()
