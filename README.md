@@ -105,7 +105,7 @@ python gui.py
 Windows タスクスケジューラで定期実行したい場合は、このバッチファイルを登録してください。
 
 #### 実行時の動作
-起動すると、1秒間隔（`POLL_INTERVAL_SECONDS`）で表示中のウィンドウをスキャンします：
+起動すると、1秒間隔（`POLL_INTERVAL_SECONDS = 1`）で表示中のウィンドウをスキャンします：
 - ウィンドウタイトルが登録されたゲームと一致したら、プレイ開始として記録。
 - ウィンドウが消失したら、プレイ終了として記録。
 - 5分以上（`MIN_PLAY_MINUTES`）のプレイのみスプレッドシートに追記。
@@ -173,8 +173,14 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
 
 ## 開発向け
 - テスト実行: `python -m unittest`
-- 監視間隔や最小記録時間は `main.py` 冒頭の定数（`POLL_INTERVAL_SECONDS`, `MIN_PLAY_MINUTES`）で変更できます（デフォルト 1 秒）。
+- 監視間隔や最小記録時間は `main.py` 冒頭の定数で変更できます：
+  - `POLL_INTERVAL_SECONDS = 1`（デフォルト: 1秒）
+  - `MIN_PLAY_MINUTES = 5`（デフォルト: 5分）
 - 監視対象ブラウザ・除外ウィンドウは `config.ini` の `[WINDOW_SCAN]` で変更できます（未設定時は `config_loader.py` のデフォルト値）。
+- GUI実装:
+  - `gui.py`: ウィジェット参照を `self.w` に統一、状態管理をシンプル化
+  - `WindowState`: 静的メソッドのみで読み込み/保存を実現
+  - タイマー初期化は `_start_timer()` ヘルパーで簡潔化
 
 ## 開発ガイド
 - 仮想環境: `python -m venv .venv && .\.venv\Scripts\activate && pip install -r requirements.txt`

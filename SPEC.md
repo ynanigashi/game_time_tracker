@@ -16,6 +16,9 @@ Windows PC で実行中のゲームをウィンドウタイトルから自動検
   - ステータスをタイトルバーに表示し、左クリックで表示モード切替（max/mid/min）。
   - ウィンドウ検出は1秒間隔、UI更新は0.1秒間隔。
   - 位置・サイズ・モードを `window_state.txt` に保存/復元。
+  - `WindowState` クラス: 静的メソッドのみのシンプルなユーティリティクラス（`load()`/`save()`）。
+  - `MainWindow`: ウィジェット参照を `self.w` に統合、タイマー初期化ヘルパー `_start_timer()` で簡潔化。
+  - 状態管理の二重化を解消し、約30行のコード削減を実現。
 
 - **[gui_layout.py](gui_layout.py)**
   - GUI ウィジェットとレイアウトの構築。各ウィジェットのデフォルト高さを保持。
@@ -56,7 +59,7 @@ Windows PC で実行中のゲームをウィンドウタイトルから自動検
 
 ## 自動検出フロー (main.py)
 1. 起動時にゲーム情報シートを読み込み、`game_title/window_title/play_with_friends/is_browser_game` をメモリに保持。
-2. 10秒間隔で以下を実行：
+2. 1秒間隔（`POLL_INTERVAL_SECONDS = 1`）で以下を実行：
    - 全ウィンドウのタイトルを取得（`pygetwindow.getAllWindows()`）。
    - 除外リスト（Program Manager など）を外す。
    - 各ゲームの `window_title` が部分一致するか判定。
@@ -111,8 +114,8 @@ def matches_window(self, window_title: str, browsers: Sequence[str]) -> bool:
 ## 非機能要件・制約
 - **OS**: Windows（`tkinter` 不要、`pygetwindow/keyboard` に依存）。
 - **時刻**: ローカルタイムで算出、タイムゾーン変換なし。
-- **スキャン間隔**: 10秒固定。
-- **最小記録時間**: 5分以上。
+- **スキャン間隔**: 1秒固定（`POLL_INTERVAL_SECONDS = 1`）。
+- **最小記録時間**: 5分以上（`MIN_PLAY_MINUTES = 5`）。
 - **部分一致**: ウィンドウタイトルの部分一致に依存。共通する文字列を登録する必要がある（例: Terraria）。
 
 ## 起動エントリ
