@@ -77,9 +77,19 @@ pip install -r requirements.txt
 ## 使い方
 
 ### 自動検出モード（メイン機能）
+
+#### PowerShell での起動
 ```powershell
 python main.py
 ```
+
+#### Windows バッチファイルでの起動（推奨）
+```powershell
+.\game_time_tracker.bat
+```
+Windows タスクスケジューラで定期実行したい場合は、このバッチファイルを登録してください。
+
+#### 実行時の動作
 起動すると、10秒間隔で表示中のウィンドウをスキャンします：
 - ウィンドウタイトルが登録されたゲームと一致したら、プレイ開始として記録。
 - ウィンドウが消失したら、プレイ終了として記録。
@@ -105,6 +115,7 @@ Terrariaのプレイ時間を記録しました
 
 ## ファイル構成
 - [main.py](main.py) : 自動検出メインループ。ウィンドウスキャンとログ記録を実行。
+- [game_time_tracker.bat](game_time_tracker.bat) : Windows バッチファイル。仮想環境を有効化して main.py を実行（日々の起動はこちらから）。
 - [log_handler.py](log_handler.py) : スプレッドシート操作（読み込み・追記・インデックス管理）。
 - [config_loader.py](config_loader.py) : `config.ini` の読み込みと設定値管理。
 - [config.ini](config.ini) : スプレッドシートのキーや認証情報を指定。
