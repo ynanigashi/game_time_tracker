@@ -15,11 +15,14 @@ class LayoutWidgets:
     session_time_display: QLabel
     active_label: QLabel
     active_display: QLabel
+    today_games_label: QLabel
+    today_games_list: QListWidget
     window_label: QLabel
     window_list: QListWidget
     session_height: int
     active_min_height: int
     active_max_height: int
+    today_games_min_height: int
     window_min_height: int
 
 
@@ -57,6 +60,13 @@ def build_main_layout(parent: QWidget) -> LayoutWidgets:
     main_layout.addWidget(active_label)
     main_layout.addWidget(active_display)
 
+    today_games_label = QLabel('今日プレイしたゲーム:', parent)
+    main_layout.addWidget(today_games_label)
+    today_games_list = QListWidget(parent)
+    today_games_min_height = 100
+    today_games_list.setMinimumHeight(today_games_min_height)
+    main_layout.addWidget(today_games_list)
+
     window_label = QLabel('現在のウィンドウタイトル:', parent)
     main_layout.addWidget(window_label)
     main_layout.addWidget(window_list)
@@ -70,10 +80,13 @@ def build_main_layout(parent: QWidget) -> LayoutWidgets:
         session_time_display=session_time_display,
         active_label=active_label,
         active_display=active_display,
+        today_games_label=today_games_label,
+        today_games_list=today_games_list,
         window_label=window_label,
         window_list=window_list,
         session_height=session_height,
         active_min_height=active_min_height,
         active_max_height=active_max_height,
+        today_games_min_height=today_games_min_height,
         window_min_height=window_min_height,
     )
