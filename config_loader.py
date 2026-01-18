@@ -24,11 +24,33 @@ DEFAULT_EXCLUDED_TITLES = [
 
 # 設定ファイルの読み込み
 class ConfigLoader:
+    """設定ファイルを読み込むクラス."""
+    
+    # 必須の設定キー
+    REQUIRED_KEYS = {
+        'LOGHANDLER': ['json_file_path', 'sheet_key'],
+        'GAMEINFO': ['sheet_key', 'sheet_gid'],
+    }
+
     def __init__(self):
         self.config_file_path = 'config.ini'
         self.config = configparser.ConfigParser()
         self.config.read(self.config_file_path, encoding='utf-8')
+        self._validate_required_keys()
         self.load()
+
+    def _validate_required_keys(self) -> None:
+        """必須キーの存在を検証。"""
+        missing = []
+        for section, keys in self.REQUIRED_KEYS.items():
+            if section not in self.config:
+                missing.append(f'セクション [{section}]')
+            else:
+                for key in keys:
+                    if key not in self.config[section]:
+                        missing.append(f'[{section}] の {key}')
+        if missing:
+            raise KeyError(f"config.ini に必須項目がありません: {', '.join(missing)}")
 
     def load(self):
         self.log_handler = {
@@ -36,9 +58,15 @@ class ConfigLoader:
             'sheet_key': self.config['LOGHANDLER']['sheet_key'],
         }
 
+        # sheet_gid を int に変換（スプレッドシートAPIはintを期待）
+        try:
+            sheet_gid = int(self.config['GAMEINFO']['sheet_gid'])
+        except ValueError:
+            raise ValueError(f"config.ini の [GAMEINFO] sheet_gid は整数である必要があります: {self.config['GAMEINFO']['sheet_gid']}")
+
         self.game_info = {
             'sheet_key': self.config['GAMEINFO']['sheet_key'],
-            'sheet_gid': self.config['GAMEINFO']['sheet_gid'],
+            'sheet_gid': sheet_gid,
         }
 
         self.window_scan = {

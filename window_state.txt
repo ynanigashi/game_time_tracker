@@ -1,17 +1,17 @@
 {
-  "x": 323,
-  "y": 204,
-  "width": 417,
-  "height": 160,
-  "display_mode": "mid",
+  "x": 2155,
+  "y": 325,
+  "width": 387,
+  "height": 451,
+  "display_mode": "max",
   "mode_sizes": {
     "max": [
-      505,
-      593
+      387,
+      451
     ],
     "mid": [
-      417,
-      160
+      351,
+      319
     ],
     "min": [
       246,

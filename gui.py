@@ -2,13 +2,13 @@
 
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, time
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QCloseEvent, QMouseEvent, QResizeEvent
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QWidget, QTableWidgetItem
 
 from config_loader import DEFAULT_BROWSERS, DEFAULT_EXCLUDED_TITLES, ConfigLoader
 from gui_layout import LayoutWidgets, build_main_layout
@@ -52,6 +52,10 @@ class WindowState:
             y = int(data.get("y", 0))
             mode = data.get("display_mode", "max")
             
+            # display_mode の検証（不正値の場合はデフォルトに戻す）
+            if mode not in DISPLAY_MODES:
+                mode = "max"
+            
             mode_sizes: Dict[str, Tuple[int, int]] = {}
             mode_sizes_raw = data.get("mode_sizes", {})
             for key in DISPLAY_MODES:
@@ -94,6 +98,37 @@ def _format_hms(total_seconds: float) -> str:
     return f'{hours:02}:{minutes:02}:{seconds_int:02}.{fraction}'
 
 
+class DailyStatsTracker:
+    """日付ごとの統計を追跡し、日付変更時にリセットするクラス."""
+
+    def __init__(self, get_current_date=None) -> None:
+        """初期化。get_current_dateはテスト用に日付取得関数を差し替え可能."""
+        self._get_current_date = get_current_date or (lambda: datetime.now().date())
+        self._last_checked_date = self._get_current_date()
+        self.today_completed_seconds: float = 0.0
+        self.today_game_minutes_cache: Dict[str, float] = {}
+        self.last_today_games_content: str = ""
+
+    def check_day_change(self) -> bool:
+        """日付が変わったかチェックし、変わっていればリセット。変更があればTrueを返す."""
+        today = self._get_current_date()
+        if today != self._last_checked_date:
+            self._last_checked_date = today
+            self.today_completed_seconds = 0.0
+            self.today_game_minutes_cache = {}
+            self.last_today_games_content = ""
+            return True
+        return False
+
+    def add_completed_seconds(self, seconds: float) -> None:
+        """完了したプレイ時間を追加."""
+        self.today_completed_seconds += seconds
+
+    def update_game_minutes_cache(self, cache: Dict[str, float]) -> None:
+        """ゲームごとのプレイ時間キャッシュを更新."""
+        self.today_game_minutes_cache = cache
+
+
 class MainWindow(QWidget):
     """メインウィンドウ."""
 
@@ -111,15 +146,14 @@ class MainWindow(QWidget):
         self.browsers: Sequence[str] = DEFAULT_BROWSERS
         self.scanner: WindowScanner
         self.recorder: SessionRecorder
-        self.today_completed_seconds: float = 0.0
+        self.daily_stats = DailyStatsTracker()
         self.active_games_cache: List[GameEntry] = []
         self.latest_window_titles: List[str] = []
-        self.last_today_games_content: str = ""
-        self.today_game_minutes_cache: Dict[str, float] = {}
         self._init_components()
 
-        self._start_timer(POLL_INTERVAL_SECONDS, self._scan_tick)
-        self._start_timer(UI_REFRESH_INTERVAL_SECONDS, self._ui_tick)
+        # タイマーをインスタンス変数に保持（GCによる停止防止）
+        self._scan_timer = self._start_timer(POLL_INTERVAL_SECONDS, self._scan_tick)
+        self._ui_timer = self._start_timer(UI_REFRESH_INTERVAL_SECONDS, self._ui_tick)
 
         # 初回更新
         self._scan_tick()
@@ -159,8 +193,8 @@ class MainWindow(QWidget):
             log_handler=LogHandler(),
             min_play_minutes=MIN_PLAY_MINUTES,
         )
-        self.today_completed_seconds = self._load_today_completed_seconds()
-        self.today_game_minutes_cache = self._load_today_game_minutes()
+        self.daily_stats.today_completed_seconds = self._load_today_completed_seconds()
+        self.daily_stats.today_game_minutes_cache = self._load_today_game_minutes()
         self._apply_display_mode()
         self._apply_mode_geometry()
         self._set_status(Messages.NO_GAME_PLAYING)
@@ -170,6 +204,9 @@ class MainWindow(QWidget):
         if not self.games:
             return
 
+        if self.daily_stats.check_day_change():
+            # 日付変更時、UIも強制クリア
+            self.w.today_games_table.setRowCount(0)
         window_titles = self.scanner.get_titles()
         active_games = self._update_game_states(window_titles)
 
@@ -196,9 +233,9 @@ class MainWindow(QWidget):
             elif not detected and game.is_playing:
                 recorded_seconds = self.recorder.record(game)
                 if recorded_seconds:
-                    self.today_completed_seconds += recorded_seconds
+                    self.daily_stats.add_completed_seconds(recorded_seconds)
                     # 記録後にキャッシュを更新
-                    self.today_game_minutes_cache = self._load_today_game_minutes()
+                    self.daily_stats.update_game_minutes_cache(self._load_today_game_minutes())
 
             if game.is_playing:
                 active_games.append(game)
@@ -226,12 +263,23 @@ class MainWindow(QWidget):
         self.w.session_time_display.setText(_format_hms(max_elapsed))
 
     def _update_today_totals(self, active_games: List[GameEntry]) -> None:
-        """今日のプレイ時間（完了+進行中）を更新."""
-        total_seconds = self.today_completed_seconds
+        """今日のプレイ時間（完了+進行中）を更新.
+        
+        - 日跨ぎセッションは今日0:00以降のみカウント
+        - 5分未満の進行中セッションは除外
+        """
+        total_seconds = self.daily_stats.today_completed_seconds
         now = datetime.now()
+        today_start = datetime.combine(now.date(), time(0, 0, 0))
+        
         for game in active_games:
             if game.start_time:
-                total_seconds += (now - game.start_time).total_seconds()
+                # 日跨ぎの場合は今日0:00から、そうでなければ開始時刻から
+                effective_start = max(game.start_time, today_start)
+                elapsed_seconds = (now - effective_start).total_seconds()
+                # 5分未満の進行中セッションは除外
+                if elapsed_seconds >= MIN_PLAY_MINUTES * 60:
+                    total_seconds += elapsed_seconds
         self.w.today_time_display.setText(_format_hms(total_seconds))
 
     def _update_window_list(self, window_titles: List[str]) -> None:
@@ -241,11 +289,11 @@ class MainWindow(QWidget):
             self.w.window_list.addItem(title)
 
     def _load_today_game_minutes(self) -> Dict[str, float]:
-        """Googleスプレッドシートから今日プレイしたゲームごとの分数を集計."""
+        """キャッシュから今日プレイしたゲームごとの分数を集計."""
         game_minutes: Dict[str, float] = {}
         today = datetime.now().date()
         try:
-            records = self.recorder.log_handler.get_all_records()
+            records = self.recorder.log_handler.get_cached_records()
             for record in records:
                 try:
                     start = datetime.strptime(str(record['start_time']), "%Y/%m/%d %H:%M:%S")
@@ -264,14 +312,27 @@ class MainWindow(QWidget):
     def _update_today_games_list(self) -> None:
         """今日プレイしたゲームの一覧と時間を更新."""
         # キャッシュをコピー
-        game_minutes = dict(self.today_game_minutes_cache)
+        game_minutes = dict(self.daily_stats.today_game_minutes_cache)
         
-        # 現在プレイ中のゲームの時間を追加
+        # 空の場合（日付変更直後など）はテーブルをクリア
+        if not game_minutes and not self.active_games_cache:
+            if self.daily_stats.last_today_games_content != "":
+                self.daily_stats.last_today_games_content = ""
+                self.w.today_games_table.setRowCount(0)
+            return
+        
+        # 現在プレイ中のゲームの時間を追加（日跨ぎ対応、5分未満除外）
         now = datetime.now()
+        today_start = datetime.combine(now.date(), time(0, 0, 0))
+        
         for game in self.active_games_cache:
             if game.start_time:
-                current_minutes = (now - game.start_time).total_seconds() / 60
-                game_minutes[game.game_title] = game_minutes.get(game.game_title, 0) + current_minutes
+                # 日跨ぎの場合は今日0:00から、そうでなければ開始時刻から
+                effective_start = max(game.start_time, today_start)
+                current_minutes = (now - effective_start).total_seconds() / 60
+                # 5分未満の進行中セッションは除外
+                if current_minutes >= MIN_PLAY_MINUTES:
+                    game_minutes[game.game_title] = game_minutes.get(game.game_title, 0) + current_minutes
         
         # 時間でソート（降順）
         sorted_games = sorted(game_minutes.items(), key=lambda x: x[1], reverse=True)
@@ -280,18 +341,19 @@ class MainWindow(QWidget):
         content = '\n'.join(f'{game_title}: {int(minutes)}分' for game_title, minutes in sorted_games)
         
         # 内容が変わった場合のみ更新
-        if content != self.last_today_games_content:
-            self.last_today_games_content = content
-            self.w.today_games_list.clear()
-            for game_title, minutes in sorted_games:
-                self.w.today_games_list.addItem(f'{game_title}: {int(minutes)}分')
+        if content != self.daily_stats.last_today_games_content:
+            self.daily_stats.last_today_games_content = content
+            self.w.today_games_table.setRowCount(len(sorted_games))
+            for row, (game_title, minutes) in enumerate(sorted_games):
+                self.w.today_games_table.setItem(row, 0, QTableWidgetItem(game_title))
+                self.w.today_games_table.setItem(row, 1, QTableWidgetItem(f'{int(minutes)}分'))
 
     def _load_today_completed_seconds(self) -> float:
-        """起動時に今日分の完了プレイ時間をロード."""
+        """起動時に今日分の完了プレイ時間をロード（キャッシュ使用）."""
         total = 0.0
         today = datetime.now().date()
         try:
-            records = self.recorder.log_handler.get_all_records()
+            records = self.recorder.log_handler.get_cached_records()
             for record in records:
                 try:
                     start = datetime.strptime(str(record['start_time']), "%Y/%m/%d %H:%M:%S")
@@ -359,7 +421,7 @@ class MainWindow(QWidget):
         
         self._set_widget_visibility(self.w.today_games_label, is_expanded)
         self._set_widget_with_height(
-            self.w.today_games_list,
+            self.w.today_games_table,
             is_expanded,
             min_height=self.w.today_games_min_height if is_expanded else 0,
             max_height=MAX_WIDGET_HEIGHT if is_expanded else 0

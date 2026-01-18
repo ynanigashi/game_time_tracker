@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from PySide6.QtWidgets import QLabel, QListWidget, QVBoxLayout, QWidget, QHBoxLayout
+from PySide6.QtWidgets import QLabel, QListWidget, QVBoxLayout, QWidget, QHBoxLayout, QTableWidget, QHeaderView
 
 
 @dataclass
@@ -16,7 +16,7 @@ class LayoutWidgets:
     active_label: QLabel
     active_display: QLabel
     today_games_label: QLabel
-    today_games_list: QListWidget
+    today_games_table: QTableWidget
     window_label: QLabel
     window_list: QListWidget
     session_height: int
@@ -62,10 +62,16 @@ def build_main_layout(parent: QWidget) -> LayoutWidgets:
 
     today_games_label = QLabel('今日プレイしたゲーム:', parent)
     main_layout.addWidget(today_games_label)
-    today_games_list = QListWidget(parent)
+    today_games_table = QTableWidget(parent)
+    today_games_table.setColumnCount(2)
+    today_games_table.setHorizontalHeaderLabels(['ゲーム名', 'プレイ時間'])
+    today_games_table.horizontalHeader().setStretchLastSection(False)
+    today_games_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+    today_games_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+    today_games_table.verticalHeader().setVisible(False)
     today_games_min_height = 100
-    today_games_list.setMinimumHeight(today_games_min_height)
-    main_layout.addWidget(today_games_list)
+    today_games_table.setMinimumHeight(today_games_min_height)
+    main_layout.addWidget(today_games_table)
 
     window_label = QLabel('現在のウィンドウタイトル:', parent)
     main_layout.addWidget(window_label)
@@ -81,7 +87,7 @@ def build_main_layout(parent: QWidget) -> LayoutWidgets:
         active_label=active_label,
         active_display=active_display,
         today_games_label=today_games_label,
-        today_games_list=today_games_list,
+        today_games_table=today_games_table,
         window_label=window_label,
         window_list=window_list,
         session_height=session_height,

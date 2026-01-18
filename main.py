@@ -1,11 +1,11 @@
 """Game Time Tracker - ウィンドウタイトルからゲームプレイを自動検出し記録するツール."""
 
 import os
-import time
+import time as time_module
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 import gspread
 import pygetwindow as gw
@@ -150,34 +150,78 @@ class SessionRecorder:
         self.min_play_minutes = min_play_minutes
 
     def record(self, game: GameEntry) -> Optional[float]:
-        """ゲームセッションを終了して記録し、保存した秒数を返す."""
+        """ゲームセッションを終了して記録。日を跨いだ場合は分割。
+        
+        Returns:
+            当日分のみの記録秒数。書き込み失敗時はNone。
+        """
         start_time, end_time = game.end_session()
 
         if start_time is None or end_time is None:
             return None
 
-        play_minutes = (end_time - start_time).total_seconds() / 60
+        today = datetime.now().date()
+        today_seconds = 0.0
+        any_saved = False
+        segments = self._split_by_day(start_time, end_time)
 
-        if play_minutes < self.min_play_minutes:
-            print(Messages.GAME_TOO_SHORT.format(
-                game_title=game.game_title,
-                min_minutes=self.min_play_minutes,
-            ))
-            return None
+        for seg_start, seg_end in segments:
+            play_minutes = (seg_end - seg_start).total_seconds() / 60
+            if play_minutes >= self.min_play_minutes:
+                success = self._save_to_spreadsheet(game, seg_start, seg_end)
+                if success:
+                    any_saved = True
+                    # 当日分のみ加算
+                    if seg_start.date() == today:
+                        today_seconds += (seg_end - seg_start).total_seconds()
+                    print(Messages.GAME_RECORDED.format(game_title=game.game_title))
+                else:
+                    print(f'{game.game_title}の記録保存に失敗しました')
+            else:
+                print(Messages.GAME_TOO_SHORT.format(
+                    game_title=game.game_title,
+                    min_minutes=self.min_play_minutes,
+                ))
 
-        duration_seconds = (end_time - start_time).total_seconds()
-        self._save_to_spreadsheet(game, start_time, end_time)
-        print(Messages.GAME_RECORDED.format(game_title=game.game_title))
-        return duration_seconds
+        return today_seconds if any_saved else None
+
+    def _split_by_day(
+        self,
+        start: datetime,
+        end: datetime,
+    ) -> List[Tuple[datetime, datetime]]:
+        """セッションを日付境界で分割."""
+        segments: List[Tuple[datetime, datetime]] = []
+        current_start = start
+
+        while current_start.date() < end.date():
+            # 当日の終わり（23:59:59.999999）
+            day_end = datetime.combine(
+                current_start.date(),
+                time(23, 59, 59, 999999),
+            )
+            segments.append((current_start, day_end))
+            # 翌日の開始（00:00:00）
+            current_start = datetime.combine(
+                current_start.date() + timedelta(days=1),
+                time(0, 0, 0),
+            )
+
+        segments.append((current_start, end))
+        return segments
 
     def _save_to_spreadsheet(
         self,
         game: GameEntry,
         start_time: datetime,
         end_time: datetime,
-    ) -> None:
-        """スプレッドシートに記録を保存."""
-        self.log_handler.save_record([
+    ) -> bool:
+        """スプレッドシートに記録を保存.
+        
+        Returns:
+            保存成功時True、失敗時False。
+        """
+        return self.log_handler.save_record([
             self.log_handler.get_and_increment_index(),
             self.log_handler.format_datetime_to_gss_style(start_time),
             self.log_handler.format_datetime_to_gss_style(end_time),
@@ -213,7 +257,7 @@ class GameMonitor:
         try:
             while True:
                 self._tick()
-                time.sleep(self.poll_interval)
+                time_module.sleep(self.poll_interval)
         except KeyboardInterrupt:
             print('\n終了します。')
             self._finalize_all_sessions()

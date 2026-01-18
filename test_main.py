@@ -27,8 +27,21 @@ class FakeLogHandler:
         self.current_index += 1
         return self.current_index
 
-    def save_record(self, values):
-        self.records.append(values)
+    def get_cached_records(self):
+        """キャッシュされたレコードを返す."""
+        return self.records
+
+    def save_record(self, values) -> bool:
+        """レコードを保存し、キャッシュにも追加。成功時Trueを返す。"""
+        if len(values) >= 5:
+            self.records.append({
+                'index': values[0],
+                'start_time': values[1],
+                'end_time': values[2],
+                'title': values[3],
+                'play_with_friends': values[4],
+            })
+        return True
 
 
 class TestGameEntry(unittest.TestCase):
@@ -53,9 +66,9 @@ class TestSessionRecorder(unittest.TestCase):
         self.assertFalse(game.is_playing)
         self.assertIsNone(game.start_time)
         self.assertEqual(len(handler.records), 1)
-        self.assertEqual(handler.records[0][0], 1)
-        self.assertEqual(handler.records[0][3], "LongPlay")
-        self.assertTrue(handler.records[0][4])
+        self.assertEqual(handler.records[0]['index'], 1)
+        self.assertEqual(handler.records[0]['title'], "LongPlay")
+        self.assertTrue(handler.records[0]['play_with_friends'])
 
     def test_record_under_threshold_skips(self):
         handler = FakeLogHandler()
@@ -76,6 +89,161 @@ class TestUtils(unittest.TestCase):
         elapsed_str = main._format_elapsed(start)
         self.assertTrue(elapsed_str.startswith("1分"))
         self.assertIn("秒", elapsed_str)
+
+
+class TestSplitByDay(unittest.TestCase):
+    """日を跨いだセッション分割のテスト."""
+
+    def setUp(self):
+        handler = FakeLogHandler()
+        self.recorder = main.SessionRecorder(log_handler=handler, min_play_minutes=5)
+
+    def test_same_day_no_split(self):
+        """同日内のセッションは分割されない."""
+        start = datetime(2026, 1, 10, 22, 0, 0)
+        end = datetime(2026, 1, 10, 23, 30, 0)
+        segments = self.recorder._split_by_day(start, end)
+        self.assertEqual(len(segments), 1)
+        self.assertEqual(segments[0], (start, end))
+
+    def test_cross_midnight_splits_into_two(self):
+        """日を跨ぐセッションは2つに分割される."""
+        start = datetime(2026, 1, 10, 23, 30, 0)
+        end = datetime(2026, 1, 11, 1, 30, 0)
+        segments = self.recorder._split_by_day(start, end)
+        self.assertEqual(len(segments), 2)
+        # 1日目: 23:30 - 23:59:59.999999
+        self.assertEqual(segments[0][0], start)
+        self.assertEqual(segments[0][1].date(), datetime(2026, 1, 10).date())
+        self.assertEqual(segments[0][1].hour, 23)
+        self.assertEqual(segments[0][1].minute, 59)
+        # 2日目: 00:00 - 01:30
+        self.assertEqual(segments[1][0], datetime(2026, 1, 11, 0, 0, 0))
+        self.assertEqual(segments[1][1], end)
+
+    def test_cross_two_days_splits_into_three(self):
+        """2日を跨ぐセッションは3つに分割される."""
+        start = datetime(2026, 1, 10, 23, 0, 0)
+        end = datetime(2026, 1, 12, 2, 0, 0)
+        segments = self.recorder._split_by_day(start, end)
+        self.assertEqual(len(segments), 3)
+        # 1日目
+        self.assertEqual(segments[0][0].date(), datetime(2026, 1, 10).date())
+        # 2日目
+        self.assertEqual(segments[1][0].date(), datetime(2026, 1, 11).date())
+        # 3日目
+        self.assertEqual(segments[2][0].date(), datetime(2026, 1, 12).date())
+        self.assertEqual(segments[2][1], end)
+
+    def test_record_cross_midnight_creates_two_records(self):
+        """日を跨ぐプレイで5分以上のセグメントが2つ記録される."""
+        handler = FakeLogHandler()
+        recorder = main.SessionRecorder(log_handler=handler, min_play_minutes=5)
+        game = main.GameEntry(
+            game_title="MidnightGame",
+            window_title="MidnightGame",
+            is_playing=True,
+        )
+        # 23:30 - 翌01:30 (各セグメント30分以上)
+        game.start_time = datetime(2026, 1, 10, 23, 30, 0)
+        # end_session をモック
+        original_end_session = game.end_session
+        def mock_end_session():
+            game.is_playing = False
+            start = game.start_time
+            game.start_time = None
+            return start, datetime(2026, 1, 11, 1, 30, 0)
+        game.end_session = mock_end_session
+
+        recorder.record(game)
+
+        self.assertEqual(len(handler.records), 2)
+        # 1日目のレコード
+        self.assertIn("2026/01/10", handler.records[0]['start_time'])
+        # 2日目のレコード
+        self.assertIn("2026/01/11", handler.records[1]['start_time'])
+
+
+class TestLogHandlerCache(unittest.TestCase):
+    """LogHandlerのキャッシュ機能テスト."""
+
+    def test_save_record_updates_cache(self):
+        """save_record後にget_cached_recordsで新しいレコードが取得できる."""
+        handler = FakeLogHandler()
+        
+        # 初期状態は空
+        self.assertEqual(len(handler.get_cached_records()), 0)
+        
+        # レコードを保存
+        handler.save_record([
+            1,
+            "2026/01/18 10:00:00",
+            "2026/01/18 11:00:00",
+            "TestGame",
+            False,
+        ])
+        
+        # キャッシュに追加されている
+        cached = handler.get_cached_records()
+        self.assertEqual(len(cached), 1)
+        self.assertEqual(cached[0]['title'], "TestGame")
+        self.assertEqual(cached[0]['start_time'], "2026/01/18 10:00:00")
+        self.assertEqual(cached[0]['end_time'], "2026/01/18 11:00:00")
+
+    def test_multiple_saves_accumulate_in_cache(self):
+        """複数回のsave_recordでキャッシュに蓄積される."""
+        handler = FakeLogHandler()
+        
+        handler.save_record([1, "2026/01/18 10:00:00", "2026/01/18 11:00:00", "Game1", False])
+        handler.save_record([2, "2026/01/18 12:00:00", "2026/01/18 13:00:00", "Game2", True])
+        handler.save_record([3, "2026/01/18 14:00:00", "2026/01/18 15:00:00", "Game1", False])
+        
+        cached = handler.get_cached_records()
+        self.assertEqual(len(cached), 3)
+        self.assertEqual(cached[0]['title'], "Game1")
+        self.assertEqual(cached[1]['title'], "Game2")
+        self.assertEqual(cached[2]['title'], "Game1")
+
+    def test_cache_can_filter_by_date(self):
+        """キャッシュから特定日付のレコードをフィルタできる."""
+        handler = FakeLogHandler()
+        
+        # 異なる日付のレコードを追加
+        handler.save_record([1, "2026/01/17 10:00:00", "2026/01/17 11:00:00", "Yesterday", False])
+        handler.save_record([2, "2026/01/18 10:00:00", "2026/01/18 11:00:00", "Today1", False])
+        handler.save_record([3, "2026/01/18 14:00:00", "2026/01/18 15:00:00", "Today2", False])
+        
+        # 今日のレコードだけをフィルタ
+        today_str = "2026/01/18"
+        today_records = [
+            r for r in handler.get_cached_records()
+            if r['start_time'].startswith(today_str)
+        ]
+        
+        self.assertEqual(len(today_records), 2)
+        self.assertEqual(today_records[0]['title'], "Today1")
+        self.assertEqual(today_records[1]['title'], "Today2")
+
+    def test_cache_calculates_play_minutes_correctly(self):
+        """キャッシュからプレイ時間（分）を正しく計算できる."""
+        handler = FakeLogHandler()
+        
+        # 30分と60分のレコード
+        handler.save_record([1, "2026/01/18 10:00:00", "2026/01/18 10:30:00", "Game1", False])
+        handler.save_record([2, "2026/01/18 12:00:00", "2026/01/18 13:00:00", "Game2", False])
+        handler.save_record([3, "2026/01/18 14:00:00", "2026/01/18 14:45:00", "Game1", False])
+        
+        # ゲームごとの合計時間を計算
+        game_minutes = {}
+        for record in handler.get_cached_records():
+            start = datetime.strptime(record['start_time'], "%Y/%m/%d %H:%M:%S")
+            end = datetime.strptime(record['end_time'], "%Y/%m/%d %H:%M:%S")
+            minutes = (end - start).total_seconds() / 60
+            title = record['title']
+            game_minutes[title] = game_minutes.get(title, 0) + minutes
+        
+        self.assertEqual(game_minutes['Game1'], 75)  # 30 + 45
+        self.assertEqual(game_minutes['Game2'], 60)
 
 
 if __name__ == "__main__":

@@ -62,13 +62,34 @@ class LogHandler():
     def format_datetime_to_gss_style(self, datetime):
         return datetime.strftime("%Y/%m/%d %H:%M:%S")
 
-    def save_record(self, values):
+    def get_cached_records(self):
+        """キャッシュされたレコードを返す（スプレッドシートにアクセスしない）."""
+        return self.records
+
+    def save_record(self, values) -> bool:
+        """レコードをスプレッドシートに保存。
+        
+        Returns:
+            保存成功時True、失敗時False。
+        """
         try:
             self.sheet.append_row(values, value_input_option='USER_ENTERED')
+            # ローカルキャッシュにも追加（スプレッドシート再読込を避ける）
+            if len(values) >= 5:
+                self.records.append({
+                    'index': values[0],
+                    'start_time': values[1],
+                    'end_time': values[2],
+                    'title': values[3],
+                    'play_with_friends': values[4],
+                })
+            return True
         except gspread.exceptions.APIError as e:
             print(f'APIError occurred while appending row: {e}')
+            return False
         except Exception as e:
             print(f'Exception occurred while appending row: {e}')
+            return False
             
 def main():
     pass
