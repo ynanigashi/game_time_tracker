@@ -127,10 +127,18 @@ Windows タスクスケジューラで定期実行したい場合は、このバ
 - タイトルバーにステータスを表示、記録時のメッセージは標準出力に表示。
 
 ## ファイル構成
-- [main.py](main.py) : PySide6 GUI + 自動検出メインループ。`MainWindow` クラスがウィンドウスキャンとログ記録を担当。
-- [game_time_tracker.bat](game_time_tracker.bat) : Windows バッチファイル。仮想環境を有効化して main.py を実行（日々の起動はこちらから）。
+
+### アプリケーションコード
+- [main.py](main.py) : PySide6 GUI（`MainWindow` クラス）。イベント処理とUI更新のみを担当。
+- [models.py](models.py) : データモデル（`GameEntry`, `ParsedRecord`）とパース関数。
+- [services.py](services.py) : ビジネスロジック（`GameInfoLoader`, `WindowScanner`, `SessionRecorder`, `DailyStatsTracker`）。
+- [window_state.py](window_state.py) : ウィンドウ状態の保存/読み込み（`WindowState`）。
+- [gui_layout.py](gui_layout.py) : UIレイアウト構築。
 - [log_handler.py](log_handler.py) : スプレッドシート操作（読み込み・追記・インデックス管理）。起動時に全レコードをキャッシュし、記録時に更新することでAPI呼び出しを最小化。
 - [config_loader.py](config_loader.py) : `config.ini` の読み込みと設定値管理。ブラウザ判定/除外タイトルはここで定義。
+
+### 設定・その他
+- [game_time_tracker.bat](game_time_tracker.bat) : Windows バッチファイル。仮想環境を有効化して main.py を実行（日々の起動はこちらから）。
 - [config.ini](config.ini) : スプレッドシートのキーや認証情報を指定。
 - [service_account.json](service_account.json) : Google Cloud サービスアカウント秘密鍵（.gitignore で除外）。
 
@@ -171,24 +179,29 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
 
 ## 開発向け
 - テスト実行: `python -m unittest`
-- 監視間隔や最小記録時間は `main.py` 冒頭の定数で変更できます：
+- 監視間隔は `main.py` 冒頭の定数で変更できます：
   - `POLL_INTERVAL_SECONDS = 1`（デフォルト: 1秒）
+- 最小記録時間は `services.py` の定数で変更できます：
   - `MIN_PLAY_MINUTES = 5`（デフォルト: 5分）
 - 監視対象ブラウザ・除外ウィンドウは `config.ini` の `[WINDOW_SCAN]` で変更できます（未設定時は `config_loader.py` のデフォルト値）。
-- GUI実装:
-  - `main.py`: ウィジェット参照を `self.w` に統一、状態管理をシンプル化
-  - `WindowState`: 静的メソッドのみで読み込み/保存を実現
-  - タイマー初期化は `_start_timer()` ヘルパーで簡潔化
+- モジュール構成:
+  - `models.py`: データモデル（`GameEntry`, `ParsedRecord`）
+  - `services.py`: ビジネスロジック（`GameInfoLoader`, `WindowScanner`, `SessionRecorder`, `DailyStatsTracker`）
+  - `window_state.py`: ウィンドウ状態の永続化
+  - `main.py`: UIのみ（イベント → サービス呼び出し → UI更新）
 
 ## 開発ガイド
 - 仮想環境: `python -m venv .venv && .\.venv\Scripts\activate && pip install -r requirements.txt`
 - 実行: `python main.py`（Google Sheets への書き込みが発生するため必要なら別シートで検証）
 - 設定: `config.ini` にログシート・ゲーム情報シートのキーと gid、サービスアカウント JSON のパスを指定
-- テスト: 依存をスタブ化した単体テストを `python -m unittest` で実行
+- テスト: 依存をスタブ化した単体テストを `python -m unittest` で実行（244件のテスト）
 - 拡張例:
-  - ポーリング間隔・最小記録時間の変更は `POLL_INTERVAL_SECONDS`, `MIN_PLAY_MINUTES`
+  - ポーリング間隔の変更は `main.py` の `POLL_INTERVAL_SECONDS`
+  - 最小記録時間の変更は `services.py` の `MIN_PLAY_MINUTES`
   - 対応ブラウザや除外ウィンドウの追加は `config.ini` の `[WINDOW_SCAN]`（未設定時は `config_loader.py` のデフォルト値）
-  - ゲーム情報の再読込やUIの追加は `MainWindow` を拡張
+  - 新しいデータモデルは `models.py` に追加
+  - 新しいビジネスロジックは `services.py` に追加
+  - UIの拡張は `main.py` の `MainWindow` を拡張
 
 ### クラス/メソッドの関係図（Mermaid）
 ```mermaid
@@ -196,19 +209,25 @@ flowchart LR
     subgraph Config
         C[config.ini] --> CL[ConfigLoader]
     end
-    subgraph Data
-        GIL[GameInfoLoader.load] --> GE[GameEntry<br/>matches_window / start_session / end_session]
+    subgraph Models
+        GE[GameEntry<br/>matches_window / start_session / end_session]
+    end
+    subgraph Services
+        GIL[GameInfoLoader.load] --> GE
+        WS[WindowScanner.get_titles]
+        SR[SessionRecorder.record]
+        DS[DailyStatsTracker]
     end
     subgraph GUI
         MW[MainWindow._scan_tick/_ui_tick]
-        WS[WindowScanner.get_titles]
         US[_update_game_states]
     end
 
     MW --> WS
     MW --> US
     US --> GE
-    US --> SR[SessionRecorder.record]
+    US --> SR
+    US --> DS
     SR --> LH[LogHandler<br/>format_datetime_to_gss_style<br/>get_and_increment_index<br/>save_record]
 
     CL --> MW

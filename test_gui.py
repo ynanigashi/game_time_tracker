@@ -59,7 +59,8 @@ for attr, val in vars(fake_pygetwindow).items():
     setattr(sys.modules["pygetwindow"], attr, val)
 
 # Now import the gui module
-from main import DailyStatsTracker, _format_hms
+from main import DailyStatsTracker
+from time_utils import format_hms
 
 
 class TestDailyStatsTracker(unittest.TestCase):
@@ -157,23 +158,23 @@ class TestDailyStatsTracker(unittest.TestCase):
 
 
 class TestFormatHms(unittest.TestCase):
-    """_format_hms関数のテスト."""
+    """format_hms関数のテスト."""
 
     def test_zero_seconds(self):
         """0秒の場合."""
-        self.assertEqual(_format_hms(0), "00:00:00.0")
+        self.assertEqual(format_hms(0), "00:00:00.0")
 
     def test_seconds_only(self):
         """秒のみ."""
-        self.assertEqual(_format_hms(45.5), "00:00:45.5")
+        self.assertEqual(format_hms(45.5), "00:00:45.5")
 
     def test_minutes_and_seconds(self):
         """分と秒."""
-        self.assertEqual(_format_hms(125.0), "00:02:05.0")
+        self.assertEqual(format_hms(125.0), "00:02:05.0")
 
     def test_hours_minutes_seconds(self):
         """時間・分・秒."""
-        self.assertEqual(_format_hms(3725.0), "01:02:05.0")
+        self.assertEqual(format_hms(3725.0), "01:02:05.0")
 
 
 if __name__ == "__main__":

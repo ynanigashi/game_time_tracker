@@ -9,13 +9,7 @@ Windows PC で実行中のゲームをウィンドウタイトルから自動検
 
 ```mermaid
 classDiagram
-    namespace main_py {
-        class Messages {
-            <<constants>>
-            GAME_RECORDED
-            GAME_TOO_SHORT
-            NO_GAME_PLAYING
-        }
+    namespace models_py {
         class GameEntry {
             <<dataclass>>
             +game_title: str
@@ -33,8 +27,39 @@ classDiagram
             +is_inactive()
             +get_inactive_seconds()
         }
+        class ParsedRecord {
+            <<dataclass>>
+            +start: datetime
+            +end: datetime
+            +game_title: str
+        }
+    }
+
+    namespace time_utils_py {
+        class TimeUtils {
+            <<module>>
+            +GSS_DATETIME_FORMAT: str
+            +format_hms(total_seconds) str
+            +split_by_day(start, end) List~Tuple~
+            +calc_today_elapsed_seconds(start_time, now) float
+        }
+    }
+
+    namespace services_py {
+        class ScanResult {
+            <<dataclass>>
+            +active_games: List~GameEntry~
+            +inactive_games: List~GameEntry~
+            +recorded_seconds: float
+        }
+        class Messages {
+            <<constants>>
+            GAME_RECORDED
+            GAME_TOO_SHORT
+            NO_GAME_PLAYING
+        }
         class GameInfoLoader {
-            +config: ConfigLoader
+            +config: Config
             +load() List~GameEntry~
             -_record_to_entry()
         }
@@ -48,13 +73,7 @@ classDiagram
             +min_play_minutes: int
             +record() Optional~float~
             +record_with_times() Optional~float~
-            -_split_by_day()
             -_save_to_spreadsheet() bool
-        }
-        class WindowState {
-            <<static>>
-            +load()$ Tuple
-            +save()$
         }
         class DailyStatsTracker {
             +today_completed_seconds: float
@@ -63,12 +82,33 @@ classDiagram
             +add_completed_seconds()
             +update_game_minutes_cache()
         }
+        class GameStateTracker {
+            +active_games: List~GameEntry~
+            +inactive_games: List~GameEntry~
+            +add_active()
+            +remove_active()
+            +add_inactive()
+            +remove_inactive()
+            +clear_all()
+        }
+    }
+
+    namespace window_state_py {
+        class WindowState {
+            <<static>>
+            +load()$ Tuple
+            +save()$
+        }
+    }
+
+    namespace main_py {
         class MainWindow {
             <<QWidget>>
             +games: List~GameEntry~
             +scanner: WindowScanner
             +recorder: SessionRecorder
             +daily_stats: DailyStatsTracker
+            +state_tracker: GameStateTracker
             -_init_components()
             -_scan_tick()
             -_ui_tick()
@@ -89,7 +129,6 @@ classDiagram
             +today_games_table: QTableWidget
             +window_label: QLabel
             +window_list: QListWidget
-            +session_height: int
             +active_min_height: int
             +active_max_height: int
             +today_games_min_height: int
@@ -98,23 +137,70 @@ classDiagram
     }
 
     namespace config_loader_py {
+        class LogHandlerConfig {
+            <<dataclass>>
+            +cert_file_path: str
+            +sheet_key: str
+        }
+        class GameInfoConfig {
+            <<dataclass>>
+            +sheet_key: str
+            +sheet_gid: int
+        }
+        class WindowScanConfig {
+            <<dataclass>>
+            +browsers: List~str~
+            +excluded_titles: List~str~
+        }
+        class Config {
+            <<dataclass>>
+            +log_handler: LogHandlerConfig
+            +game_info: GameInfoConfig
+            +window_scan: WindowScanConfig
+        }
         class ConfigLoader {
-            +log_handler: dict
-            +game_info: dict
-            +window_scan: dict
-            +load()
+            +config: ConfigParser
+            +load() Config
+            -_validate_required_keys()
+            -_get_list()
+        }
+    }
+
+    namespace gspread_service_py {
+        class GspreadService {
+            +cert_file_path: str
+            +sheet_key: str
+            -gc: Client
+            -sheet: Worksheet
+            -_connect()
+            +get_all_records() List~Dict~
+            +append_row(values) bool
         }
     }
 
     namespace log_handler_py {
         class LogHandler {
-            +sheet: Worksheet
+            +gspread_service: GspreadService
+            +records: List~Dict~
             +index: int
             +get_all_records()
+            +get_cached_records()
+            +get_today_stats() Tuple
             +save_record()
             +format_datetime_to_gss_style()
+            +get_and_increment_index()
         }
     }
+
+    models_py ..> time_utils_py : uses
+    services_py ..> time_utils_py : uses
+    services_py ..> log_handler_py : uses
+    log_handler_py ..> gspread_service_py : uses
+    main_py ..> models_py : uses
+    main_py ..> services_py : uses
+    main_py ..> time_utils_py : uses
+    main_py ..> window_state_py : uses
+    main_py ..> gui_layout_py : uses
 ```
 
 ### 依存関係図
@@ -130,6 +216,11 @@ flowchart TB
         ConfigLoader
     end
 
+    subgraph UtilLayer["ユーティリティレイヤー"]
+        TimeUtils["time_utils"]
+        GspreadService
+    end
+
     subgraph DataLayer["データレイヤー"]
         LogHandler
         GameInfoLoader
@@ -140,6 +231,7 @@ flowchart TB
         WindowScanner
         SessionRecorder
         DailyStatsTracker
+        GameStateTracker
     end
 
     subgraph AppLayer["アプリケーションレイヤー"]
@@ -147,21 +239,25 @@ flowchart TB
     end
 
     ConfigFile --> ConfigLoader
-    Spreadsheet --> LogHandler
-    Spreadsheet --> GameInfoLoader
+    Spreadsheet --> GspreadService
 
+    GspreadService --> LogHandler
     ConfigLoader --> LogHandler
     ConfigLoader --> GameInfoLoader
     ConfigLoader --> WindowScanner
 
+    Spreadsheet --> GameInfoLoader
     GameInfoLoader --> GameEntry
     LogHandler --> SessionRecorder
     GameEntry --> SessionRecorder
+    TimeUtils --> SessionRecorder
+    TimeUtils --> MainWindow
 
     WindowScanner --> MainWindow
     SessionRecorder --> MainWindow
     GameEntry --> MainWindow
     DailyStatsTracker --> MainWindow
+    GameStateTracker --> MainWindow
 ```
 
 ### 呼び出しフロー
@@ -190,7 +286,7 @@ sequenceDiagram
         else ゲーム未検出 & プレイ中
             MW->>SR: record(game)
             SR->>GE: end_session()
-            SR->>SR: _split_by_day()
+            Note over SR: time_utils.split_by_day()使用
             SR->>LH: save_record()
             SR-->>MW: recorded_seconds
             MW->>DS: add_completed_seconds()
@@ -202,7 +298,7 @@ sequenceDiagram
 
 ## クラス詳細
 
-### main.py
+### models.py
 
 #### `GameEntry` (dataclass)
 ゲーム情報を保持するデータクラス。
@@ -217,14 +313,43 @@ sequenceDiagram
 | `is_inactive()` | 非アクティブ状態かどうかを返す | `MainWindow._update_game_states()` |
 | `get_inactive_seconds()` | 非アクティブ経過秒数を取得 | `MainWindow._update_game_states()` |
 
+#### `ParsedRecord` (dataclass)
+パース済みのレコードを保持するデータクラス。
+
+| フィールド | 説明 |
+|------------|------|
+| `start` | 開始時刻 (datetime) |
+| `end` | 終了時刻 (datetime) |
+| `game_title` | ゲーム名 |
+
+#### 関数
+
+| 関数 | 説明 | 呼び出し元 |
+|------|------|------------|
+| `parse_record(record)` | レコードをパースしてParsedRecordを返す。パース失敗時はNone | `LogHandler.get_today_stats()` |
+| `parse_bool(value)` | 文字列を bool に変換（"TRUE" → True, その他 → False） | `GameInfoLoader._record_to_entry()` |
+
+---
+
+### services.py
+
+#### `ScanResult` (dataclass)
+ゲームスキャン結果を保持するデータクラス。
+
+| フィールド | 説明 |
+|------------|------|
+| `active_games` | アクティブなゲームのリスト |
+| `inactive_games` | 非アクティブなゲームのリスト |
+| `recorded_seconds` | この周期で記録された秒数 |
+
 #### `GameInfoLoader`
 スプレッドシートからゲーム情報を読み込む。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `__init__(config)` | ConfigLoaderを受け取って初期化 | `MainWindow._init_components()` |
+| `__init__(config)` | Config（dataclass）を受け取って初期化 | `MainWindow._init_components()` |
 | `load()` | ゲーム情報リストを取得 | `MainWindow._init_components()` |
-| `_record_to_entry(record)` | スプレッドシートのレコードをGameEntryに変換 | `load()` 内部 |
+| `_record_to_entry(record)` | スプレッドシートのレコードをGameEntryに変換（`models.parse_bool()`を使用） | `load()` 内部 |
 
 #### `WindowScanner`
 アクティブなウィンドウタイトルを取得する。
@@ -246,18 +371,6 @@ sequenceDiagram
 | `_split_by_day(start, end)` | セッションを日付境界で分割 | `record()` / `record_with_times()` 内部 |
 | `_save_to_spreadsheet(game, start_time, end_time)` | スプレッドシートに1件保存。**成功時True、失敗時Falseを返す** | `record()` / `record_with_times()` 内部 |
 
----
-
-### main.py (GUI部分)
-
-#### `WindowState`
-ウィンドウ状態の保存/読み込み用ユーティリティクラス（静的メソッドのみ）。
-
-| メソッド | 説明 | 呼び出し元 |
-|----------|------|------------|
-| `load(path)` | ファイルから (x, y, display_mode, mode_sizes) を読込。**display_modeが不正な場合は"max"にフォールバック** | `MainWindow.__init__()` |
-| `save(path, x, y, display_mode, mode_sizes)` | 現在の状態をファイルに保存 | `MainWindow._save_window_state()` |
-
 #### `DailyStatsTracker`
 日付ごとの統計を追跡し、日付変更時にリセットする。
 
@@ -267,6 +380,34 @@ sequenceDiagram
 | `check_day_change()` | 日付変更をチェックし、変わっていればリセット | `MainWindow._scan_tick()` |
 | `add_completed_seconds(seconds)` | 完了したプレイ時間を追加 | `MainWindow._update_game_states()` |
 | `update_game_minutes_cache(cache)` | ゲームごとのプレイ時間キャッシュを更新 | `MainWindow._update_game_states()` |
+
+#### `GameStateTracker`
+ゲーム状態の追跡と遷移を管理するクラス。
+
+UIから独立した状態遷移ロジックを提供。
+`scan()`を呼び出すことで、ウィンドウ状態に基づいてゲーム状態を更新し、
+`ScanResult`（アクティブ/非アクティブなゲームと記録された秒数）を返す。
+
+| メソッド | 説明 | 呼び出し元 |
+|----------|------|------------|
+| `__init__(recorder, daily_stats, browsers, inactive_timeout_minutes)` | 初期化 | `MainWindow._init_components()` |
+| `scan(games, window_titles, foreground_title, load_today_game_minutes_callback)` | ゲーム状態をスキャンして更新。`ScanResult`を返す | `MainWindow._scan_tick()` |
+
+---
+
+### window_state.py
+
+#### `WindowState`
+ウィンドウ状態の保存/読み込み用ユーティリティクラス（静的メソッドのみ）。
+
+| メソッド | 説明 | 呼び出し元 |
+|----------|------|------------|
+| `load(path)` | ファイルから (x, y, display_mode, mode_sizes) を読込。**display_modeが不正な場合は"max"にフォールバック** | `MainWindow.__init__()` |
+| `save(path, x, y, display_mode, mode_sizes)` | 現在の状態をファイルに保存 | `MainWindow._save_window_state()` |
+
+---
+
+### main.py
 
 #### `MainWindow` (QWidget)
 GUI版メインウィンドウ。
@@ -311,7 +452,7 @@ GUI版メインウィンドウ。
 | `active_label`, `active_display` | プレイ中ゲーム表示 |
 | `today_games_label`, `today_games_table` | 今日プレイしたゲーム一覧 |
 | `window_label`, `window_list` | ウィンドウタイトル一覧 |
-| `active_min_height`, `active_max_height`, etc. | 各ウィジェットの高さ定数 |
+| `active_min_height`, `active_max_height`, `today_games_min_height`, `window_min_height` | 各ウィジェットの高さ定数 |
 
 #### `build_main_layout(parent)` (関数)
 メインレイアウトを構築して `LayoutWidgets` を返す。
@@ -326,22 +467,55 @@ GUI版メインウィンドウ。
 
 #### 定数
 - `DEFAULT_CONFIG_FILE = 'config.ini'` - デフォルトの設定ファイルパス
+- `DEFAULT_BROWSERS` - デフォルトのブラウザリスト
+- `DEFAULT_EXCLUDED_TITLES` - デフォルトの除外タイトルリスト
+
+#### データクラス
+
+##### `LogHandlerConfig`
+ログハンドラー設定を保持するデータクラス。
+- `cert_file_path: str` - 認証情報ファイルのパス
+- `sheet_key: str` - スプレッドシートのキー
+
+##### `GameInfoConfig`
+ゲーム情報設定を保持するデータクラス。
+- `sheet_key: str` - スプレッドシートのキー
+- `sheet_gid: int` - シートのGID
+
+##### `WindowScanConfig`
+ウィンドウスキャン設定を保持するデータクラス。
+- `browsers: List[str]` - 対応ブラウザのリスト
+- `excluded_titles: List[str]` - 除外するタイトルのリスト
+
+##### `Config`
+アプリケーション全体の設定を保持するデータクラス。
+- `log_handler: LogHandlerConfig` - ログハンドラー設定
+- `game_info: GameInfoConfig` - ゲーム情報設定
+- `window_scan: WindowScanConfig` - ウィンドウスキャン設定
 
 #### `ConfigLoader`
-config.ini を読み込んで設定を提供する。
+config.ini を読み込んで型付き設定（`Config`）を提供する。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `__init__(config_file_path=DEFAULT_CONFIG_FILE)` | 指定されたconfig.ini を読み込み、**必須キーの検証後**に初期化 | `MainWindow._init_components()`, `LogHandler.__init__()` |
+| `__init__(config_file_path=DEFAULT_CONFIG_FILE)` | 指定されたconfig.ini を読み込み、**必須キーを検証** | `MainWindow._init_components()`, `LogHandler.__init__()` |
 | `_validate_required_keys()` | 必須キー（LOGHANDLER/GAMEINFOセクション）の存在を検証。欠落時はKeyError | `__init__()` 内部 |
-| `load()` | 設定を各プロパティに展開。**sheet_gidはintに変換** | `__init__()` 内部 |
+| `load() -> Config` | 設定を読み込んで`Config`データクラスを返す。**sheet_gidはintに変換** | `MainWindow._init_components()`, `LogHandler.__init__()` |
 | `_get_list(section, key, default)` | カンマ区切りの設定をリストに変換 | `load()` 内部 |
 
-| プロパティ | 説明 |
-|------------|------|
-| `log_handler` | cert_file_path, sheet_key |
-| `game_info` | sheet_key, sheet_gid (**int型**) |
-| `window_scan` | browsers, excluded_titles |
+---
+
+### gspread_service.py
+
+#### `GspreadService`
+Google Spreadsheet操作を抽象化するサービスクラス。
+
+| メソッド | 説明 | 呼び出し元 |
+|----------|------|------------|
+| `__init__(cert_file_path, sheet_key)` | 認証情報とシートキーを設定 | `LogHandler.__init__()` |
+| `_connect()` | スプレッドシートに接続（遅延初期化） | `get_all_records()`, `append_row()` |
+| `get_all_records() -> List[Dict]` | 全レコードを取得 | `LogHandler.get_all_records()` |
+| `append_row(values) -> bool` | 行を追加。成功時True、失敗時False | `LogHandler.save_record()` |
 
 ---
 
@@ -349,15 +523,17 @@ config.ini を読み込んで設定を提供する。
 
 #### `LogHandler`
 スプレッドシートの読み書きを担当する。起動時に全レコードをメモリにキャッシュし、API呼び出しを最小化。
+`GspreadService`を使用してスプレッドシート操作を実行。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `__init__()` | スプレッドシートに接続、インデックス初期化、全レコードをキャッシュ（`self.records`）に保存。**接続失敗時は例外をスロー** | `SessionRecorder.__init__()` |
-| `get_all_records()` | 全レコードをスプレッドシートから直接取得（初期化時のみ使用） | `__init__()` 内部 |
-| `get_cached_records()` | キャッシュされたレコード（`self.records`）を返す。API呼び出しなし | `MainWindow._load_today_game_minutes()`, `MainWindow._load_today_completed_seconds()` |
+| `__init__()` | `ConfigLoader`で設定を取得し、`GspreadService`を初期化。全レコードをキャッシュ（`self.records`）に保存。**接続失敗時は例外をスロー** | `SessionRecorder.__init__()` |
+| `get_all_records()` | `GspreadService`経由で全レコードを取得（初期化時のみ使用） | `__init__()` 内部 |
+| `get_cached_records()` | キャッシュされたレコード（`self.records`）を返す。API呼び出しなし | `get_today_stats()` 内部 |
+| `get_today_stats() -> Tuple[Dict[str, float], float]` | 今日のゲーム別プレイ時間と合計秒数を計算して返す。キャッシュのみ使用、API呼び出しなし | `MainWindow._load_today_game_minutes()`, `MainWindow._load_today_completed_seconds()` |
 | `get_and_increment_index()` | インデックスを取得して+1 | `SessionRecorder._save_to_spreadsheet()` |
 | `format_datetime_to_gss_style(datetime)` | datetimeをスプレッドシート形式に変換 | `SessionRecorder._save_to_spreadsheet()` |
-| `save_record(values)` | 1行をスプレッドシートに追記し、同時に`self.records`にも追加してキャッシュを更新。**成功時True、失敗時Falseを返す** | `SessionRecorder._save_to_spreadsheet()` |
+| `save_record(values)` | `GspreadService`経由で1行をスプレッドシートに追記し、同時に`self.records`にも追加してキャッシュを更新。**成功時True、失敗時Falseを返す** | `SessionRecorder._save_to_spreadsheet()` |
 
 ---
 
@@ -616,20 +792,8 @@ def record(self, game: GameEntry) -> Optional[float]:
     
     return today_seconds if any_saved else None
 
-def _split_by_day(self, start: datetime, end: datetime) -> List[Tuple[datetime, datetime]]:
-    """セッションを日付境界で分割。"""
-    segments = []
-    current_start = start
-    
-    while current_start.date() < end.date():
-        # 当日の終わり（23:59:59.999999）
-        day_end = datetime.combine(current_start.date(), time(23, 59, 59, 999999))
-        segments.append((current_start, day_end))
-        # 翌日の開始（00:00:00）
-        current_start = datetime.combine(current_start.date() + timedelta(days=1), time(0, 0, 0))
-    
-    segments.append((current_start, end))
-    return segments
+# time_utils.split_by_day()を使用してセッションを分割
+# 詳細はtime_utils.pyを参照
 ```
 
 #### 2. GUI の日付変更検出

@@ -2,23 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List
-
-# https://docs.gspread.org/en/v5.12.1/
-import gspread
-
-if TYPE_CHECKING:
-    from gspread.worksheet import Worksheet
+from typing import Any, Dict, List, Tuple
 
 from config_loader import ConfigLoader
+from gspread_service import GspreadService
+
+logger = logging.getLogger(__name__)
 
 
 class LogHandler:
     """スプレッドシートの読み書きを担当するクラス."""
 
-    sheet: "Worksheet"
+    gspread_service: GspreadService
     records: List[Dict[str, Any]]
     index: int
 
@@ -30,15 +27,17 @@ class LogHandler:
             gspread.exceptions.SpreadsheetNotFound: スプレッドシートが見つからない場合
             gspread.exceptions.APIError: APIエラーが発生した場合
         """
-        config = ConfigLoader()
-        gc = gspread.service_account(filename=Path(config.log_handler['cert_file_path']))
-        self.sheet = gc.open_by_key(config.log_handler['sheet_key']).sheet1
+        config = ConfigLoader().load()
+        self.gspread_service = GspreadService(
+            cert_file_path=config.log_handler.cert_file_path,
+            sheet_key=config.log_handler.sheet_key,
+        )
         self.records = self.get_all_records()
         self.index = len(self.records)
 
     def get_all_records(self) -> List[Dict[str, Any]]:
         """全レコードをスプレッドシートから取得."""
-        return self.sheet.get_all_records()
+        return self.gspread_service.get_all_records()
 
     def get_and_increment_index(self) -> int:
         """インデックスを取得して+1."""
@@ -53,6 +52,36 @@ class LogHandler:
         """キャッシュされたレコードを返す（スプレッドシートにアクセスしない）."""
         return self.records
 
+    def get_today_stats(self) -> Tuple[Dict[str, float], float]:
+        """今日のゲーム時間統計を取得（1回のパースで取得）.
+        
+        Returns:
+            (game_minutes, total_seconds): 
+                - game_minutes: ゲームタイトルごとの分数の辞書
+                - total_seconds: 今日の完了プレイ時間の合計（秒）
+        """
+        from models import parse_record
+        
+        game_minutes: Dict[str, float] = {}
+        total_seconds = 0.0
+        today = datetime.now().date()
+        
+        try:
+            for record in self.records:
+                parsed = parse_record(record)
+                if parsed is None or parsed.start.date() != today:
+                    continue
+                
+                seconds = (parsed.end - parsed.start).total_seconds()
+                total_seconds += seconds
+                
+                minutes = seconds / 60.0  # SECONDS_PER_MINUTE
+                game_minutes[parsed.game_title] = game_minutes.get(parsed.game_title, 0) + minutes
+        except Exception as e:
+            logger.error(f'今日の統計情報の取得中にエラーが発生しました: {e}')
+        
+        return game_minutes, total_seconds
+
     def save_record(self, values: List[Any]) -> bool:
         """レコードをスプレッドシートに保存。
         
@@ -62,8 +91,8 @@ class LogHandler:
         Returns:
             保存成功時True、失敗時False。
         """
-        try:
-            self.sheet.append_row(values, value_input_option='USER_ENTERED')
+        success = self.gspread_service.append_row(values)
+        if success:
             # ローカルキャッシュにも追加（スプレッドシート再読込を避ける）
             if len(values) >= 5:
                 self.records.append({
@@ -73,10 +102,4 @@ class LogHandler:
                     'title': values[3],
                     'play_with_friends': values[4],
                 })
-            return True
-        except gspread.exceptions.APIError as e:
-            print(f'APIError occurred while appending row: {e}')
-            return False
-        except Exception as e:
-            print(f'Exception occurred while appending row: {e}')
-            return False
+        return success

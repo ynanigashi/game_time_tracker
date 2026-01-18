@@ -4,6 +4,13 @@ from dataclasses import dataclass
 
 from PySide6.QtWidgets import QLabel, QListWidget, QVBoxLayout, QWidget, QHBoxLayout, QTableWidget, QHeaderView
 
+# ウィジェット高さ定数
+ACTIVE_DISPLAY_HEIGHT = 30  # プレイ中ゲーム表示の高さ（1行分）
+SESSION_TIME_DISPLAY_HEIGHT = 24  # セッション時間表示の高さ
+TODAY_TIME_DISPLAY_HEIGHT = 32  # 今日のプレイ時間表示の高さ
+WINDOW_LIST_MIN_HEIGHT = 200  # ウィンドウリストの最小高さ
+TODAY_GAMES_TABLE_MIN_HEIGHT = 100  # 今日のゲーム一覧テーブルの最小高さ
+
 
 @dataclass
 class LayoutWidgets:
@@ -28,17 +35,17 @@ class LayoutWidgets:
 def build_main_layout(parent: QWidget) -> LayoutWidgets:
     """メインレイアウトを作成して親ウィンドウにアタッチする."""
     active_display = QLabel('---', parent)
-    active_min_height = 30
-    active_max_height = 30
+    active_min_height = ACTIVE_DISPLAY_HEIGHT
+    active_max_height = ACTIVE_DISPLAY_HEIGHT
     active_display.setMinimumHeight(active_min_height)  # 1行前提
     active_display.setMaximumHeight(active_max_height)  # 1行分で固定
     session_time_display = QLabel('---', parent)
-    session_time_display.setFixedHeight(24)
+    session_time_display.setFixedHeight(SESSION_TIME_DISPLAY_HEIGHT)
     today_time_display = QLabel('00:00:00', parent)
-    today_time_display.setFixedHeight(32)
+    today_time_display.setFixedHeight(TODAY_TIME_DISPLAY_HEIGHT)
     today_time_display.setStyleSheet("font-size: 20px; font-weight: bold;")
     window_list = QListWidget(parent)
-    window_min_height = 200  # ウィンドウタイトルは複数並ぶ想定
+    window_min_height = WINDOW_LIST_MIN_HEIGHT
     window_list.setMinimumHeight(window_min_height)
 
     main_layout = QVBoxLayout()
@@ -67,7 +74,7 @@ def build_main_layout(parent: QWidget) -> LayoutWidgets:
     today_games_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
     today_games_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
     today_games_table.verticalHeader().setVisible(False)
-    today_games_min_height = 100
+    today_games_min_height = TODAY_GAMES_TABLE_MIN_HEIGHT
     today_games_table.setMinimumHeight(today_games_min_height)
     main_layout.addWidget(today_games_table)
 
