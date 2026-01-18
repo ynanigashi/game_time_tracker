@@ -8,7 +8,10 @@ fake_gspread = types.SimpleNamespace(
     service_account=lambda filename=None: None,
     exceptions=types.SimpleNamespace(APIError=Exception),
 )
-fake_pygetwindow = types.SimpleNamespace(getAllWindows=lambda: [])
+fake_pygetwindow = types.SimpleNamespace(
+    getAllWindows=lambda: [],
+    getActiveWindow=lambda: None,
+)
 sys.modules.setdefault("gspread", fake_gspread)
 sys.modules.setdefault("pygetwindow", fake_pygetwindow)
 
@@ -244,6 +247,100 @@ class TestLogHandlerCache(unittest.TestCase):
         
         self.assertEqual(game_minutes['Game1'], 75)  # 30 + 45
         self.assertEqual(game_minutes['Game2'], 60)
+
+
+class TestGameEntryInactive(unittest.TestCase):
+    """GameEntryの非アクティブ機能テスト."""
+
+    def test_initial_state_not_inactive(self):
+        """初期状態では非アクティブではない."""
+        game = main.GameEntry(game_title="Test", window_title="Test")
+        self.assertFalse(game.is_inactive())
+        self.assertEqual(game.get_inactive_seconds(), 0.0)
+
+    def test_set_inactive_marks_inactive(self):
+        """set_inactive()で非アクティブ状態になる."""
+        game = main.GameEntry(game_title="Test", window_title="Test")
+        game.set_inactive()
+        self.assertTrue(game.is_inactive())
+        self.assertIsNotNone(game.inactive_since)
+
+    def test_set_active_clears_inactive(self):
+        """set_active()で非アクティブ状態がクリアされる."""
+        game = main.GameEntry(game_title="Test", window_title="Test")
+        game.set_inactive()
+        game.set_active()
+        self.assertFalse(game.is_inactive())
+        self.assertIsNone(game.inactive_since)
+
+    def test_start_session_clears_inactive(self):
+        """start_session()で非アクティブ状態がクリアされる."""
+        game = main.GameEntry(game_title="Test", window_title="Test")
+        game.inactive_since = datetime.now()
+        game.start_session()
+        self.assertIsNone(game.inactive_since)
+
+    def test_end_session_clears_inactive(self):
+        """end_session()で非アクティブ状態がクリアされる."""
+        game = main.GameEntry(game_title="Test", window_title="Test", is_playing=True)
+        game.start_time = datetime.now()
+        game.inactive_since = datetime.now()
+        game.end_session()
+        self.assertIsNone(game.inactive_since)
+
+    def test_get_inactive_seconds_returns_elapsed_time(self):
+        """get_inactive_seconds()は経過秒数を返す."""
+        game = main.GameEntry(game_title="Test", window_title="Test")
+        game.inactive_since = datetime.now() - timedelta(seconds=30)
+        elapsed = game.get_inactive_seconds()
+        self.assertGreaterEqual(elapsed, 29)
+        self.assertLess(elapsed, 32)
+
+
+class TestSessionRecorderWithTimes(unittest.TestCase):
+    """SessionRecorder.record_with_times()のテスト."""
+
+    def test_record_with_times_saves_record(self):
+        """record_with_times()で指定した時刻でレコードを保存."""
+        handler = FakeLogHandler()
+        recorder = main.SessionRecorder(log_handler=handler, min_play_minutes=5)
+        game = main.GameEntry(game_title="TestGame", window_title="TestGame", is_playing=True)
+        game.start_time = datetime(2026, 1, 18, 10, 0, 0)
+
+        start = datetime(2026, 1, 18, 10, 0, 0)
+        end = datetime(2026, 1, 18, 10, 30, 0)
+        result = recorder.record_with_times(game, start, end)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(len(handler.records), 1)
+        self.assertEqual(handler.records[0]['title'], "TestGame")
+        # ゲームの状態は変更されない
+        self.assertTrue(game.is_playing)
+        self.assertEqual(game.start_time, datetime(2026, 1, 18, 10, 0, 0))
+
+    def test_record_with_times_under_threshold_skips(self):
+        """record_with_times()で5分未満のセッションはスキップ."""
+        handler = FakeLogHandler()
+        recorder = main.SessionRecorder(log_handler=handler, min_play_minutes=5)
+        game = main.GameEntry(game_title="TestGame", window_title="TestGame")
+
+        start = datetime(2026, 1, 18, 10, 0, 0)
+        end = datetime(2026, 1, 18, 10, 3, 0)  # 3分
+        result = recorder.record_with_times(game, start, end)
+
+        self.assertIsNone(result)
+        self.assertEqual(len(handler.records), 0)
+
+
+class TestWindowScannerForeground(unittest.TestCase):
+    """WindowScanner.get_foreground_title()のテスト."""
+
+    def test_get_foreground_title_returns_none_when_no_active_window(self):
+        """アクティブウィンドウがない場合はNoneを返す."""
+        scanner = main.WindowScanner(excluded_titles=[])
+        # pygetwindow.getActiveWindow()はスタブではNoneを返す想定
+        result = scanner.get_foreground_title()
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

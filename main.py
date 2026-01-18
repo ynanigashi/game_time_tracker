@@ -24,6 +24,7 @@ from log_handler import LogHandler
 # =============================================================================
 POLL_INTERVAL_SECONDS = 1
 MIN_PLAY_MINUTES = 5
+INACTIVE_TIMEOUT_MINUTES = 5  # 非アクティブ状態でこの時間経過でセッション分割
 STATE_FILE = Path("window_state.txt")
 BASE_TITLE = "Game Time Tracker"
 UI_REFRESH_INTERVAL_SECONDS = 0.1
@@ -61,6 +62,7 @@ class GameEntry:
     is_browser_game: bool = False
     is_playing: bool = field(default=False, compare=False)
     start_time: Optional[datetime] = field(default=None, compare=False)
+    inactive_since: Optional[datetime] = field(default=None, compare=False)
 
     def matches_window(self, window_title: str, browsers: Sequence[str]) -> bool:
         """ウィンドウタイトルがこのゲームに該当するか判定."""
@@ -80,6 +82,7 @@ class GameEntry:
         """ゲームセッションを開始."""
         self.is_playing = True
         self.start_time = datetime.now()
+        self.inactive_since = None
 
     def end_session(self) -> tuple[Optional[datetime], Optional[datetime]]:
         """ゲームセッションを終了し、開始・終了時刻を返す."""
@@ -87,7 +90,27 @@ class GameEntry:
         end_time = datetime.now() if start_time else None
         self.is_playing = False
         self.start_time = None
+        self.inactive_since = None
         return start_time, end_time
+
+    def set_inactive(self) -> None:
+        """非アクティブ状態に設定."""
+        if self.inactive_since is None:
+            self.inactive_since = datetime.now()
+
+    def set_active(self) -> None:
+        """アクティブ状態に戻す（非アクティブ時間をクリア）."""
+        self.inactive_since = None
+
+    def is_inactive(self) -> bool:
+        """非アクティブ状態かどうか."""
+        return self.inactive_since is not None
+
+    def get_inactive_seconds(self) -> float:
+        """非アクティブ経過秒数を取得."""
+        if self.inactive_since is None:
+            return 0.0
+        return (datetime.now() - self.inactive_since).total_seconds()
 
 
 # =============================================================================
@@ -145,6 +168,20 @@ class WindowScanner:
             if window.title and window.title not in self.excluded_titles
         }
         return list(titles)
+
+    def get_foreground_title(self) -> Optional[str]:
+        """フォアグラウンド（最前面）ウィンドウのタイトルを取得.
+        
+        Returns:
+            フォアグラウンドウィンドウのタイトル。取得できない場合はNone。
+        """
+        try:
+            active_window = gw.getActiveWindow()
+            if active_window and active_window.title:
+                return active_window.title
+        except Exception:
+            pass
+        return None
 
 
 # =============================================================================
@@ -240,6 +277,44 @@ class SessionRecorder:
             game.game_title,
             game.play_with_friends,
         ])
+
+    def record_with_times(
+        self,
+        game: GameEntry,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> Optional[float]:
+        """指定された開始・終了時刻でセッションを記録。日を跨いだ場合は分割。
+        
+        ゲームの状態（is_playing, start_time）は変更しない。
+        
+        Returns:
+            当日分のみの記録秒数。5分未満や書き込み失敗など保存が一件も発生しない場合はNone。
+        """
+        today = datetime.now().date()
+        today_seconds = 0.0
+        any_saved = False
+        segments = self._split_by_day(start_time, end_time)
+
+        for seg_start, seg_end in segments:
+            play_minutes = (seg_end - seg_start).total_seconds() / 60
+            if play_minutes >= self.min_play_minutes:
+                success = self._save_to_spreadsheet(game, seg_start, seg_end)
+                if success:
+                    any_saved = True
+                    # 当日分のみ加算
+                    if seg_start.date() == today:
+                        today_seconds += (seg_end - seg_start).total_seconds()
+                    print(Messages.GAME_RECORDED.format(game_title=game.game_title))
+                else:
+                    print(f'{game.game_title}の記録保存に失敗しました')
+            else:
+                print(Messages.GAME_TOO_SHORT.format(
+                    game_title=game.game_title,
+                    min_minutes=self.min_play_minutes,
+                ))
+
+        return today_seconds if any_saved else None
 
 
 # =============================================================================
@@ -384,6 +459,7 @@ class MainWindow(QWidget):
         self.recorder: SessionRecorder
         self.daily_stats = DailyStatsTracker()
         self.active_games_cache: List[GameEntry] = []
+        self.inactive_games_cache: List[GameEntry] = []
         self.latest_window_titles: List[str] = []
         self._init_components()
 
@@ -443,58 +519,122 @@ class MainWindow(QWidget):
         if self.daily_stats.check_day_change():
             # 日付変更時、UIも強制クリア
             self.w.today_games_table.setRowCount(0)
+        
         window_titles = self.scanner.get_titles()
-        active_games = self._update_game_states(window_titles)
+        foreground_title = self.scanner.get_foreground_title()
+        active_games, inactive_games = self._update_game_states(window_titles, foreground_title)
 
         self.latest_window_titles = window_titles
         self.active_games_cache = active_games
-        self._update_active_list(active_games)
+        self.inactive_games_cache = inactive_games
+        self._update_active_list(active_games, inactive_games)
         self._update_window_list(window_titles)
 
-        if active_games:
+        if active_games or inactive_games:
             self._set_status('プレイ時間計測中')
         else:
             self._set_status(Messages.NO_GAME_PLAYING)
 
-    def _update_game_states(self, window_titles: List[str]) -> List[GameEntry]:
-        """ゲーム状態を更新し、アクティブなゲームを返す."""
+    def _update_game_states(
+        self,
+        window_titles: List[str],
+        foreground_title: Optional[str],
+    ) -> Tuple[List[GameEntry], List[GameEntry]]:
+        """ゲーム状態を更新し、アクティブ/非アクティブなゲームを返す.
+        
+        Returns:
+            (active_games, inactive_games) のタプル。
+            active_games: フォアグラウンドでプレイ中のゲーム
+            inactive_games: 非アクティブ状態（5分未満）のゲーム
+        """
         active_games: List[GameEntry] = []
+        inactive_games: List[GameEntry] = []
+        
         for game in self.games:
-            detected = any(
+            # ウィンドウが存在するか
+            window_exists = any(
                 game.matches_window(title, self.browsers)
                 for title in window_titles
             )
-            if detected and not game.is_playing:
-                game.start_session()
-            elif not detected and game.is_playing:
-                recorded_seconds = self.recorder.record(game)
-                if recorded_seconds:
-                    self.daily_stats.add_completed_seconds(recorded_seconds)
-                    # 記録後にキャッシュを更新
-                    self.daily_stats.update_game_minutes_cache(self._load_today_game_minutes())
+            # フォアグラウンドか（アクティブか）
+            is_foreground = (
+                foreground_title is not None
+                and game.matches_window(foreground_title, self.browsers)
+            )
+            
+            if not game.is_playing:
+                # プレイ中でない場合
+                if is_foreground:
+                    # フォアグラウンドになったら新規セッション開始
+                    game.start_session()
+                    active_games.append(game)
+            else:
+                # プレイ中の場合
+                if not window_exists:
+                    # ウィンドウ消失 → 記録して終了
+                    recorded_seconds = self.recorder.record(game)
+                    if recorded_seconds:
+                        self.daily_stats.add_completed_seconds(recorded_seconds)
+                        self.daily_stats.update_game_minutes_cache(self._load_today_game_minutes())
+                elif is_foreground:
+                    # フォアグラウンド → アクティブ状態に
+                    game.set_active()
+                    active_games.append(game)
+                else:
+                    # 非フォアグラウンドだがウィンドウは存在
+                    if not game.is_inactive():
+                        # 非アクティブ状態に移行
+                        game.set_inactive()
+                    
+                    # 非アクティブ時間が5分超過したか確認
+                    inactive_seconds = game.get_inactive_seconds()
+                    if inactive_seconds >= INACTIVE_TIMEOUT_MINUTES * 60:
+                        # 5分超過 → 非アクティブ化時点までを記録
+                        if game.start_time and game.inactive_since:
+                            recorded_seconds = self.recorder.record_with_times(
+                                game, game.start_time, game.inactive_since
+                            )
+                            if recorded_seconds:
+                                self.daily_stats.add_completed_seconds(recorded_seconds)
+                                self.daily_stats.update_game_minutes_cache(self._load_today_game_minutes())
+                        # セッション終了（ウィンドウはまだ存在するが、新規セッション待ち）
+                        game.is_playing = False
+                        game.start_time = None
+                        game.inactive_since = None
+                    else:
+                        # まだ5分未満 → 非アクティブリストに追加
+                        inactive_games.append(game)
+        
+        return active_games, inactive_games
 
-            if game.is_playing:
-                active_games.append(game)
-        return active_games
-
-    def _update_active_list(self, active_games: List[GameEntry]) -> None:
+    def _update_active_list(self, active_games: List[GameEntry], inactive_games: List[GameEntry]) -> None:
         """プレイ中ゲームリストを更新."""
-        if not active_games:
+        if not active_games and not inactive_games:
             self.w.active_display.setText('---')
             return
-        names = ' / '.join(game.game_title for game in active_games)
-        self.w.active_display.setText(names)
+        
+        parts: List[str] = []
+        for game in active_games:
+            parts.append(game.game_title)
+        for game in inactive_games:
+            parts.append(f'{game.game_title} - 停止中')
+        
+        self.w.active_display.setText(' / '.join(parts))
 
     def _update_session_times(self, active_games: List[GameEntry]) -> None:
-        """現在のセッション時間を更新（最長セッションを表示）."""
-        if not active_games:
+        """現在のセッション時間を更新（最長セッションを表示）.
+        
+        active_games と inactive_games_cache を合わせた全プレイ中ゲームから最長を表示。
+        """
+        all_playing = active_games + self.inactive_games_cache
+        if not all_playing:
             self.w.session_time_display.setText('---')
             return
 
         max_elapsed = max(
             (datetime.now() - game.start_time).total_seconds()
             if game.start_time else 0
-            for game in active_games
+            for game in all_playing
         )
         self.w.session_time_display.setText(_format_hms(max_elapsed))
 
@@ -503,12 +643,14 @@ class MainWindow(QWidget):
         
         - 日跨ぎセッションは今日0:00以降のみカウント
         - 5分未満の進行中セッションは除外
+        - 非アクティブ中のゲームも含む
         """
         total_seconds = self.daily_stats.today_completed_seconds
         now = datetime.now()
         today_start = datetime.combine(now.date(), time(0, 0, 0))
         
-        for game in active_games:
+        all_playing = active_games + self.inactive_games_cache
+        for game in all_playing:
             if game.start_time:
                 # 日跨ぎの場合は今日0:00から、そうでなければ開始時刻から
                 effective_start = max(game.start_time, today_start)
@@ -551,17 +693,18 @@ class MainWindow(QWidget):
         game_minutes = dict(self.daily_stats.today_game_minutes_cache)
         
         # 空の場合（日付変更直後など）はテーブルをクリア
-        if not game_minutes and not self.active_games_cache:
+        all_playing = self.active_games_cache + self.inactive_games_cache
+        if not game_minutes and not all_playing:
             if self.daily_stats.last_today_games_content != "":
                 self.daily_stats.last_today_games_content = ""
                 self.w.today_games_table.setRowCount(0)
             return
         
-        # 現在プレイ中のゲームの時間を追加（日跨ぎ対応、5分未満除外）
+        # 現在プレイ中のゲームの時間を追加（日跨ぎ対応、5分未満除外、非アクティブ含む）
         now = datetime.now()
         today_start = datetime.combine(now.date(), time(0, 0, 0))
         
-        for game in self.active_games_cache:
+        for game in all_playing:
             if game.start_time:
                 # 日跨ぎの場合は今日0:00から、そうでなければ開始時刻から
                 effective_start = max(game.start_time, today_start)

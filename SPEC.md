@@ -27,9 +27,14 @@ classDiagram
             +is_browser_game: bool
             +is_playing: bool
             +start_time: datetime
+            +inactive_since: datetime
             +matches_window()
             +start_session()
             +end_session()
+            +set_inactive()
+            +set_active()
+            +is_inactive()
+            +get_inactive_seconds()
         }
         class GameInfoLoader {
             +config: ConfigLoader
@@ -39,11 +44,13 @@ classDiagram
         class WindowScanner {
             +excluded_titles: set
             +get_titles() List~str~
+            +get_foreground_title() Optional~str~
         }
         class SessionRecorder {
             +log_handler: LogHandler
             +min_play_minutes: int
             +record() Optional~float~
+            +record_with_times() Optional~float~
             -_split_by_day()
             -_save_to_spreadsheet() bool
         }
@@ -206,8 +213,12 @@ sequenceDiagram
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
 | `matches_window(window_title, browsers)` | ウィンドウタイトルがこのゲームに該当するか判定 | `MainWindow._update_game_states()` |
-| `start_session()` | ゲームセッションを開始（is_playing=True, start_time設定） | `MainWindow._update_game_states()` |
-| `end_session()` | セッション終了し開始・終了時刻を返す | `SessionRecorder.record()` |
+| `start_session()` | ゲームセッションを開始（is_playing=True, start_time設定, inactive_sinceクリア） | `MainWindow._update_game_states()` |
+| `end_session()` | セッション終了し開始・終了時刻を返す（inactive_sinceもクリア） | `SessionRecorder.record()` |
+| `set_inactive()` | 非アクティブ状態に設定（inactive_sinceを記録） | `MainWindow._update_game_states()` |
+| `set_active()` | アクティブ状態に戻す（inactive_sinceクリア） | `MainWindow._update_game_states()` |
+| `is_inactive()` | 非アクティブ状態かどうかを返す | `MainWindow._update_game_states()` |
+| `get_inactive_seconds()` | 非アクティブ経過秒数を取得 | `MainWindow._update_game_states()` |
 
 #### `GameInfoLoader`
 スプレッドシートからゲーム情報を読み込む。
@@ -225,6 +236,7 @@ sequenceDiagram
 |----------|------|------------|
 | `__init__(excluded_titles)` | 除外リストを受け取って初期化 | `MainWindow._init_components()` |
 | `get_titles()` | 除外リストを考慮してウィンドウタイトル一覧を取得 | `MainWindow._scan_tick()` |
+| `get_foreground_title()` | フォアグラウンド（最前面）ウィンドウのタイトルを取得 | `MainWindow._scan_tick()` |
 
 #### `SessionRecorder`
 ゲームセッションをスプレッドシートに記録する。
@@ -233,8 +245,9 @@ sequenceDiagram
 |----------|------|------------|
 | `__init__(log_handler, min_play_minutes)` | LogHandlerと最小記録時間を受け取って初期化 | `MainWindow._init_components()` |
 | `record(game)` | セッション終了→日付分割→記録。**当日分のみの記録秒数を返す**。5分未満や書き込み失敗など保存が一件も発生しない場合はNone | `MainWindow._update_game_states()` |
-| `_split_by_day(start, end)` | セッションを日付境界で分割 | `record()` 内部 |
-| `_save_to_spreadsheet(game, start_time, end_time)` | スプレッドシートに1件保存。**成功時True、失敗時Falseを返す** | `record()` 内部 |
+| `record_with_times(game, start_time, end_time)` | 指定された開始/終了時刻でセッションを記録。セッションは終了せず継続可能。**当日分のみの記録秒数を返す**。5分未満や書き込み失敗など保存が一件も発生しない場合はNone | `MainWindow._update_game_states()` |
+| `_split_by_day(start, end)` | セッションを日付境界で分割 | `record()` / `record_with_times()` 内部 |
+| `_save_to_spreadsheet(game, start_time, end_time)` | スプレッドシートに1件保存。**成功時True、失敗時Falseを返す** | `record()` / `record_with_times()` 内部 |
 
 ---
 
@@ -432,6 +445,75 @@ config.ini を読み込んで設定を提供する。
      - 5分以上: `{game_title}のプレイ時間を記録しました`
      - 5分未満: `{game_title}のプレイ時間が5分未満のため、記録されませんでした`
      - 書き込み失敗: `{game_title}の記録保存に失敗しました`
+
+## 非アクティブウィンドウトラッキング
+
+### 概要
+ゲームウィンドウが検出されていても、フォアグラウンド（最前面）でない場合は「非アクティブ」として扱う。
+非アクティブ状態が5分以上続くと、その時点でセッションを記録し、次にアクティブになった際は新しいセッションとして扱う。
+
+### 定数
+- `INACTIVE_TIMEOUT_MINUTES = 5` - 非アクティブ状態のタイムアウト時間（分）
+
+### 状態判定
+
+| ウィンドウ状態 | フォアグラウンド | アクティブ判定 |
+|----------------|------------------|----------------|
+| ゲームウィンドウが存在し、最前面 | ✓ | アクティブ |
+| ゲームウィンドウが存在するが、最前面ではない | ✗ | 非アクティブ |
+| ゲームウィンドウが存在しない | - | セッション終了 |
+
+### 非アクティブ時の動作
+
+#### 5分未満で再アクティブ化
+1. 非アクティブになった時刻を `inactive_since` に記録
+2. 5分未満で再度フォアグラウンドになった場合
+3. `inactive_since` をクリアし、セッション継続
+4. 非アクティブだった時間もプレイ時間に**含める**
+
+#### 5分以上の非アクティブ
+1. 非アクティブ状態が5分以上続いた場合
+2. `inactive_since` の時点でセッションを自動記録（`record_with_times()`）
+3. セッションは終了せず、次のアクティブ化を待機
+4. 再度フォアグラウンドになった場合、`start_time` を更新して新セッション開始
+
+#### ウィンドウ消失時
+1. 非アクティブ状態でウィンドウが消失した場合
+2. ウィンドウ消失時点でセッションを記録（`record()`）
+3. 非アクティブだった時間もプレイ時間に**含める**
+
+### GUI表示
+- 非アクティブ状態のゲームは「ゲーム名 - 停止中」と表示
+- プレイ中ゲーム一覧には非アクティブゲームも含まれる
+- 今日のプレイ時間には非アクティブ時間も含まれる
+
+### シーケンス図
+
+```
+[アクティブ] → [非アクティブ] → (5分以内) → [アクティブ]
+    │              │                            │
+    │              └── inactive_since記録       └── inactive_since=None
+    │                                               セッション継続
+    └── 通常のプレイ時間計測
+
+[アクティブ] → [非アクティブ] → (5分経過) → [アクティブ]
+    │              │                │           │
+    │              └── inactive_since記録        │
+    │                              │             └── start_time更新
+    │                              │                 新セッション開始
+    │                              │
+    │                              └── record_with_times()
+    │                                  (start_time〜inactive_since)
+    └── 通常のプレイ時間計測
+
+[アクティブ] → [非アクティブ] → [ウィンドウ消失]
+    │              │                 │
+    │              └── inactive_since記録
+    │                               │
+    │                               └── record()
+    │                                   (非アクティブ時間含む)
+    └── 通常のプレイ時間計測
+```
 
 ## ウィンドウタイトル判定アルゴリズム
 
