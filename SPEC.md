@@ -13,8 +13,11 @@ classDiagram
         class Messages {
             <<constants>>
             GAME_PLAYING
+            GAME_PLAYING_WITH_ELAPSED
             GAME_RECORDED
+            GAME_TOO_SHORT
             NO_GAME_PLAYING
+            CURRENT_WINDOWS
         }
         class GameEntry {
             <<dataclass>>
@@ -44,19 +47,6 @@ classDiagram
             -_split_by_day()
             -_save_to_spreadsheet() bool
         }
-        class GameMonitor {
-            +games: List~GameEntry~
-            +scanner: WindowScanner
-            +recorder: SessionRecorder
-            +run()
-            -_tick()
-            -_update_game_states()
-            -_display_status()
-            -_finalize_all_sessions()
-        }
-    }
-
-    namespace gui_py {
         class WindowState {
             <<static>>
             +load()$ Tuple
@@ -87,10 +77,19 @@ classDiagram
             <<dataclass>>
             +today_label: QLabel
             +today_time_display: QLabel
+            +session_label: QLabel
             +session_time_display: QLabel
+            +active_label: QLabel
             +active_display: QLabel
+            +today_games_label: QLabel
             +today_games_table: QTableWidget
+            +window_label: QLabel
             +window_list: QListWidget
+            +session_height: int
+            +active_min_height: int
+            +active_max_height: int
+            +today_games_min_height: int
+            +window_min_height: int
         }
     }
 
@@ -140,8 +139,7 @@ flowchart TB
     end
 
     subgraph AppLayer["アプリケーションレイヤー"]
-        GameMonitor["GameMonitor\n(CLI版)"]
-        MainWindow["MainWindow\n(GUI版)"]
+        MainWindow["MainWindow\n(GUI)"]
     end
 
     ConfigFile --> ConfigLoader
@@ -156,17 +154,13 @@ flowchart TB
     LogHandler --> SessionRecorder
     GameEntry --> SessionRecorder
 
-    WindowScanner --> GameMonitor
-    SessionRecorder --> GameMonitor
-    GameEntry --> GameMonitor
-
     WindowScanner --> MainWindow
     SessionRecorder --> MainWindow
     GameEntry --> MainWindow
     DailyStatsTracker --> MainWindow
 ```
 
-### 呼び出しフロー（GUI版）
+### 呼び出しフロー
 
 ```mermaid
 sequenceDiagram
@@ -211,8 +205,8 @@ sequenceDiagram
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `matches_window(window_title, browsers)` | ウィンドウタイトルがこのゲームに該当するか判定 | `GameMonitor._update_game_states()`, `MainWindow._update_game_states()` |
-| `start_session()` | ゲームセッションを開始（is_playing=True, start_time設定） | `GameMonitor._update_game_states()`, `MainWindow._update_game_states()` |
+| `matches_window(window_title, browsers)` | ウィンドウタイトルがこのゲームに該当するか判定 | `MainWindow._update_game_states()` |
+| `start_session()` | ゲームセッションを開始（is_playing=True, start_time設定） | `MainWindow._update_game_states()` |
 | `end_session()` | セッション終了し開始・終了時刻を返す | `SessionRecorder.record()` |
 
 #### `GameInfoLoader`
@@ -220,8 +214,8 @@ sequenceDiagram
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `__init__(config)` | ConfigLoaderを受け取って初期化 | `main()`, `MainWindow._init_components()` |
-| `load()` | ゲーム情報リストを取得 | `main()`, `MainWindow._init_components()` |
+| `__init__(config)` | ConfigLoaderを受け取って初期化 | `MainWindow._init_components()` |
+| `load()` | ゲーム情報リストを取得 | `MainWindow._init_components()` |
 | `_record_to_entry(record)` | スプレッドシートのレコードをGameEntryに変換 | `load()` 内部 |
 
 #### `WindowScanner`
@@ -229,34 +223,22 @@ sequenceDiagram
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `__init__(excluded_titles)` | 除外リストを受け取って初期化 | `main()`, `MainWindow._init_components()` |
-| `get_titles()` | 除外リストを考慮してウィンドウタイトル一覧を取得 | `GameMonitor._tick()`, `MainWindow._scan_tick()` |
+| `__init__(excluded_titles)` | 除外リストを受け取って初期化 | `MainWindow._init_components()` |
+| `get_titles()` | 除外リストを考慮してウィンドウタイトル一覧を取得 | `MainWindow._scan_tick()` |
 
 #### `SessionRecorder`
 ゲームセッションをスプレッドシートに記録する。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `__init__(log_handler, min_play_minutes)` | LogHandlerと最小記録時間を受け取って初期化 | `main()`, `MainWindow._init_components()` |
-| `record(game)` | セッション終了→日付分割→記録。**当日分のみの記録秒数を返す**。書き込み失敗時はNone | `GameMonitor._update_game_states()`, `MainWindow._update_game_states()` |
+| `__init__(log_handler, min_play_minutes)` | LogHandlerと最小記録時間を受け取って初期化 | `MainWindow._init_components()` |
+| `record(game)` | セッション終了→日付分割→記録。**当日分のみの記録秒数を返す**。5分未満や書き込み失敗など保存が一件も発生しない場合はNone | `MainWindow._update_game_states()` |
 | `_split_by_day(start, end)` | セッションを日付境界で分割 | `record()` 内部 |
 | `_save_to_spreadsheet(game, start_time, end_time)` | スプレッドシートに1件保存。**成功時True、失敗時Falseを返す** | `record()` 内部 |
 
-#### `GameMonitor`
-CLI版のメイン監視クラス。
-
-| メソッド | 説明 | 呼び出し元 |
-|----------|------|------------|
-| `__init__(games, scanner, recorder, browsers, poll_interval)` | 各コンポーネントを受け取って初期化 | `main()` |
-| `run()` | 監視ループを開始（Ctrl+Cで終了） | `main()` |
-| `_tick()` | 1回の監視サイクルを実行 | `run()` 内部 |
-| `_update_game_states(window_titles)` | 全ゲームの状態を更新 | `_tick()` 内部 |
-| `_display_status(active_games, window_titles)` | コンソールに状態を表示 | `_tick()` 内部 |
-| `_finalize_all_sessions()` | 終了時に全アクティブセッションを記録 | `run()` 内部 |
-
 ---
 
-### gui.py
+### main.py (GUI部分)
 
 #### `WindowState`
 ウィンドウ状態の保存/読み込み用ユーティリティクラス（静的メソッドのみ）。
@@ -281,7 +263,7 @@ GUI版メインウィンドウ。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `__init__()` | ウィンドウ初期化、**タイマーをインスタンス変数に保持して開始** | `main()` |
+| `__init__()` | ウィンドウ初期化、**タイマーをインスタンス変数に保持して開始** | `main()` 関数 |
 | `closeEvent(event)` | ウィンドウ状態を保存して終了 | Qt イベント |
 | `_start_timer(interval, callback)` | タイマーを作成して開始 | `__init__()` 内部 |
 | `_init_components()` | 設定読み込み、コンポーネント初期化 | `__init__()` 内部 |
@@ -337,7 +319,7 @@ config.ini を読み込んで設定を提供する。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `__init__()` | config.ini を読み込み、**必須キーの検証後**に初期化 | `main()`, `MainWindow._init_components()`, `LogHandler.__init__()` |
+| `__init__()` | config.ini を読み込み、**必須キーの検証後**に初期化 | `MainWindow._init_components()`, `LogHandler.__init__()` |
 | `_validate_required_keys()` | 必須キー（LOGHANDLER/GAMEINFOセクション）の存在を検証。欠落時はKeyError | `__init__()` 内部 |
 | `load()` | 設定を各プロパティに展開。**sheet_gidはintに変換** | `__init__()` 内部 |
 | `_get_list(section, key, default)` | カンマ区切りの設定をリストに変換 | `load()` 内部 |
@@ -370,15 +352,13 @@ config.ini を読み込んで設定を提供する。
 ---
 
 ## システム構成
-- **[main.py](main.py)** (自動検出・ログ記録)
-  - `GameMonitor` がメインループを管理し、ポーリング間隔/最小記録時間を定数または引数で変更可能。
+- **[main.py](main.py)** (PySide6 GUI + 自動検出・ログ記録)
+  - `MainWindow` がメインループを管理し、ポーリング間隔/最小記録時間を定数で設定可能。
   - `pygetwindow` で全ウィンドウのタイトルを取得。
   - ゲーム情報シートから登録されたゲームを読み込み、部分一致で検出。
   - ブラウザタイトルは `is_browser_game=True` のゲームのみ記録対象。
   - 1秒間隔でポーリング。ウィンドウ消失時に終了時刻を確定。
   - 5分以上のプレイのみスプレッドシートへ追記。
-
-- **[gui.py](gui.py)** (PySide6 GUI)
   - ステータスをタイトルバーに表示し、左クリックで表示モード切替（max/mid/min）。
   - ウィンドウ検出は1秒間隔、UI更新は0.1秒間隔。
   - 位置・サイズ・モードを `window_state.txt` に保存/復元。
@@ -429,7 +409,7 @@ config.ini を読み込んで設定を提供する。
   - Google Cloud サービスアカウント秘密鍵。
   - `.gitignore` で除外管理。
 
-## 自動検出フロー (main.py)
+## 自動検出フロー
 1. 起動時にゲーム情報シートを読み込み、`game_title/window_title/play_with_friends/is_browser_game` をメモリに保持。
 2. 1秒間隔（`POLL_INTERVAL_SECONDS = 1`）で以下を実行：
    - 全ウィンドウのタイトルを取得（`pygetwindow.getAllWindows()`）。
@@ -446,10 +426,12 @@ config.ini を読み込んで設定を提供する。
    - **5分以上のプレイのみ** `[index, start, end, game_title, play_with_friends]` をログシートへ追記。
    - 5分未満の場合は破棄。
    - 開始・終了時刻は `YYYY/MM/DD HH:MM:SS` 形式に整形。
-5. ステート出力：
-   - ゲーム実行中: `{game_title}をプレイ中（経過: {elapsed}）`
-   - ゲーム終了時（5分以上）: `{game_title}のプレイ時間を記録しました`
-   - ゲーム終了時（5分未満）: `{game_title}のプレイ時間が5分未満のため、記録されませんでした`
+5. ステータス表示（GUI）：
+   - **タイトルバー**: ゲーム実行中は「プレイ時間計測中」、未実行時は「ゲームをプレイしていません」
+   - **標準出力**: ゲーム終了時のみメッセージ出力
+     - 5分以上: `{game_title}のプレイ時間を記録しました`
+     - 5分未満: `{game_title}のプレイ時間が5分未満のため、記録されませんでした`
+     - 書き込み失敗: `{game_title}の記録保存に失敗しました`
 
 ## ウィンドウタイトル判定アルゴリズム
 
@@ -524,7 +506,7 @@ def record(self, game: GameEntry) -> Optional[float]:
     """ゲームセッションを終了して記録。日を跨いだ場合は分割。
     
     Returns:
-        当日分のみの記録秒数。書き込み失敗時はNone。
+        当日分のみの記録秒数。5分未満や書き込み失敗など保存が一件も発生しない場合はNone。
     """
     start_time, end_time = game.end_session()
     if start_time is None or end_time is None:
@@ -612,9 +594,13 @@ def check_day_change(self) -> bool:
 - **スプレッドシートアクセス**: GUI版では起動時とゲーム記録時のみアクセス（UI更新時はキャッシュを使用）。キャッシュは`LogHandler.records`（`List[dict]`）に保持され、`get_cached_records()`で取得。記録時は`save_record()`がスプレッドシートとキャッシュを同時更新。
 - **日跨ぎ処理**: プレイセッションが深夜0時を跨いだ場合、日付ごとに分割して記録。
 
-## 起動エントリ
+## 起動方法
 ```powershell
 python main.py
+```
+または
+```powershell
+game_time_tracker.bat
 ```
 
 ## TODO の進捗

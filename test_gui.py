@@ -59,7 +59,7 @@ for attr, val in vars(fake_pygetwindow).items():
     setattr(sys.modules["pygetwindow"], attr, val)
 
 # Now import the gui module
-from gui import DailyStatsTracker, _format_hms
+from main import DailyStatsTracker, _format_hms
 
 
 class TestDailyStatsTracker(unittest.TestCase):

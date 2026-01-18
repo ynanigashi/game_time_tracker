@@ -83,19 +83,14 @@ pip install -r requirements.txt
 
 ## 使い方
 
-### 自動検出モード（メイン機能）
+### GUI での起動（メイン機能）
 
 #### PowerShell での起動
 ```powershell
 python main.py
 ```
-
-### GUI 版（PySide6）
-```powershell
-python gui.py
-```
 - プレイ中のゲームと経過時間、現在のウィンドウタイトルを一覧表示します。
-- スプレッドシートへの記録タイミングや検出ロジックは CLI 版と同じです。
+- スプレッドシートへの記録タイミングや検出ロジックは自動です。
 - 表示モードは左クリックでトグル：
   - **max**: 全表示（今日のプレイ時間、セッション時間、プレイ中のゲーム、今日プレイしたゲーム一覧、ウィンドウタイトル）
   - **mid**: 今日のプレイ時間、セッション時間、プレイ中のゲーム、今日プレイしたゲーム一覧（ウィンドウタイトルは非表示）
@@ -124,27 +119,10 @@ Windows タスクスケジューラで定期実行したい場合は、このバ
 - ウィンドウタイトルが登録されたゲームと一致したら、プレイ開始として記録。
 - ウィンドウが消失したら、プレイ終了として記録。
 - 5分以上（`MIN_PLAY_MINUTES`）のプレイのみスプレッドシートに追記。
-
-出力例：
-```
-ゲームをプレイしていません
-現在のウィンドウタイトルは以下です。
-- Visual Studio Code
-- Windows Explorer
-```
-
-ゲーム実行中（複数タイトルも出力可）：
-```
-Terrarioをプレイ中（経過: 3分12秒）
-```
-
-プレイ終了時（5分以上）：
-```
-Terrariaのプレイ時間を記録しました
-```
+- タイトルバーにステータスを表示、記録時のメッセージは標準出力に表示。
 
 ## ファイル構成
-- [main.py](main.py) : 自動検出メインループ。`GameMonitor` クラスがウィンドウスキャンとログ記録を担当。
+- [main.py](main.py) : PySide6 GUI + 自動検出メインループ。`MainWindow` クラスがウィンドウスキャンとログ記録を担当。
 - [game_time_tracker.bat](game_time_tracker.bat) : Windows バッチファイル。仮想環境を有効化して main.py を実行（日々の起動はこちらから）。
 - [log_handler.py](log_handler.py) : スプレッドシート操作（読み込み・追記・インデックス管理）。起動時に全レコードをキャッシュし、記録時に更新することでAPI呼び出しを最小化。
 - [config_loader.py](config_loader.py) : `config.ini` の読み込みと設定値管理。ブラウザ判定/除外タイトルはここで定義。
@@ -171,7 +149,7 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
 ### ウィンドウタイトルが認識されない
 - [config.ini](config.ini) の `[WINDOW_SCAN]` セクションで `exclude_titles` を確認・編集してください（未設定時は `config_loader.py` のデフォルト値を使用）。
 - ゲーム情報シートの `window_title` が、実際のウィンドウタイトル（の一部）と一致しているか確認してください。
-- 実際のウィンドウタイトルは実行中に出力されます。
+- 実際のウィンドウタイトルはGUIウィンドウの「現在のウィンドウタイトル」リスト（maxモード）で確認できます。
 
 ### ブラウザゲームが記録されない
 - ゲーム情報シートの `is_browser_game` が `"TRUE"` に設定されているか確認。
@@ -193,7 +171,7 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
   - `MIN_PLAY_MINUTES = 5`（デフォルト: 5分）
 - 監視対象ブラウザ・除外ウィンドウは `config.ini` の `[WINDOW_SCAN]` で変更できます（未設定時は `config_loader.py` のデフォルト値）。
 - GUI実装:
-  - `gui.py`: ウィジェット参照を `self.w` に統一、状態管理をシンプル化
+  - `main.py`: ウィジェット参照を `self.w` に統一、状態管理をシンプル化
   - `WindowState`: 静的メソッドのみで読み込み/保存を実現
   - タイマー初期化は `_start_timer()` ヘルパーで簡潔化
 
@@ -205,7 +183,7 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
 - 拡張例:
   - ポーリング間隔・最小記録時間の変更は `POLL_INTERVAL_SECONDS`, `MIN_PLAY_MINUTES`
   - 対応ブラウザや除外ウィンドウの追加は `config.ini` の `[WINDOW_SCAN]`（未設定時は `config_loader.py` のデフォルト値）
-  - ゲーム情報の再読込や CLI/UI の追加は `GameMonitor` を拡張
+  - ゲーム情報の再読込やUIの追加は `MainWindow` を拡張
 
 ### クラス/メソッドの関係図（Mermaid）
 ```mermaid
@@ -216,26 +194,22 @@ flowchart LR
     subgraph Data
         GIL[GameInfoLoader.load] --> GE[GameEntry<br/>matches_window / start_session / end_session]
     end
-    subgraph Monitor
-        GM[GameMonitor.run/_tick]
+    subgraph GUI
+        MW[MainWindow._scan_tick/_ui_tick]
         WS[WindowScanner.get_titles]
         US[_update_game_states]
-        DS[_display_status]
-        FS[_finalize_all_sessions]
     end
 
-    GM --> WS
-    GM --> US
+    MW --> WS
+    MW --> US
     US --> GE
     US --> SR[SessionRecorder.record]
     SR --> LH[LogHandler<br/>format_datetime_to_gss_style<br/>get_and_increment_index<br/>save_record]
-    GM --> DS
-    GM --> FS
 
-    CL --> GM
+    CL --> MW
     CL --> GIL
     CL --> WS
-    GM --> GIL
+    MW --> GIL
 ```
 
 ## ライセンス
