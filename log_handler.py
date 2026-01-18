@@ -1,73 +1,63 @@
+"""ログハンドラー - スプレッドシートの読み書きを担当."""
+
+from __future__ import annotations
+
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, List
 
 # https://docs.gspread.org/en/v5.12.1/
 import gspread
 
+if TYPE_CHECKING:
+    from gspread.worksheet import Worksheet
+
 from config_loader import ConfigLoader
 
-class LogHandler():
 
-    def __init__(self):
+class LogHandler:
+    """スプレッドシートの読み書きを担当するクラス."""
+
+    sheet: "Worksheet"
+    records: List[Dict[str, Any]]
+    index: int
+
+    def __init__(self) -> None:
+        """スプレッドシートに接続し、全レコードをキャッシュに保存.
+        
+        Raises:
+            FileNotFoundError: 認証情報ファイルが存在しない場合
+            gspread.exceptions.SpreadsheetNotFound: スプレッドシートが見つからない場合
+            gspread.exceptions.APIError: APIエラーが発生した場合
+        """
         config = ConfigLoader()
         gc = gspread.service_account(filename=Path(config.log_handler['cert_file_path']))
         self.sheet = gc.open_by_key(config.log_handler['sheet_key']).sheet1
         self.records = self.get_all_records()
         self.index = len(self.records)
 
-    def get_all_records(self):
+    def get_all_records(self) -> List[Dict[str, Any]]:
+        """全レコードをスプレッドシートから取得."""
         return self.sheet.get_all_records()
 
-    def get_all_values(self):
-        return self.sheet.get_all_values()
-    
-    def get_and_increment_index(self):
+    def get_and_increment_index(self) -> int:
+        """インデックスを取得して+1."""
         self.index += 1
         return self.index
 
-    # Backward compatibility for older callers
-    def get_and_incremant_index(self):
-        return self.get_and_increment_index()
-    
-    def get_titles(self):
-        records = self.get_all_records()
-        return {record['title'] for record in records}
-    
-    def get_5_titles_of_recently(self):
-        return self.get_n_titles_of_recently(5)
+    def format_datetime_to_gss_style(self, dt: datetime) -> str:
+        """datetimeをスプレッドシート形式に変換."""
+        return dt.strftime("%Y/%m/%d %H:%M:%S")
 
-    def get_10_titles_of_recently(self):
-        return self.get_n_titles_of_recently(10)
-
-    def get_n_titles_of_recently(self, num):
-        records = self.get_all_records()
-        recent_of_titles = {}
-        for record in records:
-            title = record['title']
-            start_time = self._gss_timestr_to_datetime(record['start_time'])
-            if title not in recent_of_titles or recent_of_titles[title] < start_time:
-                recent_of_titles[title] = start_time
-        
-        # 最新のdatetimeを持つレコードだけを残す
-        most_recent_records = [record for record in records if self._gss_timestr_to_datetime(record['start_time']) == recent_of_titles[record['title']]]
-
-        # ソートする
-        most_recent_records.sort(key=lambda record: record['start_time'], reverse=True)
-        
-        return most_recent_records[:num]
-
-    def _gss_timestr_to_datetime(self, timestr):
-        return datetime.strptime(timestr, '%Y/%m/%d %H:%M:%S')
-
-    def format_datetime_to_gss_style(self, datetime):
-        return datetime.strftime("%Y/%m/%d %H:%M:%S")
-
-    def get_cached_records(self):
+    def get_cached_records(self) -> List[Dict[str, Any]]:
         """キャッシュされたレコードを返す（スプレッドシートにアクセスしない）."""
         return self.records
 
-    def save_record(self, values) -> bool:
+    def save_record(self, values: List[Any]) -> bool:
         """レコードをスプレッドシートに保存。
+        
+        Args:
+            values: [index, start_time, end_time, title, play_with_friends] の形式。
         
         Returns:
             保存成功時True、失敗時False。
@@ -90,9 +80,3 @@ class LogHandler():
         except Exception as e:
             print(f'Exception occurred while appending row: {e}')
             return False
-            
-def main():
-    pass
-
-if __name__ == '__main__':
-    main()

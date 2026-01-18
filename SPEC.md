@@ -12,12 +12,9 @@ classDiagram
     namespace main_py {
         class Messages {
             <<constants>>
-            GAME_PLAYING
-            GAME_PLAYING_WITH_ELAPSED
             GAME_RECORDED
             GAME_TOO_SHORT
             NO_GAME_PLAYING
-            CURRENT_WINDOWS
         }
         class GameEntry {
             <<dataclass>>
@@ -277,7 +274,7 @@ GUI版メインウィンドウ。
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
 | `__init__()` | ウィンドウ初期化、**タイマーをインスタンス変数に保持して開始** | `main()` 関数 |
-| `closeEvent(event)` | ウィンドウ状態を保存して終了 | Qt イベント |
+| `closeEvent(event)` | **プレイ中のゲームを記録し**、ウィンドウ状態を保存して終了 | Qt イベント |
 | `_start_timer(interval, callback)` | タイマーを作成して開始 | `__init__()` 内部 |
 | `_init_components()` | 設定読み込み、コンポーネント初期化 | `__init__()` 内部 |
 | `_scan_tick()` | 監視サイクル（1秒間隔） | タイマー |
@@ -314,7 +311,7 @@ GUI版メインウィンドウ。
 | `active_label`, `active_display` | プレイ中ゲーム表示 |
 | `today_games_label`, `today_games_table` | 今日プレイしたゲーム一覧 |
 | `window_label`, `window_list` | ウィンドウタイトル一覧 |
-| `session_height`, `active_min_height`, etc. | 各ウィジェットの高さ定数 |
+| `active_min_height`, `active_max_height`, etc. | 各ウィジェットの高さ定数 |
 
 #### `build_main_layout(parent)` (関数)
 メインレイアウトを構築して `LayoutWidgets` を返す。
@@ -327,12 +324,15 @@ GUI版メインウィンドウ。
 
 ### config_loader.py
 
+#### 定数
+- `DEFAULT_CONFIG_FILE = 'config.ini'` - デフォルトの設定ファイルパス
+
 #### `ConfigLoader`
 config.ini を読み込んで設定を提供する。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `__init__()` | config.ini を読み込み、**必須キーの検証後**に初期化 | `MainWindow._init_components()`, `LogHandler.__init__()` |
+| `__init__(config_file_path=DEFAULT_CONFIG_FILE)` | 指定されたconfig.ini を読み込み、**必須キーの検証後**に初期化 | `MainWindow._init_components()`, `LogHandler.__init__()` |
 | `_validate_required_keys()` | 必須キー（LOGHANDLER/GAMEINFOセクション）の存在を検証。欠落時はKeyError | `__init__()` 内部 |
 | `load()` | 設定を各プロパティに展開。**sheet_gidはintに変換** | `__init__()` 内部 |
 | `_get_list(section, key, default)` | カンマ区切りの設定をリストに変換 | `load()` 内部 |
@@ -352,13 +352,10 @@ config.ini を読み込んで設定を提供する。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `__init__()` | スプレッドシートに接続、インデックス初期化、全レコードをキャッシュ（`self.records`）に保存 | `SessionRecorder.__init__()` |
+| `__init__()` | スプレッドシートに接続、インデックス初期化、全レコードをキャッシュ（`self.records`）に保存。**接続失敗時は例外をスロー** | `SessionRecorder.__init__()` |
 | `get_all_records()` | 全レコードをスプレッドシートから直接取得（初期化時のみ使用） | `__init__()` 内部 |
 | `get_cached_records()` | キャッシュされたレコード（`self.records`）を返す。API呼び出しなし | `MainWindow._load_today_game_minutes()`, `MainWindow._load_today_completed_seconds()` |
-| `get_all_values()` | 全値を取得 | （未使用） |
 | `get_and_increment_index()` | インデックスを取得して+1 | `SessionRecorder._save_to_spreadsheet()` |
-| `get_titles()` | 全タイトルの集合を取得 | （未使用） |
-| `get_n_titles_of_recently(num)` | 最近プレイしたn件を取得 | （未使用） |
 | `format_datetime_to_gss_style(datetime)` | datetimeをスプレッドシート形式に変換 | `SessionRecorder._save_to_spreadsheet()` |
 | `save_record(values)` | 1行をスプレッドシートに追記し、同時に`self.records`にも追加してキャッシュを更新。**成功時True、失敗時Falseを返す** | `SessionRecorder._save_to_spreadsheet()` |
 
@@ -426,10 +423,12 @@ config.ini を読み込んで設定を提供する。
 1. 起動時にゲーム情報シートを読み込み、`game_title/window_title/play_with_friends/is_browser_game` をメモリに保持。
 2. 1秒間隔（`POLL_INTERVAL_SECONDS = 1`）で以下を実行：
    - 全ウィンドウのタイトルを取得（`pygetwindow.getAllWindows()`）。
+   - フォアグラウンド（最前面）ウィンドウのタイトルを取得（`pygetwindow.getActiveWindow()`）。
    - 除外リスト（Program Manager など）を外す。
    - 各ゲームの `window_title` が部分一致するか判定。
-3. 一致したゲーム：
+3. フォアグラウンドで一致したゲームのみ：
    - `is_playing=True` とし、初回一致時に `start_time` を記録。
+   - バックグラウンド一致のみではセッションを開始しない。
    - ブラウザゲーム判定：
      - `is_browser_game=True` の場合、ブラウザタイトルでも記録対象。
      - `is_browser_game=False` の場合、ブラウザウィンドウを除外（ブラウザ名で判定）。
@@ -449,7 +448,8 @@ config.ini を読み込んで設定を提供する。
 ## 非アクティブウィンドウトラッキング
 
 ### 概要
-ゲームウィンドウが検出されていても、フォアグラウンド（最前面）でない場合は「非アクティブ」として扱う。
+セッション開始後にフォアグラウンド（最前面）でなくなった場合は「非アクティブ」として扱う。
+（バックグラウンド一致のみではセッションは開始しない）
 非アクティブ状態が5分以上続くと、その時点でセッションを記録し、次にアクティブになった際は新しいセッションとして扱う。
 
 ### 定数
@@ -460,7 +460,7 @@ config.ini を読み込んで設定を提供する。
 | ウィンドウ状態 | フォアグラウンド | アクティブ判定 |
 |----------------|------------------|----------------|
 | ゲームウィンドウが存在し、最前面 | ✓ | アクティブ |
-| ゲームウィンドウが存在するが、最前面ではない | ✗ | 非アクティブ |
+| ゲームウィンドウが存在するが、最前面ではない | ✗ | 非アクティブ（計測中のみ） |
 | ゲームウィンドウが存在しない | - | セッション終了 |
 
 ### 非アクティブ時の動作
@@ -474,8 +474,8 @@ config.ini を読み込んで設定を提供する。
 #### 5分以上の非アクティブ
 1. 非アクティブ状態が5分以上続いた場合
 2. `inactive_since` の時点でセッションを自動記録（`record_with_times()`）
-3. セッションは終了せず、次のアクティブ化を待機
-4. 再度フォアグラウンドになった場合、`start_time` を更新して新セッション開始
+3. セッションを終了（`is_playing=False`, `start_time=None`, `inactive_since=None`）
+4. 再度フォアグラウンドになった場合、`start_session()` で新セッション開始
 
 #### ウィンドウ消失時
 1. 非アクティブ状態でウィンドウが消失した場合
@@ -520,15 +520,20 @@ config.ini を読み込んで設定を提供する。
 ```python
 # 各ゲームについて
 for game in games:
-    detected = any(
+    window_exists = any(
         game.matches_window(title, self.browsers)
         for title in window_titles
     )
-    
-    if detected and not game.is_playing:
+    is_foreground = (
+        foreground_title is not None
+        and game.matches_window(foreground_title, self.browsers)
+    )
+
+    if not game.is_playing and is_foreground:
         game.start_session()
-    elif not detected and game.is_playing:
+    elif game.is_playing and not window_exists:
         self.recorder.record(game)
+    # game.is_playing かつ not is_foreground の場合は非アクティブ処理へ
 ```
 
 ### GameEntry.matches_window()

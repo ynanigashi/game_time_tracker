@@ -1,6 +1,8 @@
 import configparser
 from typing import List
 
+DEFAULT_CONFIG_FILE = 'config.ini'
+
 DEFAULT_BROWSERS = [
     'Google Chrome',
     'Microsoft Edge',
@@ -32,8 +34,8 @@ class ConfigLoader:
         'GAMEINFO': ['sheet_key', 'sheet_gid'],
     }
 
-    def __init__(self):
-        self.config_file_path = 'config.ini'
+    def __init__(self, config_file_path: str = DEFAULT_CONFIG_FILE):
+        self.config_file_path = config_file_path
         self.config = configparser.ConfigParser()
         self.config.read(self.config_file_path, encoding='utf-8')
         self._validate_required_keys()

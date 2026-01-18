@@ -1,7 +1,6 @@
 """Game Time Tracker - PySide6 GUI."""
 
 import json
-import os
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
@@ -25,6 +24,7 @@ from log_handler import LogHandler
 POLL_INTERVAL_SECONDS = 1
 MIN_PLAY_MINUTES = 5
 INACTIVE_TIMEOUT_MINUTES = 5  # 非アクティブ状態でこの時間経過でセッション分割
+SECONDS_PER_MINUTE = 60
 STATE_FILE = Path("window_state.txt")
 BASE_TITLE = "Game Time Tracker"
 UI_REFRESH_INTERVAL_SECONDS = 0.1
@@ -41,12 +41,9 @@ TIME_FRACTION_PRECISION = 10  # 0.1秒単位での時間表示精度
 class Messages:
     """ユーザー向けメッセージ定義."""
 
-    GAME_PLAYING = '{game_title}をプレイ中'
-    GAME_PLAYING_WITH_ELAPSED = '{game_title}をプレイ中（経過: {elapsed}）'
     GAME_RECORDED = '{game_title}のプレイ時間を記録しました'
     GAME_TOO_SHORT = '{game_title}のプレイ時間が{min_minutes}分未満のため、記録されませんでした'
     NO_GAME_PLAYING = 'ゲームをプレイしていません'
-    CURRENT_WINDOWS = '現在のウィンドウタイトルは以下です。'
 
 
 # =============================================================================
@@ -84,7 +81,7 @@ class GameEntry:
         self.start_time = datetime.now()
         self.inactive_since = None
 
-    def end_session(self) -> tuple[Optional[datetime], Optional[datetime]]:
+    def end_session(self) -> Tuple[Optional[datetime], Optional[datetime]]:
         """ゲームセッションを終了し、開始・終了時刻を返す."""
         start_time = self.start_time
         end_time = datetime.now() if start_time else None
@@ -134,8 +131,20 @@ class GameInfoLoader:
                 self.config.game_info['sheet_gid']
             )
             records = sheet.get_all_records()
+        except FileNotFoundError as e:
+            print(f'認証情報ファイルが見つかりません: {e}')
+            return []
+        except gspread.exceptions.SpreadsheetNotFound:
+            print('スプレッドシートが見つかりません。sheet_keyを確認してください。')
+            return []
+        except gspread.exceptions.WorksheetNotFound:
+            print('ワークシートが見つかりません。sheet_gidを確認してください。')
+            return []
         except gspread.exceptions.APIError as e:
-            print(f'スプレッドシートの読み込みに失敗しました: {e}')
+            print(f'スプレッドシートAPIエラー: {e}')
+            return []
+        except Exception as e:
+            print(f'ゲーム情報の読み込みに失敗しました: {e}')
             return []
 
         return [self._record_to_entry(record) for record in records]
@@ -180,6 +189,7 @@ class WindowScanner:
             if active_window and active_window.title:
                 return active_window.title
         except Exception:
+            # pygetwindowの内部エラーは無視（ウィンドウが存在しない場合など）
             pass
         return None
 
@@ -209,13 +219,41 @@ class SessionRecorder:
         if start_time is None or end_time is None:
             return None
 
+        return self._record_segments(game, start_time, end_time)
+
+    def record_with_times(
+        self,
+        game: GameEntry,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> Optional[float]:
+        """指定された開始・終了時刻でセッションを記録。日を跨いだ場合は分割。
+        
+        ゲームの状態（is_playing, start_time）は変更しない。
+        
+        Returns:
+            当日分のみの記録秒数。5分未満や書き込み失敗など保存が一件も発生しない場合はNone。
+        """
+        return self._record_segments(game, start_time, end_time)
+
+    def _record_segments(
+        self,
+        game: GameEntry,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> Optional[float]:
+        """セグメント分割と記録の共通ロジック。
+        
+        Returns:
+            当日分のみの記録秒数。保存が一件も発生しない場合はNone。
+        """
         today = datetime.now().date()
         today_seconds = 0.0
         any_saved = False
         segments = self._split_by_day(start_time, end_time)
 
         for seg_start, seg_end in segments:
-            play_minutes = (seg_end - seg_start).total_seconds() / 60
+            play_minutes = (seg_end - seg_start).total_seconds() / SECONDS_PER_MINUTE
             if play_minutes >= self.min_play_minutes:
                 success = self._save_to_spreadsheet(game, seg_start, seg_end)
                 if success:
@@ -278,44 +316,6 @@ class SessionRecorder:
             game.play_with_friends,
         ])
 
-    def record_with_times(
-        self,
-        game: GameEntry,
-        start_time: datetime,
-        end_time: datetime,
-    ) -> Optional[float]:
-        """指定された開始・終了時刻でセッションを記録。日を跨いだ場合は分割。
-        
-        ゲームの状態（is_playing, start_time）は変更しない。
-        
-        Returns:
-            当日分のみの記録秒数。5分未満や書き込み失敗など保存が一件も発生しない場合はNone。
-        """
-        today = datetime.now().date()
-        today_seconds = 0.0
-        any_saved = False
-        segments = self._split_by_day(start_time, end_time)
-
-        for seg_start, seg_end in segments:
-            play_minutes = (seg_end - seg_start).total_seconds() / 60
-            if play_minutes >= self.min_play_minutes:
-                success = self._save_to_spreadsheet(game, seg_start, seg_end)
-                if success:
-                    any_saved = True
-                    # 当日分のみ加算
-                    if seg_start.date() == today:
-                        today_seconds += (seg_end - seg_start).total_seconds()
-                    print(Messages.GAME_RECORDED.format(game_title=game.game_title))
-                else:
-                    print(f'{game.game_title}の記録保存に失敗しました')
-            else:
-                print(Messages.GAME_TOO_SHORT.format(
-                    game_title=game.game_title,
-                    min_minutes=self.min_play_minutes,
-                ))
-
-        return today_seconds if any_saved else None
-
 
 # =============================================================================
 # ユーティリティ関数
@@ -325,20 +325,6 @@ def _parse_bool(value: object) -> bool:
     return str(value).upper() == 'TRUE'
 
 
-def _format_elapsed(start_time: Optional[datetime]) -> str:
-    """開始時刻からの経過時間を整形."""
-    if start_time is None:
-        return '0秒'
-    delta_seconds = int((datetime.now() - start_time).total_seconds())
-    minutes, seconds = divmod(delta_seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    if hours:
-        return f'{hours}時間{minutes}分{seconds}秒'
-    if minutes:
-        return f'{minutes}分{seconds}秒'
-    return f'{seconds}秒'
-
-
 def _format_hms(total_seconds: float) -> str:
     """秒を HH:MM:SS.F 形式に整形（Fは0.1秒単位）."""
     seconds_int = int(total_seconds)
@@ -346,6 +332,29 @@ def _format_hms(total_seconds: float) -> str:
     hours, minutes = divmod(minutes, 60)
     fraction = int((total_seconds - int(total_seconds)) * TIME_FRACTION_PRECISION)
     return f'{hours:02}:{minutes:02}:{seconds_int:02}.{fraction}'
+
+
+# 日時フォーマット定数
+GSS_DATETIME_FORMAT = "%Y/%m/%d %H:%M:%S"
+
+
+@dataclass
+class ParsedRecord:
+    """パース済みレコードを保持するデータクラス."""
+    start: datetime
+    end: datetime
+    game_title: str
+
+
+def _parse_record(record: dict) -> Optional[ParsedRecord]:
+    """レコードをパースしてParsedRecordを返す。パース失敗時はNone."""
+    try:
+        start = datetime.strptime(str(record['start_time']), GSS_DATETIME_FORMAT)
+        end = datetime.strptime(str(record['end_time']), GSS_DATETIME_FORMAT)
+        game_title = str(record.get('title', '不明'))
+        return ParsedRecord(start=start, end=end, game_title=game_title)
+    except (ValueError, KeyError):
+        return None
 
 
 # =============================================================================
@@ -472,7 +481,12 @@ class MainWindow(QWidget):
         self._ui_tick()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """ウィンドウ状態を保存."""
+        """ウィンドウ終了時にプレイ中のゲームを記録し、状態を保存."""
+        # プレイ中のゲームを記録（5分以上の場合のみ）
+        for game in self.games:
+            if game.is_playing and game.start_time:
+                self.recorder.record(game)
+        
         self._save_window_state()
         super().closeEvent(event)
 
@@ -501,8 +515,33 @@ class MainWindow(QWidget):
                 + [BASE_TITLE, self.windowTitle()]
             )
         )
+        
+        # LogHandler初期化（スプレッドシート接続失敗時は記録機能を無効化）
+        try:
+            log_handler = LogHandler()
+        except FileNotFoundError as e:
+            print(f'ログ用認証情報ファイルが見つかりません: {e}')
+            self._set_status('認証情報ファイルが見つかりません（config.ini を確認）')
+            self.setDisabled(True)
+            return
+        except gspread.exceptions.SpreadsheetNotFound:
+            print('ログ用スプレッドシートが見つかりません。sheet_keyを確認してください。')
+            self._set_status('ログ用スプレッドシートが見つかりません')
+            self.setDisabled(True)
+            return
+        except gspread.exceptions.APIError as e:
+            print(f'ログ用スプレッドシートAPIエラー: {e}')
+            self._set_status('スプレッドシート接続エラー')
+            self.setDisabled(True)
+            return
+        except Exception as e:
+            print(f'ログハンドラーの初期化に失敗しました: {e}')
+            self._set_status('ログハンドラー初期化エラー')
+            self.setDisabled(True)
+            return
+        
         self.recorder = SessionRecorder(
-            log_handler=LogHandler(),
+            log_handler=log_handler,
             min_play_minutes=MIN_PLAY_MINUTES,
         )
         self.daily_stats.today_completed_seconds = self._load_today_completed_seconds()
@@ -588,7 +627,7 @@ class MainWindow(QWidget):
                     
                     # 非アクティブ時間が5分超過したか確認
                     inactive_seconds = game.get_inactive_seconds()
-                    if inactive_seconds >= INACTIVE_TIMEOUT_MINUTES * 60:
+                    if inactive_seconds >= INACTIVE_TIMEOUT_MINUTES * SECONDS_PER_MINUTE:
                         # 5分超過 → 非アクティブ化時点までを記録
                         if game.start_time and game.inactive_since:
                             recorded_seconds = self.recorder.record_with_times(
@@ -621,7 +660,7 @@ class MainWindow(QWidget):
         
         self.w.active_display.setText(' / '.join(parts))
 
-    def _update_session_times(self, active_games: List[GameEntry]) -> None:
+    def _update_session_times(self, active_games: List[GameEntry], now: datetime) -> None:
         """現在のセッション時間を更新（最長セッションを表示）.
         
         active_games と inactive_games_cache を合わせた全プレイ中ゲームから最長を表示。
@@ -632,13 +671,13 @@ class MainWindow(QWidget):
             return
 
         max_elapsed = max(
-            (datetime.now() - game.start_time).total_seconds()
+            (now - game.start_time).total_seconds()
             if game.start_time else 0
             for game in all_playing
         )
         self.w.session_time_display.setText(_format_hms(max_elapsed))
 
-    def _update_today_totals(self, active_games: List[GameEntry]) -> None:
+    def _update_today_totals(self, active_games: List[GameEntry], now: datetime) -> None:
         """今日のプレイ時間（完了+進行中）を更新.
         
         - 日跨ぎセッションは今日0:00以降のみカウント
@@ -646,7 +685,6 @@ class MainWindow(QWidget):
         - 非アクティブ中のゲームも含む
         """
         total_seconds = self.daily_stats.today_completed_seconds
-        now = datetime.now()
         today_start = datetime.combine(now.date(), time(0, 0, 0))
         
         all_playing = active_games + self.inactive_games_cache
@@ -656,7 +694,7 @@ class MainWindow(QWidget):
                 effective_start = max(game.start_time, today_start)
                 elapsed_seconds = (now - effective_start).total_seconds()
                 # 5分未満の進行中セッションは除外
-                if elapsed_seconds >= MIN_PLAY_MINUTES * 60:
+                if elapsed_seconds >= MIN_PLAY_MINUTES * SECONDS_PER_MINUTE:
                     total_seconds += elapsed_seconds
         self.w.today_time_display.setText(_format_hms(total_seconds))
 
@@ -673,21 +711,16 @@ class MainWindow(QWidget):
         try:
             records = self.recorder.log_handler.get_cached_records()
             for record in records:
-                try:
-                    start = datetime.strptime(str(record['start_time']), "%Y/%m/%d %H:%M:%S")
-                    end = datetime.strptime(str(record['end_time']), "%Y/%m/%d %H:%M:%S")
-                    game_title = str(record.get('title', '不明'))
-                except (ValueError, KeyError):
+                parsed = _parse_record(record)
+                if parsed is None or parsed.start.date() != today:
                     continue
-                if start.date() != today:
-                    continue
-                minutes = (end - start).total_seconds() / 60
-                game_minutes[game_title] = game_minutes.get(game_title, 0) + minutes
-        except Exception:
-            pass
+                minutes = (parsed.end - parsed.start).total_seconds() / SECONDS_PER_MINUTE
+                game_minutes[parsed.game_title] = game_minutes.get(parsed.game_title, 0) + minutes
+        except Exception as e:
+            print(f'今日のゲーム時間の集計中にエラーが発生しました: {e}')
         return game_minutes
 
-    def _update_today_games_list(self) -> None:
+    def _update_today_games_list(self, now: datetime) -> None:
         """今日プレイしたゲームの一覧と時間を更新."""
         # キャッシュをコピー
         game_minutes = dict(self.daily_stats.today_game_minutes_cache)
@@ -701,14 +734,13 @@ class MainWindow(QWidget):
             return
         
         # 現在プレイ中のゲームの時間を追加（日跨ぎ対応、5分未満除外、非アクティブ含む）
-        now = datetime.now()
         today_start = datetime.combine(now.date(), time(0, 0, 0))
         
         for game in all_playing:
             if game.start_time:
                 # 日跨ぎの場合は今日0:00から、そうでなければ開始時刻から
                 effective_start = max(game.start_time, today_start)
-                current_minutes = (now - effective_start).total_seconds() / 60
+                current_minutes = (now - effective_start).total_seconds() / SECONDS_PER_MINUTE
                 # 5分未満の進行中セッションは除外
                 if current_minutes >= MIN_PLAY_MINUTES:
                     game_minutes[game.game_title] = game_minutes.get(game.game_title, 0) + current_minutes
@@ -734,17 +766,12 @@ class MainWindow(QWidget):
         try:
             records = self.recorder.log_handler.get_cached_records()
             for record in records:
-                try:
-                    start = datetime.strptime(str(record['start_time']), "%Y/%m/%d %H:%M:%S")
-                    end = datetime.strptime(str(record['end_time']), "%Y/%m/%d %H:%M:%S")
-                except (ValueError, KeyError):
+                parsed = _parse_record(record)
+                if parsed is None or parsed.start.date() != today:
                     continue
-                if start.date() != today:
-                    continue
-                total += (end - start).total_seconds()
-        except Exception:
-            # ログハンドラのエラーは無視（初回起動時など）
-            pass
+                total += (parsed.end - parsed.start).total_seconds()
+        except Exception as e:
+            print(f'今日の完了プレイ時間のロード中にエラーが発生しました: {e}')
         return total
 
     def _save_window_state(self) -> None:
@@ -848,10 +875,11 @@ class MainWindow(QWidget):
 
     def _ui_tick(self) -> None:
         """UIだけを高速更新（0.1秒間隔）."""
+        now = datetime.now()
         # セッション時間と今日の合計時間のみ更新（リストはスキャン時に更新）
-        self._update_session_times(self.active_games_cache)
-        self._update_today_totals(self.active_games_cache)
-        self._update_today_games_list()
+        self._update_session_times(self.active_games_cache, now)
+        self._update_today_totals(self.active_games_cache, now)
+        self._update_today_games_list(now)
 
 
 # =============================================================================

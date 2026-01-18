@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QLabel, QListWidget, QVBoxLayout, QWidget, QHBoxLa
 
 @dataclass
 class LayoutWidgets:
-    """Holds widget references for the main window."""
+    """メインウィンドウのウィジェット参照を保持するデータクラス."""
 
     today_label: QLabel
     today_time_display: QLabel
@@ -19,7 +19,6 @@ class LayoutWidgets:
     today_games_table: QTableWidget
     window_label: QLabel
     window_list: QListWidget
-    session_height: int
     active_min_height: int
     active_max_height: int
     today_games_min_height: int
@@ -27,15 +26,14 @@ class LayoutWidgets:
 
 
 def build_main_layout(parent: QWidget) -> LayoutWidgets:
-    """Create and attach the main layout to the parent window."""
+    """メインレイアウトを作成して親ウィンドウにアタッチする."""
     active_display = QLabel('---', parent)
     active_min_height = 30
     active_max_height = 30
     active_display.setMinimumHeight(active_min_height)  # 1行前提
     active_display.setMaximumHeight(active_max_height)  # 1行分で固定
     session_time_display = QLabel('---', parent)
-    session_height = 24
-    session_time_display.setFixedHeight(session_height)
+    session_time_display.setFixedHeight(24)
     today_time_display = QLabel('00:00:00', parent)
     today_time_display.setFixedHeight(32)
     today_time_display.setStyleSheet("font-size: 20px; font-weight: bold;")
@@ -90,7 +88,6 @@ def build_main_layout(parent: QWidget) -> LayoutWidgets:
         today_games_table=today_games_table,
         window_label=window_label,
         window_list=window_list,
-        session_height=session_height,
         active_min_height=active_min_height,
         active_max_height=active_max_height,
         today_games_min_height=today_games_min_height,
