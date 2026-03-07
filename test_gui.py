@@ -8,23 +8,50 @@ from typing import Any
 
 # Stub external dependencies before importing gui module
 # SimpleNamespaceを使って動的属性追加の型エラーを回避
+class _FakeQWidget:
+    def closeEvent(self, event) -> None:
+        pass
+
+    def resizeEvent(self, event) -> None:
+        pass
+
+    def mousePressEvent(self, event) -> None:
+        pass
+
+
+class _FakeQMouseEvent:
+    def button(self):
+        return None
+
+
+class _FakeQTableWidgetItem:
+    def __init__(self, text: Any = "") -> None:
+        self._text = "" if text is None else str(text)
+
+    def text(self) -> str:
+        return self._text
+
+    def setText(self, text: Any) -> None:
+        self._text = "" if text is None else str(text)
+
+
 fake_pyside6_core: Any = types.SimpleNamespace(
     QTimer=type("QTimer", (), {}),
     Qt=types.SimpleNamespace(
-        MouseButton=types.SimpleNamespace(LeftButton=1)
+        MouseButton=types.SimpleNamespace(LeftButton=1, RightButton=2)
     ),
 )
 
 fake_pyside6_gui: Any = types.SimpleNamespace(
     QCloseEvent=type("QCloseEvent", (), {}),
-    QMouseEvent=type("QMouseEvent", (), {}),
+    QMouseEvent=_FakeQMouseEvent,
     QResizeEvent=type("QResizeEvent", (), {}),
 )
 
 fake_pyside6_widgets: Any = types.SimpleNamespace(
     QApplication=type("QApplication", (), {}),
-    QWidget=type("QWidget", (), {}),
-    QTableWidgetItem=type("QTableWidgetItem", (), {}),
+    QWidget=_FakeQWidget,
+    QTableWidgetItem=_FakeQTableWidgetItem,
     QLabel=type("QLabel", (), {}),
     QListWidget=type("QListWidget", (), {}),
     QVBoxLayout=type("QVBoxLayout", (), {}),
@@ -35,9 +62,16 @@ fake_pyside6_widgets: Any = types.SimpleNamespace(
 
 fake_gspread: Any = types.SimpleNamespace(
     service_account=lambda filename=None: None,
-    exceptions=types.SimpleNamespace(APIError=Exception),
+    exceptions=types.SimpleNamespace(
+        APIError=type("APIError", (Exception,), {}),
+        SpreadsheetNotFound=type("SpreadsheetNotFound", (Exception,), {}),
+        WorksheetNotFound=type("WorksheetNotFound", (Exception,), {}),
+    ),
 )
-fake_pygetwindow: Any = types.SimpleNamespace(getAllWindows=lambda: [])
+fake_pygetwindow: Any = types.SimpleNamespace(
+    getAllWindows=lambda: [],
+    getActiveWindow=lambda: None,
+)
 
 sys.modules.setdefault("PySide6", types.ModuleType("PySide6"))
 sys.modules.setdefault("PySide6.QtCore", types.ModuleType("PySide6.QtCore"))

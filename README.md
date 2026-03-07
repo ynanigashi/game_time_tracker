@@ -220,14 +220,14 @@ flowchart LR
     end
     subgraph GUI
         MW[MainWindow._scan_tick/_ui_tick]
-        US[_update_game_states]
+        GST[GameStateTracker.scan]
     end
 
     MW --> WS
-    MW --> US
-    US --> GE
-    US --> SR
-    US --> DS
+    MW --> GST
+    GST --> GE
+    GST --> SR
+    GST --> DS
     SR --> LH[LogHandler<br/>format_datetime_to_gss_style<br/>get_and_increment_index<br/>save_record]
 
     CL --> MW
@@ -238,3 +238,34 @@ flowchart LR
 
 ## ライセンス
 MIT License
+
+## ドキュメント追記（2026-03）
+- タイトル判定は正規化前提に変更:
+  - `GameStateTracker.scan()` で `window_titles` / `foreground_title` を 1 回だけ正規化してから判定します。
+  - `GameEntry.matches_window()` は正規化済み入力を受け取り、`window_title` の正規化結果を内部キャッシュして比較します。
+- 正規化の仕様:
+  - 大文字/小文字を吸収（`casefold`）
+  - ダッシュ記号バリエーションを `-` に統一
+  - 余分な空白を正規化
+- 追加モジュール:
+  - `text_utils.py` に `normalize_title()` を追加
+- `GameStateTracker` の内部リファクタ:
+  - `_check_window_exists()` / `_check_is_foreground()` は `browsers` 引数を廃止し、内部キャッシュ `self._normalized_browsers` を直接参照。
+  - 記録後の `DailyStatsTracker` 更新処理を `_apply_recorded_seconds()` に集約し、`_handle_window_closed()` と `_handle_inactive_timeout()` の重複を解消。
+  - `set_browsers()` で空の正規化結果を除外してキャッシュを保持。
+  - `WindowMatchState` を導入し、`scan()` での「存在判定/フォアグラウンド判定」の受け渡しを明示化。
+  - `LoadTodayMinutes` 型エイリアスで、コールバック型を1箇所に集約。
+- `MainWindow` の内部リファクタ:
+  - 初期化エラー処理を `_disable_with_status()` と `_create_log_handler()` に分離し、`_init_components()` の責務を整理。
+  - プレイ中ゲームの統合取得を `_all_playing_games()` に集約し、UI更新系メソッドの重複を削減。
+  - 初期化フローを `_load_config_and_games()` / `_build_scanner()` / `_initialize_tracking_services()` / `_load_today_stats_cache()` に分割。
+  - スキャンフローを `_scan_games()` / `_apply_scan_result()` / `_update_scan_status()` に分割し、`_scan_tick()` をオーケストレーション専用に整理。
+  - UI更新ロジックを `MainWindowUiController` に分離し、`MainWindow` はイベント駆動と状態遷移のオーケストレーションに集中。
+  - 表示モード切替ロジックを `MainWindowDisplayController` に分離し、`_apply_display_mode()` / `_apply_mode_geometry()` / `_cycle_display_mode()` を薄い委譲メソッド化。
+  - ウィンドウ状態の保存・復元ロジックを `MainWindowStateController` に分離し、`_save_window_state()` / `resizeEvent()` / 初期ロードを委譲化。
+  - 初期化依存構築を `MainWindowBootstrapper` に分離し、`_init_components()` は「エラー処理 + 反映」に限定。
+  - タイマー起動と tick 実行フローを `MainWindowLoopController` に分離し、`_start_timer()` / `_scan_tick()` / `_ui_tick()` を委譲化。
+  - 初期化エラーのドメイン例外として `MainWindowBootstrapError` を導入し、`_init_components()` の例外境界を単純化。
+  - コントローラー/ブートストラッパー取得の重複ロジックを `_resolve_dependency()` に集約し、各 `_get_*` メソッドを「依存定義 + 再生成条件」だけに整理。
+  - `__init__` の起動手順を `_initialize_window_state()` / `_initialize_runtime_state()` / `_warmup_dependencies()` / `_start_background_timers()` / `_run_initial_refresh()` に分割し、起動フローを段階的に把握しやすく整理。
+  - UIイベント処理を小メソッドに分割し、`closeEvent()` / `mousePressEvent()` / `resizeEvent()` をオーケストレーションに限定（`_record_playing_games_before_close()` / `_should_cycle_display_mode()` / `_record_current_mode_size()`）。

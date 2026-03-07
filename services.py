@@ -12,6 +12,7 @@ import pygetwindow as gw
 from config_loader import Config
 from log_handler import LogHandler
 from models import GameEntry, ParsedRecord, parse_bool, parse_record
+from text_utils import normalize_title
 from time_utils import split_by_day
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,17 @@ class ScanResult:
     active_games: List[GameEntry]
     inactive_games: List[GameEntry]
     recorded_seconds: float  # この周期で記録された秒数
+
+
+@dataclass(frozen=True)
+class WindowMatchState:
+    """Window match result for one game in one scan tick."""
+
+    exists: bool
+    is_foreground: bool
+
+
+LoadTodayMinutes = Callable[[], Dict[str, float]]
 
 
 class GameStateTracker:
@@ -55,15 +67,31 @@ class GameStateTracker:
         """
         self.recorder = recorder
         self.daily_stats = daily_stats
-        self.browsers = browsers
+        self._browsers: List[str] = []
+        self._normalized_browsers: List[str] = []
+        self.set_browsers(browsers)
         self.inactive_timeout_minutes = inactive_timeout_minutes
+
+    @property
+    def browsers(self) -> List[str]:
+        """Return a copy of configured browser names."""
+        return list(self._browsers)
+
+    def set_browsers(self, browsers: Sequence[str]) -> None:
+        """Update browsers and keep normalized cache in sync."""
+        self._browsers = list(browsers)
+        self._normalized_browsers = [
+            normalized
+            for normalized in (normalize_title(browser) for browser in self._browsers)
+            if normalized
+        ]
     
     def scan(
         self,
         games: List[GameEntry],
         window_titles: List[str],
         foreground_title: Optional[str],
-        load_today_game_minutes_callback: Callable[[], Dict[str, float]],
+        load_today_game_minutes_callback: LoadTodayMinutes,
     ) -> ScanResult:
         """ゲーム状態をスキャンして更新.
         
@@ -80,15 +108,23 @@ class GameStateTracker:
         inactive_games: List[GameEntry] = []
         total_recorded_seconds = 0.0
         
+        normalized_window_titles, normalized_foreground_title = self._normalize_scan_inputs(
+            window_titles, foreground_title
+        )
+
         for game in games:
-            window_exists = self._check_window_exists(game, window_titles)
-            is_foreground = self._check_is_foreground(game, foreground_title)
+            match_state = self._resolve_window_match_state(
+                game,
+                normalized_window_titles,
+                normalized_foreground_title,
+            )
             
             if not game.is_playing:
-                self._handle_not_playing(game, is_foreground, active_games)
+                self._handle_not_playing(game, match_state.is_foreground, active_games)
             else:
                 recorded_seconds = self._handle_playing(
-                    game, window_exists, is_foreground,
+                    game,
+                    match_state,
                     active_games, inactive_games,
                     load_today_game_minutes_callback
                 )
@@ -99,21 +135,53 @@ class GameStateTracker:
             inactive_games=inactive_games,
             recorded_seconds=total_recorded_seconds
         )
+
+    def _normalize_scan_inputs(
+        self,
+        window_titles: Sequence[str],
+        foreground_title: Optional[str],
+    ) -> Tuple[List[str], Optional[str]]:
+        """Normalize scan inputs once per tick."""
+        normalized_window_titles = [normalize_title(title) for title in window_titles]
+        normalized_foreground_title = (
+            normalize_title(foreground_title) if foreground_title else None
+        )
+        return normalized_window_titles, normalized_foreground_title
     
-    def _check_window_exists(self, game: GameEntry, window_titles: List[str]) -> bool:
-        """ゲームのウィンドウが存在するか確認."""
+    def _check_window_exists(
+        self,
+        game: GameEntry,
+        window_titles: Sequence[str],
+    ) -> bool:
+        """Return True if any normalized window title matches this game."""
         return any(
-            game.matches_window(title, self.browsers)
+            game.matches_window(title, self._normalized_browsers)
             for title in window_titles
         )
-    
-    def _check_is_foreground(self, game: GameEntry, foreground_title: Optional[str]) -> bool:
-        """ゲームがフォアグラウンドか確認."""
+
+    def _check_is_foreground(
+        self,
+        game: GameEntry,
+        foreground_title: Optional[str],
+    ) -> bool:
+        """Return True if the normalized foreground title matches this game."""
         return (
             foreground_title is not None
-            and game.matches_window(foreground_title, self.browsers)
+            and game.matches_window(foreground_title, self._normalized_browsers)
         )
-    
+
+    def _resolve_window_match_state(
+        self,
+        game: GameEntry,
+        window_titles: Sequence[str],
+        foreground_title: Optional[str],
+    ) -> WindowMatchState:
+        """Resolve window existence and foreground match state for a game."""
+        return WindowMatchState(
+            exists=self._check_window_exists(game, window_titles),
+            is_foreground=self._check_is_foreground(game, foreground_title),
+        )
+
     def _handle_not_playing(
         self,
         game: GameEntry,
@@ -128,41 +196,53 @@ class GameStateTracker:
     def _handle_playing(
         self,
         game: GameEntry,
-        window_exists: bool,
-        is_foreground: bool,
+        match_state: WindowMatchState,
         active_games: List[GameEntry],
         inactive_games: List[GameEntry],
-        load_today_game_minutes_callback: Callable[[], Dict[str, float]],
+        load_today_game_minutes_callback: LoadTodayMinutes,
     ) -> float:
         """プレイ中ゲームの状態遷移を処理.
         
         Returns:
             この処理で記録された秒数
         """
-        if not window_exists:
+        # まず、非アクティブタイムアウトをチェック
+        if game.is_inactive():
+            inactive_seconds = game.get_inactive_seconds()
+            if inactive_seconds >= self.inactive_timeout_minutes * SECONDS_PER_MINUTE:
+                # タイムアウト：記録して状態をリセット
+                recorded_seconds = self._handle_inactive_timeout(game, load_today_game_minutes_callback)
+                # タイムアウト後、フォアグラウンドに戻っている場合は新しいセッションを開始
+                if match_state.is_foreground and match_state.exists:
+                    game.start_session()
+                    active_games.append(game)
+                return recorded_seconds
+        
+        # ウィンドウが消失した場合
+        if not match_state.exists:
             return self._handle_window_closed(game, load_today_game_minutes_callback)
-        elif is_foreground:
+        # フォアグラウンドの場合
+        elif match_state.is_foreground:
             self._handle_foreground(game, active_games)
             return 0.0
+        # バックグラウンドの場合
         else:
-            return self._handle_background(game, inactive_games, load_today_game_minutes_callback)
+            return self._handle_background(game, inactive_games)
     
     def _handle_window_closed(
         self,
         game: GameEntry,
-        load_today_game_minutes_callback: Callable[[], Dict[str, float]],
+        load_today_game_minutes_callback: LoadTodayMinutes,
     ) -> float:
         """ウィンドウが閉じられた場合の処理.
         
         Returns:
             記録された秒数
         """
-        recorded_seconds = self.recorder.record(game)
-        if recorded_seconds:
-            self.daily_stats.add_completed_seconds(recorded_seconds)
-            self.daily_stats.update_game_minutes_cache(load_today_game_minutes_callback())
-            return recorded_seconds
-        return 0.0
+        return self._apply_recorded_seconds(
+            self.recorder.record(game),
+            load_today_game_minutes_callback,
+        )
     
     def _handle_foreground(self, game: GameEntry, active_games: List[GameEntry]) -> None:
         """フォアグラウンドになった場合の処理."""
@@ -173,7 +253,6 @@ class GameStateTracker:
         self,
         game: GameEntry,
         inactive_games: List[GameEntry],
-        load_today_game_minutes_callback: Callable[[], Dict[str, float]],
     ) -> float:
         """バックグラウンドに移行した場合の処理.
         
@@ -183,17 +262,14 @@ class GameStateTracker:
         if not game.is_inactive():
             game.set_inactive()
         
-        inactive_seconds = game.get_inactive_seconds()
-        if inactive_seconds >= self.inactive_timeout_minutes * SECONDS_PER_MINUTE:
-            return self._handle_inactive_timeout(game, load_today_game_minutes_callback)
-        else:
-            inactive_games.append(game)
-            return 0.0
+        # 非アクティブリストに追加（タイムアウトチェックは_handle_playingで行われる）
+        inactive_games.append(game)
+        return 0.0
     
     def _handle_inactive_timeout(
         self,
         game: GameEntry,
-        load_today_game_minutes_callback: Callable[[], Dict[str, float]],
+        load_today_game_minutes_callback: LoadTodayMinutes,
     ) -> float:
         """非アクティブタイムアウト時の処理.
         
@@ -204,13 +280,27 @@ class GameStateTracker:
         if game.start_time and game.inactive_since:
             recorded_seconds = self.recorder.record_with_times(
                 game, game.start_time, game.inactive_since
-            ) or 0.0
-            if recorded_seconds:
-                self.daily_stats.add_completed_seconds(recorded_seconds)
-                self.daily_stats.update_game_minutes_cache(load_today_game_minutes_callback())
+            )
+            recorded_seconds = self._apply_recorded_seconds(
+                recorded_seconds,
+                load_today_game_minutes_callback,
+            )
         game.is_playing = False
         game.start_time = None
         game.inactive_since = None
+        return recorded_seconds
+
+    def _apply_recorded_seconds(
+        self,
+        recorded_seconds: Optional[float],
+        load_today_game_minutes_callback: LoadTodayMinutes,
+    ) -> float:
+        """Apply recorded seconds to daily stats and normalize the return value."""
+        if not recorded_seconds:
+            return 0.0
+
+        self.daily_stats.add_completed_seconds(recorded_seconds)
+        self.daily_stats.update_game_minutes_cache(load_today_game_minutes_callback())
         return recorded_seconds
 
 

@@ -414,17 +414,32 @@ GUI版メインウィンドウ。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `__init__()` | ウィンドウ初期化、**タイマーをインスタンス変数に保持して開始** | `main()` 関数 |
-| `closeEvent(event)` | **プレイ中のゲームを記録し**、ウィンドウ状態を保存して終了 | Qt イベント |
+| `__init__()` | 起動フローのオーケストレーション（状態復元→依存ウォームアップ→初期化→タイマー開始） | `main()` 関数 |
+| `_initialize_window_state()` | タイトル設定とウィンドウ状態の復元 | `__init__()` 内部 |
+| `_initialize_runtime_state()` | 実行時キャッシュ/依存の初期値を設定 | `__init__()` 内部 |
+| `_warmup_dependencies()` | UI/表示/loop/bootstrap 依存を事前生成 | `__init__()` 内部 |
+| `_start_background_timers()` | 監視/UI更新タイマーを開始 | `__init__()` 内部 |
+| `_run_initial_refresh()` | 起動直後の初回スキャン/UI更新を実行 | `__init__()` 内部 |
+| `closeEvent(event)` | 終了時の記録・状態保存をオーケストレーション | Qt イベント |
+| `_record_playing_games_before_close()` | 終了時に記録対象ゲームを記録 | `closeEvent()` 内部 |
+| `_iter_recordable_games()` | 記録対象ゲームのみ抽出 | `_record_playing_games_before_close()` 内部 |
 | `_start_timer(interval, callback)` | タイマーを作成して開始 | `__init__()` 内部 |
 | `_init_components()` | 設定読み込み、コンポーネント初期化 | `__init__()` 内部 |
+| `_resolve_dependency(attr_name, factory, validator=None)` | 依存生成/再利用の共通ロジック | 各 `_get_*` メソッド |
+| `_get_ui_controller()` | `MainWindowUiController` を取得（必要時再生成） | UI更新メソッド |
+| `_get_display_controller()` | `MainWindowDisplayController` を取得 | 表示モード関連 |
+| `_get_state_controller()` | `MainWindowStateController` を取得 | 状態保存/復元関連 |
+| `_get_loop_controller()` | `MainWindowLoopController` を取得 | tick/タイマー関連 |
+| `_get_bootstrapper()` | `MainWindowBootstrapper` を取得 | `_init_components()` |
 | `_scan_tick()` | 監視サイクル（1秒間隔） | タイマー |
-| `_update_game_states(window_titles)` | ゲーム状態を更新 | `_scan_tick()` 内部 |
+| `_scan_games(window_titles, foreground_title)` | `GameStateTracker.scan()` を呼び出して判定結果を取得 | `_scan_tick()` 内部 |
+| `_apply_scan_result(window_titles, result)` | スキャン結果をキャッシュ/UIへ反映 | `_scan_tick()` 内部 |
+| `_update_scan_status(active_games, inactive_games)` | 計測中/非計測のステータスを更新 | `_apply_scan_result()` 内部 |
 | `_update_active_list(active_games)` | プレイ中ゲームリストをUIに反映 | `_scan_tick()` 内部 |
-| `_update_session_times(active_games)` | 現在のセッション時間をUIに反映 | `_ui_tick()` 内部 |
-| `_update_today_totals(active_games)` | 今日の合計時間をUIに反映。**日跨ぎセッションは0:00以降のみ、5分未満は除外** | `_ui_tick()` 内部 |
+| `_update_session_times(active_games, now)` | 現在のセッション時間をUIに反映 | `_ui_tick()` 内部 |
+| `_update_today_totals(active_games, now)` | 今日の合計時間をUIに反映。**日跨ぎセッションは0:00以降のみ、5分未満は除外** | `_ui_tick()` 内部 |
 | `_update_window_list(window_titles)` | ウィンドウタイトル一覧をUIに反映 | `_scan_tick()` 内部 |
-| `_load_today_game_minutes()` | スプレッドシートから今日のゲーム別時間を集計 | `_init_components()`, `_update_game_states()` |
+| `_load_today_game_minutes()` | スプレッドシートから今日のゲーム別時間を集計 | `_init_components()`, `_scan_games()` |
 | `_update_today_games_list()` | 今日プレイしたゲーム一覧をUIに反映。**日跨ぎセッションは0:00以降のみ、5分未満は除外** | `_ui_tick()` 内部 |
 | `_load_today_completed_seconds()` | 起動時に今日分の完了時間をロード | `_init_components()` 内部 |
 | `_save_window_state()` | ウィンドウ位置・サイズ・モードを保存 | `closeEvent()`, `_cycle_display_mode()` |
@@ -434,9 +449,21 @@ GUI版メインウィンドウ。
 | `_set_widget_visibility(widget, visible)` | ウィジェットの表示/非表示を設定 | `_apply_display_mode()` 内部 |
 | `_set_widget_with_height(widget, visible, min_height, max_height)` | ウィジェットの表示と高さ制約を設定 | `_apply_display_mode()` 内部 |
 | `mousePressEvent(event)` | クリックで表示モードをトグル | Qt イベント |
+| `_should_cycle_display_mode(event)` | 表示モード切り替え対象クリックかを判定 | `mousePressEvent()` 内部 |
 | `_cycle_display_mode()` | 表示モードを循環 | `mousePressEvent()` 内部 |
 | `resizeEvent(event)` | リサイズ時にサイズを記録 | Qt イベント |
+| `_record_current_mode_size()` | 現在モードのサイズを `mode_sizes` に記録 | `resizeEvent()` 内部 |
 | `_ui_tick()` | UI高速更新（0.1秒間隔） | タイマー |
+
+#### `MainWindow` 内部コントローラー
+
+| クラス | 役割 |
+|--------|------|
+| `MainWindowUiController` | `active/session/today/windows` のUI更新を担当 |
+| `MainWindowDisplayController` | `min/mid/max` 表示モードの可視性・サイズ制約・ジオメトリ適用を担当 |
+| `MainWindowStateController` | ウィンドウ状態の読み書きとリサイズ記録を担当 |
+| `MainWindowLoopController` | タイマー生成と `scan_tick/ui_tick` 実行フローを担当 |
+| `MainWindowBootstrapper` | 初期化依存構築と初期統計ロードを担当（失敗時は `MainWindowBootstrapError`） |
 
 ---
 

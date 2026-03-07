@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Optional, Sequence, Tuple
 
 from time_utils import GSS_DATETIME_FORMAT
+from text_utils import normalize_title
 
 
 @dataclass
@@ -18,19 +19,39 @@ class GameEntry:
     is_playing: bool = field(default=False, compare=False)
     start_time: Optional[datetime] = field(default=None, compare=False)
     inactive_since: Optional[datetime] = field(default=None, compare=False)
+    _normalized_window_title: Optional[str] = field(default=None, init=False, repr=False, compare=False)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        """Invalidate title cache when `window_title` changes."""
+        object.__setattr__(self, name, value)
+        if name == "window_title":
+            object.__setattr__(self, "_normalized_window_title", None)
+
+    def _get_normalized_window_title(self) -> str:
+        """Return cached normalized `window_title`."""
+        if self._normalized_window_title is None:
+            self._normalized_window_title = normalize_title(self.window_title)
+        return self._normalized_window_title
 
     def matches_window(self, window_title: str, browsers: Sequence[str]) -> bool:
-        """ウィンドウタイトルがこのゲームに該当するか判定."""
-        if self.window_title not in window_title:
+        """Check whether this game matches a normalized window title.
+
+        Args:
+            window_title: Normalized window title.
+            browsers: Normalized browser name list.
+        """
+        normalized_window = window_title
+        normalized_target = self._get_normalized_window_title()
+        if not normalized_target or normalized_target not in normalized_window:
             return False
 
-        is_browser = any(browser in window_title for browser in browsers)
+        is_browser = any(browser in normalized_window for browser in browsers)
 
-        # ブラウザゲームの場合は常にマッチ
+        # Browser games should match browser windows as well.
         if self.is_browser_game:
             return True
 
-        # 通常ゲームの場合はブラウザ以外でマッチ
+        # Non-browser games are ignored when the title is a browser window.
         return not is_browser
 
     def start_session(self) -> None:

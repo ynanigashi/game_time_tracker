@@ -1,4 +1,6 @@
-﻿import configparser
+# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false, reportOptionalMemberAccess=false
+
+import configparser
 import sys
 import types
 import unittest
@@ -9,25 +11,115 @@ import tempfile
 import os
 
 # Stub external dependencies before importing the app.
-fake_gspread = types.SimpleNamespace(
-    service_account=lambda filename=None: None,
-    exceptions=types.SimpleNamespace(
-        APIError=Exception,
-        SpreadsheetNotFound=type('SpreadsheetNotFound', (Exception,), {}),
-        WorksheetNotFound=type('WorksheetNotFound', (Exception,), {}),
+class _FakeQWidget:
+    def closeEvent(self, event) -> None:
+        pass
+
+    def resizeEvent(self, event) -> None:
+        pass
+
+    def mousePressEvent(self, event) -> None:
+        pass
+
+
+class _FakeQMouseEvent:
+    def button(self):
+        return None
+
+
+class _FakeQTableWidgetItem:
+    def __init__(self, text="") -> None:
+        self._text = "" if text is None else str(text)
+
+    def text(self) -> str:
+        return self._text
+
+    def setText(self, text) -> None:
+        self._text = "" if text is None else str(text)
+
+
+fake_pyside6_core = types.SimpleNamespace(
+    QTimer=type("QTimer", (), {}),
+    Qt=types.SimpleNamespace(
+        MouseButton=types.SimpleNamespace(LeftButton=1, RightButton=2)
     ),
 )
-fake_pygetwindow = types.SimpleNamespace(
-    getAllWindows=lambda: [],
-    getActiveWindow=lambda: None,
+fake_pyside6_gui = types.SimpleNamespace(
+    QCloseEvent=type("QCloseEvent", (), {}),
+    QMouseEvent=_FakeQMouseEvent,
+    QResizeEvent=type("QResizeEvent", (), {}),
 )
-sys.modules.setdefault("gspread", fake_gspread)
-sys.modules.setdefault("pygetwindow", fake_pygetwindow)
+fake_pyside6_widgets = types.SimpleNamespace(
+    QApplication=type("QApplication", (), {}),
+    QWidget=_FakeQWidget,
+    QTableWidgetItem=_FakeQTableWidgetItem,
+    QLabel=type("QLabel", (), {}),
+    QListWidget=type("QListWidget", (), {}),
+    QVBoxLayout=type("QVBoxLayout", (), {}),
+    QHBoxLayout=type("QHBoxLayout", (), {}),
+    QTableWidget=type("QTableWidget", (), {}),
+    QHeaderView=type("QHeaderView", (), {}),
+)
+
+sys.modules["PySide6"] = types.ModuleType("PySide6")
+sys.modules["PySide6.QtCore"] = types.ModuleType("PySide6.QtCore")
+sys.modules["PySide6.QtGui"] = types.ModuleType("PySide6.QtGui")
+sys.modules["PySide6.QtWidgets"] = types.ModuleType("PySide6.QtWidgets")
+
+for attr, val in vars(fake_pyside6_core).items():
+    setattr(sys.modules["PySide6.QtCore"], attr, val)
+for attr, val in vars(fake_pyside6_gui).items():
+    setattr(sys.modules["PySide6.QtGui"], attr, val)
+for attr, val in vars(fake_pyside6_widgets).items():
+    setattr(sys.modules["PySide6.QtWidgets"], attr, val)
+
+_existing_gspread = sys.modules.get("gspread")
+if _existing_gspread is None:
+    fake_gspread = types.SimpleNamespace(
+        service_account=lambda filename=None: None,
+        exceptions=types.SimpleNamespace(
+            APIError=type("APIError", (Exception,), {}),
+            SpreadsheetNotFound=type("SpreadsheetNotFound", (Exception,), {}),
+            WorksheetNotFound=type("WorksheetNotFound", (Exception,), {}),
+        ),
+    )
+    sys.modules["gspread"] = fake_gspread
+else:
+    fake_gspread = _existing_gspread
+    if not hasattr(fake_gspread, "service_account"):
+        fake_gspread.service_account = lambda filename=None: None
+    if not hasattr(fake_gspread, "exceptions") or fake_gspread.exceptions is None:
+        fake_gspread.exceptions = types.SimpleNamespace()
+    if not hasattr(fake_gspread.exceptions, "APIError"):
+        fake_gspread.exceptions.APIError = type("APIError", (Exception,), {})
+    if not hasattr(fake_gspread.exceptions, "SpreadsheetNotFound"):
+        fake_gspread.exceptions.SpreadsheetNotFound = type(
+            "SpreadsheetNotFound", (Exception,), {}
+        )
+    if not hasattr(fake_gspread.exceptions, "WorksheetNotFound"):
+        fake_gspread.exceptions.WorksheetNotFound = type(
+            "WorksheetNotFound", (Exception,), {}
+        )
+
+_existing_pygetwindow = sys.modules.get("pygetwindow")
+if _existing_pygetwindow is None:
+    fake_pygetwindow = types.SimpleNamespace(
+        getAllWindows=lambda: [],
+        getActiveWindow=lambda: None,
+    )
+    sys.modules["pygetwindow"] = fake_pygetwindow
+else:
+    fake_pygetwindow = _existing_pygetwindow
+    if not hasattr(fake_pygetwindow, "getAllWindows"):
+        fake_pygetwindow.getAllWindows = lambda: []
+    if not hasattr(fake_pygetwindow, "getActiveWindow"):
+        fake_pygetwindow.getActiveWindow = lambda: None
 
 import main
 import models
 import services
 import time_utils
+from text_utils import normalize_title
 import window_state
 
 # servicesモジュールにpygetwindowのスタブを設定
@@ -92,11 +184,72 @@ class FakeLogHandler:
 class TestGameEntry(unittest.TestCase):
     def test_matches_window_browser_game_allows_browser_titles(self):
         game = models.GameEntry(game_title="BrowserGame", window_title="BrowserGame", is_browser_game=True)
-        self.assertTrue(game.matches_window("BrowserGame - Chrome", browsers=["Chrome"]))
+        self.assertTrue(
+            game.matches_window(
+                normalize_title("BrowserGame - Chrome"),
+                browsers=[normalize_title("Chrome")],
+            )
+        )
+
+    def test_matches_window_uses_normalized_inputs(self):
+        game = models.GameEntry(
+            game_title="PlayGo",
+            window_title="PlayGo.gg – Play Go Online",
+            is_browser_game=True,
+        )
+        title = "PLAYGO.GG - PLAY GO ONLINE - GOOGLE CHROME"
+        self.assertTrue(
+            game.matches_window(
+                normalize_title(title),
+                browsers=[normalize_title("Google Chrome")],
+            )
+        )
 
     def test_matches_window_normal_game_excludes_browsers(self):
         game = models.GameEntry(game_title="NormalGame", window_title="NormalGame", is_browser_game=False)
-        self.assertFalse(game.matches_window("NormalGame - Chrome", browsers=["Chrome"]))
+        self.assertFalse(
+            game.matches_window(
+                normalize_title("NormalGame - Chrome"),
+                browsers=[normalize_title("Chrome")],
+            )
+        )
+
+    def test_window_title_change_invalidates_normalized_cache(self):
+        game = models.GameEntry(
+            game_title="WebGame",
+            window_title="OldTitle",
+            is_browser_game=True,
+        )
+
+        # Warm cache.
+        self.assertTrue(
+            game.matches_window(
+                normalize_title("OldTitle - Chrome"),
+                browsers=[normalize_title("Chrome")],
+            )
+        )
+        self.assertIsNotNone(game._normalized_window_title)
+
+        game.window_title = "NewTitle"
+
+        self.assertTrue(
+            game.matches_window(
+                normalize_title("NewTitle - Chrome"),
+                browsers=[normalize_title("Chrome")],
+            )
+        )
+        self.assertFalse(
+            game.matches_window(
+                normalize_title("OldTitle - Chrome"),
+                browsers=[normalize_title("Chrome")],
+            )
+        )
+
+
+class TestNormalizeTitle(unittest.TestCase):
+    def test_normalizes_case_dash_and_whitespace(self):
+        value = "PlayGo.gg –  Play Go Online"
+        self.assertEqual(normalize_title(value), "playgo.gg - play go online")
 
 
 class TestSessionRecorder(unittest.TestCase):
@@ -616,12 +769,16 @@ class TestGameEntryMatchesWindow(unittest.TestCase):
     def test_partial_match_in_title(self):
         """window_titleがウィンドウタイトルの一部として含まれる場合にマッチ."""
         game = models.GameEntry(game_title="Terraria", window_title="Terraria")
-        self.assertTrue(game.matches_window("Terraria: Official Server", browsers=[]))
+        self.assertTrue(
+            game.matches_window(normalize_title("Terraria: Official Server"), browsers=[])
+        )
 
     def test_no_match_if_not_contained(self):
         """window_titleが含まれない場合はマッチしない."""
         game = models.GameEntry(game_title="Terraria", window_title="Terraria")
-        self.assertFalse(game.matches_window("Terra - Some Other App", browsers=[]))
+        self.assertFalse(
+            game.matches_window(normalize_title("Terra - Some Other App"), browsers=[])
+        )
 
     def test_browser_game_matches_browser_title(self):
         """ブラウザゲームはブラウザタイトルでもマッチ."""
@@ -630,7 +787,12 @@ class TestGameEntryMatchesWindow(unittest.TestCase):
             window_title="WebGame",
             is_browser_game=True,
         )
-        self.assertTrue(game.matches_window("WebGame - Google Chrome", browsers=["Google Chrome"]))
+        self.assertTrue(
+            game.matches_window(
+                normalize_title("WebGame - Google Chrome"),
+                browsers=[normalize_title("Google Chrome")],
+            )
+        )
 
     def test_non_browser_game_rejects_browser_title(self):
         """通常ゲームはブラウザタイトルを拒否."""
@@ -639,7 +801,12 @@ class TestGameEntryMatchesWindow(unittest.TestCase):
             window_title="SteamGame",
             is_browser_game=False,
         )
-        self.assertFalse(game.matches_window("SteamGame - Google Chrome", browsers=["Google Chrome"]))
+        self.assertFalse(
+            game.matches_window(
+                normalize_title("SteamGame - Google Chrome"),
+                browsers=[normalize_title("Google Chrome")],
+            )
+        )
 
     def test_non_browser_game_matches_non_browser_title(self):
         """通常ゲームは非ブラウザタイトルでマッチ."""
@@ -648,7 +815,12 @@ class TestGameEntryMatchesWindow(unittest.TestCase):
             window_title="SteamGame",
             is_browser_game=False,
         )
-        self.assertTrue(game.matches_window("SteamGame v1.2.3", browsers=["Google Chrome"]))
+        self.assertTrue(
+            game.matches_window(
+                normalize_title("SteamGame v1.2.3"),
+                browsers=[normalize_title("Google Chrome")],
+            )
+        )
 
 
 class TestParseBool(unittest.TestCase):
@@ -1064,7 +1236,12 @@ class TestUpdateGameStates(unittest.TestCase):
         foreground_title = None
         
         # ウィンドウ消失を検出
-        window_exists = any(game.matches_window(title, browsers) for title in window_titles)
+        normalized_titles = [normalize_title(title) for title in window_titles]
+        normalized_browsers = [normalize_title(browser) for browser in browsers]
+        window_exists = any(
+            game.matches_window(title, normalized_browsers)
+            for title in normalized_titles
+        )
         self.assertFalse(window_exists)
         
         # record()を呼ぶ
@@ -1338,15 +1515,21 @@ class TestUpdateGameStatesIntegration(unittest.TestCase):
         """_update_game_statesのロジックを再現して実行."""
         active_games = []
         inactive_games = []
+
+        normalized_titles = [normalize_title(title) for title in window_titles]
+        normalized_foreground = (
+            normalize_title(foreground_title) if foreground_title else None
+        )
+        normalized_browsers = [normalize_title(browser) for browser in self.browsers]
         
         for game in games:
             window_exists = any(
-                game.matches_window(title, self.browsers)
-                for title in window_titles
+                game.matches_window(title, normalized_browsers)
+                for title in normalized_titles
             )
             is_foreground = (
-                foreground_title is not None
-                and game.matches_window(foreground_title, self.browsers)
+                normalized_foreground is not None
+                and game.matches_window(normalized_foreground, normalized_browsers)
             )
             
             if not game.is_playing:
@@ -4727,6 +4910,84 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
         self.assertEqual(tracker.daily_stats, mock_daily_stats)
         self.assertEqual(tracker.browsers, ['Chrome', 'Firefox'])
         self.assertEqual(tracker.inactive_timeout_minutes, 5)
+        self.assertEqual(tracker._normalized_browsers, ['chrome', 'firefox'])
+
+    def test_normalize_scan_inputs(self):
+        """scan入力の正規化が1箇所で行われる."""
+        from services import GameStateTracker, SessionRecorder, DailyStatsTracker
+
+        mock_recorder = MagicMock(spec=SessionRecorder)
+        mock_daily_stats = MagicMock(spec=DailyStatsTracker)
+        tracker = GameStateTracker(
+            recorder=mock_recorder,
+            daily_stats=mock_daily_stats,
+            browsers=['Google Chrome'],
+            inactive_timeout_minutes=5
+        )
+
+        window_titles = ['PlayGo.gg – Play Go Online - Google Chrome']
+        foreground_title = 'PLAYGO.GG - PLAY GO ONLINE - GOOGLE CHROME'
+        normalized_titles, normalized_foreground = tracker._normalize_scan_inputs(
+            window_titles, foreground_title
+        )
+
+        self.assertEqual(normalized_titles, ['playgo.gg - play go online - google chrome'])
+        self.assertEqual(normalized_foreground, 'playgo.gg - play go online - google chrome')
+
+    def test_set_browsers_updates_normalized_cache(self):
+        """set_browsers()で正規化キャッシュが同期更新される."""
+        from services import GameStateTracker, SessionRecorder, DailyStatsTracker
+
+        mock_recorder = MagicMock(spec=SessionRecorder)
+        mock_daily_stats = MagicMock(spec=DailyStatsTracker)
+        tracker = GameStateTracker(
+            recorder=mock_recorder,
+            daily_stats=mock_daily_stats,
+            browsers=['Chrome'],
+            inactive_timeout_minutes=5
+        )
+
+        tracker.set_browsers(['Microsoft Edge', 'Google Chrome'])
+
+        self.assertEqual(tracker.browsers, ['Microsoft Edge', 'Google Chrome'])
+        self.assertEqual(tracker._normalized_browsers, ['microsoft edge', 'google chrome'])
+
+    def test_set_browsers_skips_empty_normalized_values(self):
+        """set_browsers()は正規化後に空になる値をキャッシュから除外する."""
+        from services import GameStateTracker, SessionRecorder, DailyStatsTracker
+
+        mock_recorder = MagicMock(spec=SessionRecorder)
+        mock_daily_stats = MagicMock(spec=DailyStatsTracker)
+        tracker = GameStateTracker(
+            recorder=mock_recorder,
+            daily_stats=mock_daily_stats,
+            browsers=['Chrome'],
+            inactive_timeout_minutes=5
+        )
+
+        tracker.set_browsers(['', '   ', 'Google Chrome'])
+
+        self.assertEqual(tracker.browsers, ['', '   ', 'Google Chrome'])
+        self.assertEqual(tracker._normalized_browsers, ['google chrome'])
+
+    def test_browsers_property_returns_copy(self):
+        """browsersプロパティの外部変更は内部状態に影響しない."""
+        from services import GameStateTracker, SessionRecorder, DailyStatsTracker
+
+        mock_recorder = MagicMock(spec=SessionRecorder)
+        mock_daily_stats = MagicMock(spec=DailyStatsTracker)
+        tracker = GameStateTracker(
+            recorder=mock_recorder,
+            daily_stats=mock_daily_stats,
+            browsers=['Chrome'],
+            inactive_timeout_minutes=5
+        )
+
+        browsers = tracker.browsers
+        browsers.append('Edge')
+
+        self.assertEqual(tracker.browsers, ['Chrome'])
+        self.assertEqual(tracker._normalized_browsers, ['chrome'])
 
     def test_scan_result_dataclass(self):
         """ScanResultデータクラスが正しく動作する."""
@@ -4777,3 +5038,5 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
