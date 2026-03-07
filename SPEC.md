@@ -170,9 +170,10 @@ classDiagram
         class GspreadService {
             +cert_file_path: str
             +sheet_key: str
-            -gc: Client
-            -sheet: Worksheet
+            +sheet_gid: Optional~int~
+            -_sheet: Worksheet
             -_connect()
+            +sheet: Worksheet
             +get_all_records() List~Dict~
             +append_row(values) bool
         }
@@ -183,11 +184,12 @@ classDiagram
             +gspread_service: GspreadService
             +records: List~Dict~
             +index: int
+            +__init__(config: LogHandlerConfig)
             +get_all_records()
             +get_cached_records()
             +get_today_stats() Tuple
             +save_record()
-            +format_datetime_to_gss_style()
+            +format_datetime_to_gss_style()$
             +get_and_increment_index()
         }
     }
@@ -242,6 +244,7 @@ flowchart TB
     Spreadsheet --> GspreadService
 
     GspreadService --> LogHandler
+    GspreadService --> GameInfoLoader
     ConfigLoader --> LogHandler
     ConfigLoader --> GameInfoLoader
     ConfigLoader --> WindowScanner
@@ -343,12 +346,12 @@ sequenceDiagram
 | `recorded_seconds` | この周期で記録された秒数 |
 
 #### `GameInfoLoader`
-スプレッドシートからゲーム情報を読み込む。
+スプレッドシートからゲーム情報を読み込む。内部で`GspreadService`を生成し、`sheet_gid`指定で対応ワークシートに接続する。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
 | `__init__(config)` | Config（dataclass）を受け取って初期化 | `MainWindow._init_components()` |
-| `load()` | ゲーム情報リストを取得 | `MainWindow._init_components()` |
+| `load()` | ゲーム情報リストを取得。内部で`GspreadService(cert_file_path, sheet_key, sheet_gid)`を使用 | `MainWindow._init_components()` |
 | `_record_to_entry(record)` | スプレッドシートのレコードをGameEntryに変換（`models.parse_bool()`を使用） | `load()` 内部 |
 
 #### `WindowScanner`
@@ -539,9 +542,10 @@ Google Spreadsheet操作を抽象化するサービスクラス。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `__init__(cert_file_path, sheet_key)` | 認証情報とシートキーを設定 | `LogHandler.__init__()` |
-| `_connect()` | スプレッドシートに接続（遅延初期化） | `get_all_records()`, `append_row()` |
-| `get_all_records() -> List[Dict]` | 全レコードを取得 | `LogHandler.get_all_records()` |
+| `__init__(cert_file_path, sheet_key, *, sheet_gid=None)` | 認証情報とシートキーを設定し、スプレッドシートに接続。`sheet_gid`指定時は対応ワークシート、省略時はsheet1に接続 | `LogHandler.__init__()`, `GameInfoLoader.load()` |
+| `_connect()` | スプレッドシートに接続。`sheet_gid`がある場合は`get_worksheet_by_id()`で接続 | `__init__()` 内部 |
+| `sheet` | ワークシートプロパティ。未接続時は`RuntimeError`をスロー | 内部 |
+| `get_all_records() -> List[Dict]` | 全レコードを取得 | `LogHandler.get_all_records()`, `GameInfoLoader.load()` |
 | `append_row(values) -> bool` | 行を追加。成功時True、失敗時False | `LogHandler.save_record()` |
 
 ---
@@ -554,7 +558,7 @@ Google Spreadsheet操作を抽象化するサービスクラス。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `__init__()` | `ConfigLoader`で設定を取得し、`GspreadService`を初期化。全レコードをキャッシュ（`self.records`）に保存。**接続失敗時は例外をスロー** | `SessionRecorder.__init__()` |
+| `__init__(config: LogHandlerConfig)` | `LogHandlerConfig`（認証情報パスとシートキー）を受け取り、`GspreadService`を初期化。全レコードをキャッシュ（`self.records`）に保存。**接続失敗時は例外をスロー** | `MainWindowBootstrapper.bootstrap()` |
 | `get_all_records()` | `GspreadService`経由で全レコードを取得（初期化時のみ使用） | `__init__()` 内部 |
 | `get_cached_records()` | キャッシュされたレコード（`self.records`）を返す。API呼び出しなし | `get_today_stats()` 内部 |
 | `get_today_stats() -> Tuple[Dict[str, float], float]` | 今日のゲーム別プレイ時間と合計秒数を計算して返す。キャッシュのみ使用、API呼び出しなし | `MainWindow._load_today_game_minutes()`, `MainWindow._load_today_completed_seconds()` |
@@ -888,6 +892,15 @@ game_time_tracker.bat
   - Google スプレッドシートへ自動保存
 
 ## 開発
-- テスト: `python -m unittest`
+- テスト: `python -m unittest discover`
+  - `test_stubs.py` - 共通テストスタブ（PySide6/gspread/pygetwindowのフェイク、FakeLogHandler）
+  - `test_main.py` - MainWindow/GUI関連テスト
+  - `test_models.py` - models.pyのテスト
+  - `test_services.py` - services.pyのテスト
+  - `test_time_utils.py` - time_utils.pyのテスト
+  - `test_config.py` - config_loader.pyのテスト
+  - `test_log_handler.py` - log_handler.py/gspread_service.pyのテスト
+  - `test_window_state.py` - window_state.pyのテスト
+  - `test_gui.py` - DailyStatsTracker/format_hmsのテスト
 - ポーリング間隔・最小記録時間: `main.py` の `POLL_INTERVAL_SECONDS`, `MIN_PLAY_MINUTES` で調整。
 - 対応ブラウザ・除外ウィンドウ: `config.ini` の `[WINDOW_SCAN]` または `config_loader.DEFAULT_BROWSERS/DEFAULT_EXCLUDED_TITLES` で設定。

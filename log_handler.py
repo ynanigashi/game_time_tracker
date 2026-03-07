@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Tuple
 
-from config_loader import ConfigLoader
+from config_loader import LogHandlerConfig
 from gspread_service import GspreadService
 
 logger = logging.getLogger(__name__)
@@ -19,18 +19,20 @@ class LogHandler:
     records: List[Dict[str, Any]]
     index: int
 
-    def __init__(self) -> None:
+    def __init__(self, config: LogHandlerConfig) -> None:
         """スプレッドシートに接続し、全レコードをキャッシュに保存.
         
+        Args:
+            config: ログハンドラー設定（認証情報パスとシートキー）
+
         Raises:
             FileNotFoundError: 認証情報ファイルが存在しない場合
             gspread.exceptions.SpreadsheetNotFound: スプレッドシートが見つからない場合
             gspread.exceptions.APIError: APIエラーが発生した場合
         """
-        config = ConfigLoader().load()
         self.gspread_service = GspreadService(
-            cert_file_path=config.log_handler.cert_file_path,
-            sheet_key=config.log_handler.sheet_key,
+            cert_file_path=config.cert_file_path,
+            sheet_key=config.sheet_key,
         )
         self.records = self.get_all_records()
         self.index = len(self.records)
@@ -44,7 +46,8 @@ class LogHandler:
         self.index += 1
         return self.index
 
-    def format_datetime_to_gss_style(self, dt: datetime) -> str:
+    @staticmethod
+    def format_datetime_to_gss_style(dt: datetime) -> str:
         """datetimeをスプレッドシート形式に変換."""
         return dt.strftime("%Y/%m/%d %H:%M:%S")
 

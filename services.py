@@ -6,10 +6,10 @@ from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-import gspread
 import pygetwindow as gw
 
 from config_loader import Config
+from gspread_service import GspreadService
 from log_handler import LogHandler
 from models import GameEntry, ParsedRecord, parse_bool, parse_record
 from text_utils import normalize_title
@@ -321,26 +321,14 @@ class GameInfoLoader:
     def load(self) -> List[GameEntry]:
         """ゲーム情報をスプレッドシートから読み込む."""
         try:
-            gc = gspread.service_account(
-                filename=Path(self.config.log_handler.cert_file_path)
+            gspread_service = GspreadService(
+                cert_file_path=self.config.log_handler.cert_file_path,
+                sheet_key=self.config.game_info.sheet_key,
+                sheet_gid=self.config.game_info.sheet_gid,
             )
-            sheet = gc.open_by_key(
-                self.config.game_info.sheet_key
-            ).get_worksheet_by_id(
-                self.config.game_info.sheet_gid
-            )
-            records = sheet.get_all_records()
+            records = gspread_service.get_all_records()
         except FileNotFoundError as e:
             logger.error(f'認証情報ファイルが見つかりません: {e}')
-            return []
-        except gspread.exceptions.SpreadsheetNotFound:
-            logger.error('スプレッドシートが見つかりません。sheet_keyを確認してください。')
-            return []
-        except gspread.exceptions.WorksheetNotFound:
-            logger.error('ワークシートが見つかりません。sheet_gidを確認してください。')
-            return []
-        except gspread.exceptions.APIError as e:
-            logger.error(f'スプレッドシートAPIエラー: {e}')
             return []
         except Exception as e:
             logger.error(f'ゲーム情報の読み込みに失敗しました: {e}')

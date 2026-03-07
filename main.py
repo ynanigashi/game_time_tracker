@@ -7,8 +7,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
 
-import gspread
-
 # ロギング設定
 logging.basicConfig(
     level=logging.INFO,
@@ -386,7 +384,7 @@ class MainWindowBootstrapper:
                 )
             )
 
-            log_handler = LogHandler()
+            log_handler = LogHandler(config.log_handler)
             recorder = SessionRecorder(
                 log_handler=log_handler,
                 min_play_minutes=self.min_play_minutes,
@@ -416,16 +414,6 @@ class MainWindowBootstrapper:
             raise MainWindowBootstrapError(
                 '認証情報ファイルが見つかりません（config.ini を確認）',
                 f'ログ用認証情報ファイルが見つかりません: {e}',
-            ) from e
-        except gspread.exceptions.SpreadsheetNotFound as e:
-            raise MainWindowBootstrapError(
-                'ログ用スプレッドシートが見つかりません',
-                'ログ用スプレッドシートが見つかりません。sheet_keyを確認してください。',
-            ) from e
-        except gspread.exceptions.APIError as e:
-            raise MainWindowBootstrapError(
-                'スプレッドシート接続エラー',
-                f'ログ用スプレッドシートAPIエラー: {e}',
             ) from e
         except Exception as e:
             raise MainWindowBootstrapError(

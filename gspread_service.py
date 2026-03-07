@@ -21,27 +21,34 @@ class GspreadService:
     例外処理を統一する。
     """
 
-    def __init__(self, cert_file_path: str, sheet_key: str) -> None:
+    def __init__(self, cert_file_path: str, sheet_key: str, *, sheet_gid: Optional[int] = None) -> None:
         """Google Spreadsheetに接続.
         
         Args:
             cert_file_path: サービスアカウント認証情報ファイルのパス
             sheet_key: スプレッドシートのキー
+            sheet_gid: ワークシートのGID（省略時はsheet1に接続）
         
         Raises:
             FileNotFoundError: 認証情報ファイルが存在しない場合
             gspread.exceptions.SpreadsheetNotFound: スプレッドシートが見つからない場合
+            gspread.exceptions.WorksheetNotFound: 指定したGIDのワークシートが見つからない場合
             gspread.exceptions.APIError: APIエラーが発生した場合
         """
         self.cert_file_path = cert_file_path
         self.sheet_key = sheet_key
+        self.sheet_gid = sheet_gid
         self._sheet: Optional["Worksheet"] = None
         self._connect()
     
     def _connect(self) -> None:
         """スプレッドシートに接続."""
         gc = gspread.service_account(filename=Path(self.cert_file_path))
-        self._sheet = gc.open_by_key(self.sheet_key).sheet1
+        spreadsheet = gc.open_by_key(self.sheet_key)
+        if self.sheet_gid is not None:
+            self._sheet = spreadsheet.get_worksheet_by_id(self.sheet_gid)
+        else:
+            self._sheet = spreadsheet.sheet1
     
     @property
     def sheet(self) -> "Worksheet":

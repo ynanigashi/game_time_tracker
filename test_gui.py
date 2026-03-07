@@ -1,96 +1,11 @@
 """GUIモジュールのテスト（PySide6を必要としないユニットテスト）."""
 
-import sys
-import types
 import unittest
 from datetime import date
-from typing import Any
 
-# Stub external dependencies before importing gui module
-# SimpleNamespaceを使って動的属性追加の型エラーを回避
-class _FakeQWidget:
-    def closeEvent(self, event) -> None:
-        pass
-
-    def resizeEvent(self, event) -> None:
-        pass
-
-    def mousePressEvent(self, event) -> None:
-        pass
-
-
-class _FakeQMouseEvent:
-    def button(self):
-        return None
-
-
-class _FakeQTableWidgetItem:
-    def __init__(self, text: Any = "") -> None:
-        self._text = "" if text is None else str(text)
-
-    def text(self) -> str:
-        return self._text
-
-    def setText(self, text: Any) -> None:
-        self._text = "" if text is None else str(text)
-
-
-fake_pyside6_core: Any = types.SimpleNamespace(
-    QTimer=type("QTimer", (), {}),
-    Qt=types.SimpleNamespace(
-        MouseButton=types.SimpleNamespace(LeftButton=1, RightButton=2)
-    ),
-)
-
-fake_pyside6_gui: Any = types.SimpleNamespace(
-    QCloseEvent=type("QCloseEvent", (), {}),
-    QMouseEvent=_FakeQMouseEvent,
-    QResizeEvent=type("QResizeEvent", (), {}),
-)
-
-fake_pyside6_widgets: Any = types.SimpleNamespace(
-    QApplication=type("QApplication", (), {}),
-    QWidget=_FakeQWidget,
-    QTableWidgetItem=_FakeQTableWidgetItem,
-    QLabel=type("QLabel", (), {}),
-    QListWidget=type("QListWidget", (), {}),
-    QVBoxLayout=type("QVBoxLayout", (), {}),
-    QHBoxLayout=type("QHBoxLayout", (), {}),
-    QTableWidget=type("QTableWidget", (), {}),
-    QHeaderView=type("QHeaderView", (), {}),
-)
-
-fake_gspread: Any = types.SimpleNamespace(
-    service_account=lambda filename=None: None,
-    exceptions=types.SimpleNamespace(
-        APIError=type("APIError", (Exception,), {}),
-        SpreadsheetNotFound=type("SpreadsheetNotFound", (Exception,), {}),
-        WorksheetNotFound=type("WorksheetNotFound", (Exception,), {}),
-    ),
-)
-fake_pygetwindow: Any = types.SimpleNamespace(
-    getAllWindows=lambda: [],
-    getActiveWindow=lambda: None,
-)
-
-sys.modules.setdefault("PySide6", types.ModuleType("PySide6"))
-sys.modules.setdefault("PySide6.QtCore", types.ModuleType("PySide6.QtCore"))
-sys.modules.setdefault("PySide6.QtGui", types.ModuleType("PySide6.QtGui"))
-sys.modules.setdefault("PySide6.QtWidgets", types.ModuleType("PySide6.QtWidgets"))
-sys.modules.setdefault("gspread", types.ModuleType("gspread"))
-sys.modules.setdefault("pygetwindow", types.ModuleType("pygetwindow"))
-
-# ModuleTypeに属性を設定
-for attr, val in vars(fake_pyside6_core).items():
-    setattr(sys.modules["PySide6.QtCore"], attr, val)
-for attr, val in vars(fake_pyside6_gui).items():
-    setattr(sys.modules["PySide6.QtGui"], attr, val)
-for attr, val in vars(fake_pyside6_widgets).items():
-    setattr(sys.modules["PySide6.QtWidgets"], attr, val)
-for attr, val in vars(fake_gspread).items():
-    setattr(sys.modules["gspread"], attr, val)
-for attr, val in vars(fake_pygetwindow).items():
-    setattr(sys.modules["pygetwindow"], attr, val)
+# 共通スタブをインストール（他モジュール import 前に実行）
+from test_stubs import install_stubs
+install_stubs()
 
 # Now import the gui module
 from main import DailyStatsTracker
