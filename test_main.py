@@ -2483,5 +2483,226 @@ class TestUpdateSessionTimesStartTimeNone(unittest.TestCase):
         self.assertTrue(call_arg.startswith("00:00:00"))
 
 
+class TestOverlayMethods(unittest.TestCase):
+    """オーバーレイ更新/終了メソッドのテスト."""
+
+    def _create_mock_main_window(self):
+        with patch.object(main.MainWindow, '__init__', lambda self: None):
+            window = main.MainWindow()
+        return window
+
+    def test_refresh_overlay_time_updates_text(self):
+        """_refresh_overlay_timeはtoday_time_displayの値をオーバーレイへ反映."""
+        window = self._create_mock_main_window()
+        window.overlay_window = MagicMock()
+        window.w = MagicMock()
+        window.w.today_time_display.text.return_value = "01:23:45.6"
+
+        window._refresh_overlay_time()
+
+        window.overlay_window.set_today_text.assert_called_once_with("01:23:45.6")
+
+    def test_close_overlay_closes_and_clears_reference(self):
+        """_close_overlayはcloseを呼び、参照をNoneにする."""
+        window = self._create_mock_main_window()
+        overlay = MagicMock()
+        window.overlay_window = overlay
+
+        window._close_overlay()
+
+        overlay.close.assert_called_once()
+        self.assertIsNone(window.overlay_window)
+
+    def test_sync_overlay_visibility_shows_when_window_is_background(self):
+        """_sync_overlay_visibilityは背面時にshowを呼ぶ."""
+        window = self._create_mock_main_window()
+        overlay = MagicMock()
+        overlay.isVisible.return_value = False
+        window.overlay_window = overlay
+        window._should_show_overlay = MagicMock(return_value=True)
+
+        window._sync_overlay_visibility()
+
+        overlay.show.assert_called_once()
+        overlay.hide.assert_not_called()
+
+    def test_sync_overlay_visibility_hides_when_window_is_foreground(self):
+        """_sync_overlay_visibilityは前面時にhideを呼ぶ."""
+        window = self._create_mock_main_window()
+        overlay = MagicMock()
+        overlay.isVisible.return_value = False
+        window.overlay_window = overlay
+        window._should_show_overlay = MagicMock(return_value=False)
+
+        window._sync_overlay_visibility()
+
+        overlay.hide.assert_called_once()
+        overlay.show.assert_not_called()
+
+    def test_sync_overlay_visibility_temporarily_hides_visible_overlay_before_check(self):
+        """判定前に表示中オーバーレイを一度隠してヒットテスト誤検出を避ける."""
+        window = self._create_mock_main_window()
+        overlay = MagicMock()
+        overlay.isVisible.return_value = True
+        window.overlay_window = overlay
+        window._should_show_overlay = MagicMock(return_value=True)
+
+        window._sync_overlay_visibility()
+
+        self.assertGreaterEqual(overlay.hide.call_count, 1)
+        overlay.show.assert_called_once()
+
+    def test_sync_overlay_geometry_matches_today_time_display(self):
+        """_sync_overlay_geometryはtoday_time_display位置とサイズへ追従."""
+        window = self._create_mock_main_window()
+        overlay = MagicMock()
+        window.overlay_window = overlay
+        window.w = MagicMock()
+
+        point = MagicMock()
+        point.x.return_value = 111
+        point.y.return_value = 222
+        rect = MagicMock()
+        rect.topLeft.return_value = object()
+
+        target = MagicMock()
+        target.rect.return_value = rect
+        target.mapToGlobal.return_value = point
+        target.width.return_value = 333
+        target.height.return_value = 44
+        window.w.today_time_display = target
+
+        window._sync_overlay_geometry()
+
+        overlay.setGeometry.assert_called_once_with(111, 222, 333, 44)
+
+    def test_should_show_overlay_returns_false_when_not_covered(self):
+        """非アクティブでも重なっていなければオーバーレイは表示しない."""
+        window = self._create_mock_main_window()
+        window.isMinimized = MagicMock(return_value=False)
+        window.isVisible = MagicMock(return_value=True)
+        window.isActiveWindow = MagicMock(return_value=False)
+        window._is_today_display_covered_by_foreground_window = MagicMock(return_value=False)
+
+        result = window._should_show_overlay()
+
+        self.assertFalse(result)
+
+    def test_should_show_overlay_returns_true_when_covered(self):
+        """非アクティブかつ重なっている場合のみ表示する."""
+        window = self._create_mock_main_window()
+        window.isMinimized = MagicMock(return_value=False)
+        window.isVisible = MagicMock(return_value=True)
+        window.isActiveWindow = MagicMock(return_value=False)
+        window._is_today_display_covered_by_foreground_window = MagicMock(return_value=True)
+
+        result = window._should_show_overlay()
+
+        self.assertTrue(result)
+
+    def test_covered_by_foreign_window_returns_true(self):
+        """5点のいずれかが他ウィンドウで覆われればTrue."""
+        window = self._create_mock_main_window()
+        window.w = MagicMock()
+        target = MagicMock()
+        point = MagicMock()
+        point.x.return_value = 100
+        point.y.return_value = 200
+        target.rect.return_value.topLeft.return_value = object()
+        target.mapToGlobal.return_value = point
+        target.width.return_value = 120
+        target.height.return_value = 30
+        window.w.today_time_display = target
+
+        window._is_own_window = MagicMock(return_value=False)
+        window._window_rect = MagicMock(return_value=(0, 0, 2000, 2000))
+        window._to_native_point = MagicMock(side_effect=lambda x, y: (x, y))
+        window._find_covering_foreign_window_at_point = MagicMock(side_effect=[0, 0, 999, 0, 0])
+
+        with patch.object(main, "_USER32") as mock_user32:
+            mock_user32.GetForegroundWindow.return_value = 123
+            self.assertTrue(window._is_today_display_covered_by_foreground_window())
+
+    def test_uncovered_when_top_window_is_own_returns_false(self):
+        """5点すべて未被覆ならFalse."""
+        window = self._create_mock_main_window()
+        window.w = MagicMock()
+        target = MagicMock()
+        point = MagicMock()
+        point.x.return_value = 150
+        point.y.return_value = 250
+        target.rect.return_value.topLeft.return_value = object()
+        target.mapToGlobal.return_value = point
+        target.width.return_value = 140
+        target.height.return_value = 40
+        window.w.today_time_display = target
+        window._is_own_window = MagicMock(return_value=False)
+        window._window_rect = MagicMock(return_value=(0, 0, 2000, 2000))
+        window._to_native_point = MagicMock(side_effect=lambda x, y: (x, y))
+        window._find_covering_foreign_window_at_point = MagicMock(side_effect=[0, 0, 0, 0, 0])
+
+        with patch.object(main, "_USER32") as mock_user32:
+            mock_user32.GetForegroundWindow.return_value = 123
+            self.assertFalse(window._is_today_display_covered_by_foreground_window())
+
+    def test_sample_points_from_rect_uses_25_75_offsets(self):
+        """_sample_points_from_rectは中心+25/75%点を返す."""
+        rect = (100, 200, 200, 300)  # width=100, height=100
+
+        points = main.MainWindow._sample_points_from_rect(rect)
+
+        self.assertEqual(points, [(150, 250), (125, 225), (175, 225), (125, 275), (175, 275)])
+
+    def test_find_covering_foreign_window_at_point_returns_covering_hwnd(self):
+        """_find_covering_foreign_window_at_pointは点を覆う他ウィンドウを返す."""
+        window = self._create_mock_main_window()
+        window._window_at_point = MagicMock(return_value=500)
+        window._is_own_window = MagicMock(return_value=False)
+        window._window_rect = MagicMock(return_value=(0, 0, 1000, 1000))
+        window._window_below = MagicMock(return_value=0)
+
+        result = window._find_covering_foreign_window_at_point(100, 200)
+
+        self.assertEqual(result, 500)
+
+    def test_find_covering_foreign_window_at_point_ignores_non_covering_hwnd(self):
+        """矩形が点を含まない候補ウィンドウは被りとして扱わない."""
+        window = self._create_mock_main_window()
+        window._window_at_point = MagicMock(return_value=500)
+        window._is_own_window = MagicMock(return_value=False)
+        window._window_rect = MagicMock(return_value=(0, 0, 10, 10))
+        window._window_below = MagicMock(return_value=0)
+
+        result = window._find_covering_foreign_window_at_point(100, 200)
+
+        self.assertEqual(result, 0)
+
+    def test_find_covering_foreign_window_at_point_stops_at_max_z_walk(self):
+        """_find_covering_foreign_window_at_pointはMAX_Z_WALK回で探索を打ち切る."""
+        window = self._create_mock_main_window()
+        window._window_at_point = MagicMock(return_value=111)
+        window._is_own_window = MagicMock(return_value=False)
+        window._window_below = MagicMock(return_value=111)
+        window._window_rect = MagicMock(return_value=None)
+
+        result = window._find_covering_foreign_window_at_point(100, 200)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(window._window_below.call_count, main.MAX_Z_WALK)
+
+    def test_find_covering_foreign_window_at_point_returns_zero_for_own_window(self):
+        """判定点が自ウィンドウなら被覆なしとして0を返す."""
+        window = self._create_mock_main_window()
+        window._window_at_point = MagicMock(return_value=111)
+        window._is_own_window = MagicMock(return_value=True)
+        window._window_below = MagicMock(return_value=222)
+        window._window_rect = MagicMock(return_value=(0, 0, 1000, 1000))
+
+        result = window._find_covering_foreign_window_at_point(100, 200)
+
+        self.assertEqual(result, 0)
+        window._window_below.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

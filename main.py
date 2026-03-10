@@ -1,6 +1,8 @@
 """Game Time Tracker - PySide6 GUI."""
 
+import ctypes
 import logging
+import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime
@@ -19,7 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QCloseEvent, QMouseEvent, QResizeEvent
-from PySide6.QtWidgets import QApplication, QWidget, QTableWidgetItem
+from PySide6.QtWidgets import QApplication, QLabel, QTableWidgetItem, QVBoxLayout, QWidget
 
 from config_loader import DEFAULT_BROWSERS, DEFAULT_EXCLUDED_TITLES, ConfigLoader, Config
 from gui_layout import LayoutWidgets, build_main_layout
@@ -49,7 +51,119 @@ STATE_FILE = Path("window_state.txt")
 BASE_TITLE = "Game Time Tracker"
 UI_REFRESH_INTERVAL_SECONDS = 0.1
 MAX_WIDGET_HEIGHT = 16777215  # Qt default max height
+OVERLAY_FALLBACK_WIDTH = 240
+OVERLAY_FALLBACK_HEIGHT = 40
+MAX_Z_WALK = 32
+OVERLAY_SAMPLE_RATIOS: Tuple[Tuple[float, float], ...] = (
+    (0.5, 0.5),
+    (0.25, 0.25),
+    (0.75, 0.25),
+    (0.25, 0.75),
+    (0.75, 0.75),
+)
 TDependency = TypeVar("TDependency")
+Point = Tuple[int, int]
+Rect = Tuple[int, int, int, int]
+
+_USER32 = ctypes.windll.user32 if sys.platform == "win32" else None
+
+
+class _WinPoint(ctypes.Structure):
+    _fields_ = [
+        ("x", ctypes.c_long),
+        ("y", ctypes.c_long),
+    ]
+
+
+class _WinRect(ctypes.Structure):
+    _fields_ = [
+        ("left", ctypes.c_long),
+        ("top", ctypes.c_long),
+        ("right", ctypes.c_long),
+        ("bottom", ctypes.c_long),
+    ]
+
+
+if _USER32 is not None:
+    _USER32.GetForegroundWindow.restype = ctypes.c_void_p
+    _USER32.GetWindow.restype = ctypes.c_void_p
+    _USER32.GetAncestor.restype = ctypes.c_void_p
+    _USER32.WindowFromPoint.restype = ctypes.c_void_p
+    _USER32.GetWindowRect.restype = ctypes.c_int
+    _USER32.GetWindowThreadProcessId.restype = ctypes.c_uint
+
+
+class TodayTimeOverlayWindow(QWidget):
+    """フルスクリーンゲーム中に表示する、今日の時間専用オーバーレイ."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._time_display = QLabel("00:00:00.0", self)
+        self._configure_window()
+        self._build_layout()
+        self.resize(OVERLAY_FALLBACK_WIDTH, OVERLAY_FALLBACK_HEIGHT)
+
+    @staticmethod
+    def _window_flag(flag_name: str) -> object:
+        window_type = getattr(Qt, "WindowType", None)
+        if window_type is not None and hasattr(window_type, flag_name):
+            return getattr(window_type, flag_name)
+        return getattr(Qt, flag_name, 0)
+
+    @staticmethod
+    def _widget_attribute(attribute_name: str) -> Optional[object]:
+        widget_attribute = getattr(Qt, "WidgetAttribute", None)
+        if widget_attribute is not None and hasattr(widget_attribute, attribute_name):
+            return getattr(widget_attribute, attribute_name)
+        return getattr(Qt, attribute_name, None)
+
+    def _set_widget_attribute(self, attribute_name: str, enabled: bool = True) -> None:
+        attribute = self._widget_attribute(attribute_name)
+        if attribute is not None:
+            self.setAttribute(attribute, enabled)
+
+    def _configure_window(self) -> None:
+        flags = (
+            self._window_flag("Tool")
+            | self._window_flag("FramelessWindowHint")
+            | self._window_flag("WindowStaysOnTopHint")
+            | self._window_flag("WindowTransparentForInput")
+        )
+        self.setWindowFlags(flags)
+        self.setWindowOpacity(0.88)
+
+        self._set_widget_attribute("WA_TranslucentBackground")
+        self._set_widget_attribute("WA_ShowWithoutActivating")
+        self._set_widget_attribute("WA_TransparentForMouseEvents")
+
+        focus_policy_enum = getattr(Qt, "FocusPolicy", None)
+        no_focus_policy = (
+            getattr(focus_policy_enum, "NoFocus", None)
+            if focus_policy_enum is not None
+            else None
+        )
+        if no_focus_policy is not None:
+            self.setFocusPolicy(no_focus_policy)
+
+    def _build_layout(self) -> None:
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        self._time_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._time_display.setStyleSheet(
+            "QLabel {"
+            "  background-color: rgba(15, 15, 15, 190);"
+            "  color: #FFFFFF;"
+            "  border-radius: 8px;"
+            "  font-size: 20px;"
+            "  font-weight: bold;"
+            "  padding: 2px 6px;"
+            "}"
+        )
+        layout.addWidget(self._time_display)
+        self.setLayout(layout)
+
+    def set_today_text(self, formatted_time: str) -> None:
+        self._time_display.setText(formatted_time)
 
 
 class MainWindowUiController:
@@ -326,6 +440,90 @@ class MainWindowLoopController:
         window._update_today_games_list(now)
 
 
+class MainWindowOverlayController:
+    """MainWindow のオーバーレイ表示制御ロジック."""
+
+    def __init__(self, owner: "MainWindow") -> None:
+        self.owner = owner
+
+    def initialize_overlay(self) -> None:
+        """今日のプレイ時間オーバーレイを初期化する."""
+        if self.owner._get_overlay_window() is not None:
+            return
+
+        try:
+            self.owner.overlay_window = TodayTimeOverlayWindow()
+            self.owner.overlay_window.hide()
+            self.sync_overlay()
+        except Exception as e:
+            logger.warning(f"オーバーレイ初期化に失敗したため無効化します: {e}")
+            self.owner.overlay_window = None
+
+    def refresh_overlay_time(self) -> None:
+        """オーバーレイの時刻表示を更新する."""
+        overlay_window = self.owner._get_overlay_window()
+        today_time_display = self.owner._get_today_time_display()
+        if overlay_window is None or today_time_display is None:
+            return
+        overlay_window.set_today_text(today_time_display.text())
+
+    def sync_overlay_geometry(self) -> None:
+        """オーバーレイを today_time_display の位置とサイズに追従させる."""
+        overlay_window = self.owner._get_overlay_window()
+        target = self.owner._get_today_time_display()
+        if overlay_window is None or target is None:
+            return
+
+        try:
+            top_left = target.mapToGlobal(target.rect().topLeft())
+            width = max(1, int(target.width()))
+            height = max(1, int(target.height()))
+            overlay_window.setGeometry(top_left.x(), top_left.y(), width, height)
+        except Exception:
+            return
+
+    def should_show_overlay(self) -> bool:
+        """メインウィンドウ背面かつtoday表示部が重なっている時のみ表示."""
+        is_minimized = getattr(self.owner, "isMinimized", lambda: False)()
+        is_visible = getattr(self.owner, "isVisible", lambda: True)()
+        is_active = getattr(self.owner, "isActiveWindow", lambda: False)()
+        if is_minimized or not is_visible:
+            return False
+        if is_active:
+            return False
+        return self.owner._is_today_display_covered_by_foreground_window()
+
+    def sync_overlay_visibility(self) -> None:
+        """表示条件に応じてオーバーレイを表示/非表示する."""
+        overlay_window = self.owner._get_overlay_window()
+        if overlay_window is None:
+            return
+
+        # オーバーレイ自身をヒットテスト対象から外して被覆判定する。
+        was_visible = bool(getattr(overlay_window, "isVisible", lambda: False)())
+        if was_visible:
+            overlay_window.hide()
+
+        if self.owner._should_show_overlay():
+            overlay_window.show()
+        else:
+            overlay_window.hide()
+
+    def sync_overlay(self) -> None:
+        """オーバーレイの表示内容・位置・可視状態を同期する."""
+        self.refresh_overlay_time()
+        self.sync_overlay_geometry()
+        self.sync_overlay_visibility()
+
+    def close_overlay(self) -> None:
+        """オーバーレイを閉じて参照を解放する."""
+        overlay_window = self.owner._get_overlay_window()
+        if overlay_window is None:
+            return
+        overlay_window.close()
+        self.owner.overlay_window = None
+
+
 class NoGamesConfiguredError(Exception):
     """ゲーム情報が1件も読み込めなかったことを示す例外."""
 
@@ -454,12 +652,14 @@ class MainWindow(QWidget):
         self.active_games_cache: List[GameEntry] = []
         self.inactive_games_cache: List[GameEntry] = []
         self.latest_window_titles: List[str] = []
+        self.overlay_window: Optional[TodayTimeOverlayWindow] = None
 
     def _warmup_dependencies(self) -> None:
         """起動直後に使う依存を事前生成する."""
         self._get_ui_controller()
         self._get_display_controller()
         self._get_loop_controller()
+        self._get_overlay_controller()
         self._get_bootstrapper()
 
     def _start_background_timers(self) -> None:
@@ -477,6 +677,7 @@ class MainWindow(QWidget):
         """ウィンドウ終了時にプレイ中のゲームを記録し、状態を保存."""
         self._record_playing_games_before_close()
         self._save_window_state()
+        self._close_overlay()
         super().closeEvent(event)
 
     def _record_playing_games_before_close(self) -> None:
@@ -580,6 +781,14 @@ class MainWindow(QWidget):
             factory=MainWindowLoopController,
         )
 
+    def _get_overlay_controller(self) -> MainWindowOverlayController:
+        """オーバーレイ表示制御コントローラーを返す."""
+        return self._resolve_dependency(
+            "_overlay_controller",
+            factory=lambda: MainWindowOverlayController(self),
+            validator=lambda controller: controller.owner is self,
+        )
+
     def _init_components(self) -> None:
         """設定を読み込みコンポーネントを初期化."""
         try:
@@ -594,6 +803,7 @@ class MainWindow(QWidget):
         self._apply_display_mode()
         self._apply_mode_geometry()
         self._set_status(Messages.NO_GAME_PLAYING)
+        self._initialize_overlay()
 
     def _scan_tick(self) -> None:
         """監視サイクル（1秒間隔）."""
@@ -707,6 +917,260 @@ class MainWindow(QWidget):
         if hasattr(self, "scanner"):
             self.scanner.excluded_titles.add(title)
 
+    def _initialize_overlay(self) -> None:
+        """今日のプレイ時間オーバーレイを初期化する."""
+        self._get_overlay_controller().initialize_overlay()
+
+    def _get_overlay_window(self) -> Optional[TodayTimeOverlayWindow]:
+        """現在のオーバーレイウィンドウを返す。"""
+        return cast(Optional[TodayTimeOverlayWindow], getattr(self, "overlay_window", None))
+
+    def _get_today_time_display(self) -> Optional[QWidget]:
+        """today_time_display ウィジェットを安全に取得する。"""
+        return cast(Optional[QWidget], getattr(getattr(self, "w", None), "today_time_display", None))
+
+    def _refresh_overlay_time(self) -> None:
+        """オーバーレイの時刻表示を更新する."""
+        self._get_overlay_controller().refresh_overlay_time()
+
+    def _sync_overlay_geometry(self) -> None:
+        """オーバーレイを today_time_display の位置とサイズに追従させる."""
+        self._get_overlay_controller().sync_overlay_geometry()
+
+    @staticmethod
+    def _global_rect_of_widget(widget: QWidget) -> Optional[Rect]:
+        """ウィジェットのグローバル矩形を返す."""
+        try:
+            top_left = widget.mapToGlobal(widget.rect().topLeft())
+            return (
+                int(top_left.x()),
+                int(top_left.y()),
+                int(top_left.x() + widget.width()),
+                int(top_left.y() + widget.height()),
+            )
+        except Exception:
+            return None
+
+    @staticmethod
+    def _window_rect(hwnd: int) -> Optional[Rect]:
+        """指定HWNDのスクリーン矩形を返す."""
+        if _USER32 is None or hwnd == 0:
+            return None
+
+        rect = _WinRect()
+        if _USER32.GetWindowRect(int(hwnd), ctypes.byref(rect)) == 0:
+            return None
+        return (int(rect.left), int(rect.top), int(rect.right), int(rect.bottom))
+
+    @staticmethod
+    def _rect_contains_point(rect: Rect, x: int, y: int) -> bool:
+        """矩形が点を含むか判定する."""
+        return rect[0] <= x < rect[2] and rect[1] <= y < rect[3]
+
+    @staticmethod
+    def _rects_intersect(
+        first_rect: Rect,
+        second_rect: Rect,
+    ) -> bool:
+        """2つの矩形が交差しているか判定する."""
+        left = max(first_rect[0], second_rect[0])
+        top = max(first_rect[1], second_rect[1])
+        right = min(first_rect[2], second_rect[2])
+        bottom = min(first_rect[3], second_rect[3])
+        return right > left and bottom > top
+
+    @staticmethod
+    def _sample_points_from_rect(rect: Rect) -> List[Point]:
+        """矩形内の5サンプル点（中心 + 四隅寄り）を返す."""
+        left, top, right, bottom = rect
+        width = max(1, right - left)
+        height = max(1, bottom - top)
+        points: List[Point] = []
+
+        for x_ratio, y_ratio in OVERLAY_SAMPLE_RATIOS:
+            x = left + int(width * x_ratio)
+            y = top + int(height * y_ratio)
+            x = min(max(x, left), right - 1)
+            y = min(max(y, top), bottom - 1)
+            points.append((x, y))
+        return points
+
+    @staticmethod
+    def _window_at_point(x: int, y: int) -> int:
+        """スクリーン座標の最前面ウィンドウHWNDを返す."""
+        if _USER32 is None:
+            return 0
+        try:
+            return int(_USER32.WindowFromPoint(_WinPoint(int(x), int(y))) or 0)
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _window_below(hwnd: int) -> int:
+        """指定HWNDの背面にある次ウィンドウHWNDを返す."""
+        if _USER32 is None or hwnd == 0:
+            return 0
+        # GW_HWNDNEXT = 2
+        try:
+            return int(_USER32.GetWindow(int(hwnd), 2) or 0)
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _root_window(hwnd: int) -> int:
+        """指定HWNDのルートウィンドウHWNDを返す."""
+        if _USER32 is None or hwnd == 0:
+            return 0
+        # GA_ROOT = 2
+        try:
+            return int(_USER32.GetAncestor(int(hwnd), 2) or 0)
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _window_handle_of(widget: Optional[QWidget]) -> int:
+        """QWidgetからHWNDを安全に取得する."""
+        if widget is None:
+            return 0
+        win_id_callable = getattr(widget, "winId", None)
+        if not callable(win_id_callable):
+            return 0
+        try:
+            return int(win_id_callable())
+        except Exception:
+            return 0
+
+    def _is_own_window(self, hwnd: int) -> bool:
+        """指定HWNDがMainWindowまたはオーバーレイ自身か判定する."""
+        if hwnd == 0:
+            return False
+        if _USER32 is None:
+            return False
+
+        # 同一プロセスのウィンドウはすべて「自ウィンドウ」とみなす。
+        # (Qtの子HWND/ネイティブハンドル差異での誤判定を避けるため)
+        process_id = ctypes.c_uint(0)
+        _USER32.GetWindowThreadProcessId(int(hwnd), ctypes.byref(process_id))
+        if int(process_id.value) == os.getpid():
+            return True
+
+        root_hwnd = self._root_window(hwnd)
+        main_hwnd = self._root_window(self._window_handle_of(self))
+        overlay_hwnd = self._root_window(self._window_handle_of(getattr(self, "overlay_window", None)))
+        return root_hwnd in {main_hwnd, overlay_hwnd}
+
+    def _native_scale_factor(self) -> float:
+        """Qt論理座標 -> Win32物理解像度座標へのスケールを推定する."""
+        if _USER32 is None:
+            return 1.0
+
+        hwnd = self._window_handle_of(self)
+        rect = self._window_rect(hwnd)
+        logical_w = int(getattr(self, "width", lambda: 0)())
+        logical_h = int(getattr(self, "height", lambda: 0)())
+        if rect is None or logical_w <= 0 or logical_h <= 0:
+            return 1.0
+
+        native_w = max(1, rect[2] - rect[0])
+        native_h = max(1, rect[3] - rect[1])
+        scale_x = native_w / logical_w
+        scale_y = native_h / logical_h
+        scale = (scale_x + scale_y) / 2.0
+        if 0.75 <= scale <= 3.0:
+            return scale
+        return 1.0
+
+    def _to_native_point(self, x: int, y: int) -> Point:
+        """Qt論理座標の点をWin32 API用の物理解像度座標へ変換する."""
+        scale = self._native_scale_factor()
+        return int(round(x * scale)), int(round(y * scale))
+
+    def _to_native_rect(self, rect: Rect) -> Rect:
+        """Qt論理座標の矩形をWin32 API用の物理解像度座標へ変換する."""
+        left_top = self._to_native_point(rect[0], rect[1])
+        right_bottom = self._to_native_point(rect[2], rect[3])
+        return (
+            min(left_top[0], right_bottom[0]),
+            min(left_top[1], right_bottom[1]),
+            max(left_top[0], right_bottom[0]),
+            max(left_top[1], right_bottom[1]),
+        )
+
+    def _foreground_rect_if_foreign(self) -> Optional[Rect]:
+        """前面ウィンドウが他ウィンドウの場合のみ、その矩形を返す."""
+        if _USER32 is None:
+            return None
+
+        foreground_hwnd = int(_USER32.GetForegroundWindow() or 0)
+        if foreground_hwnd == 0 or self._is_own_window(foreground_hwnd):
+            return None
+        return self._window_rect(foreground_hwnd)
+
+    def _find_covering_foreign_window_at_point(self, x: int, y: int) -> int:
+        """点を覆う「自ウィンドウ以外」のHWNDを探索して返す。"""
+        hwnd = self._window_at_point(x, y)
+        if hwnd == 0:
+            return 0
+
+        # 判定時点で自ウィンドウが最前面なら、その点は露出しているとみなす。
+        if self._is_own_window(hwnd):
+            return 0
+
+        walk_count = 0
+
+        while hwnd and walk_count < MAX_Z_WALK:
+            if not self._is_own_window(hwnd):
+                hwnd_rect = self._window_rect(hwnd)
+                if hwnd_rect is not None and self._rect_contains_point(hwnd_rect, x, y):
+                    return hwnd
+            hwnd = self._window_below(hwnd)
+            walk_count += 1
+
+        if walk_count >= MAX_Z_WALK:
+            logger.debug("overlay z-order walk reached MAX_Z_WALK=%s", MAX_Z_WALK)
+        return 0
+
+    def _is_today_display_covered_by_foreground_window(self) -> bool:
+        """today_time_displayのサンプル点が他ウィンドウに覆われているか判定する."""
+        target = self._get_today_time_display()
+        if target is None:
+            return False
+
+        target_rect = self._global_rect_of_widget(target)
+        if target_rect is None:
+            return False
+
+        # 前面ウィンドウの外接矩形が対象領域と交差しない場合は未被覆扱いにする。
+        foreground_rect = self._foreground_rect_if_foreign()
+        if foreground_rect is None:
+            return False
+
+        target_rect_native = self._to_native_rect(target_rect)
+        if not self._rects_intersect(target_rect_native, foreground_rect):
+            return False
+
+        sample_points = self._sample_points_from_rect(target_rect)
+        return any(
+            self._find_covering_foreign_window_at_point(*self._to_native_point(x, y)) != 0
+            for x, y in sample_points
+        )
+
+    def _should_show_overlay(self) -> bool:
+        """メインウィンドウ背面かつtoday表示部が重なっている時のみオーバーレイ表示."""
+        return self._get_overlay_controller().should_show_overlay()
+
+    def _sync_overlay_visibility(self) -> None:
+        """表示条件に応じてオーバーレイを表示/非表示する."""
+        self._get_overlay_controller().sync_overlay_visibility()
+
+    def _sync_overlay(self) -> None:
+        """オーバーレイの表示内容・位置・可視状態を同期する."""
+        self._get_overlay_controller().sync_overlay()
+
+    def _close_overlay(self) -> None:
+        """オーバーレイを閉じて参照を解放する."""
+        self._get_overlay_controller().close_overlay()
+
     def _apply_mode_geometry(self) -> None:
         """表示モードに応じたサイズを適用."""
         self._get_display_controller().apply_mode_geometry(
@@ -772,6 +1236,7 @@ class MainWindow(QWidget):
     def _ui_tick(self) -> None:
         """UIだけを高速更新（0.1秒間隔）."""
         self._get_loop_controller().run_ui_tick(self)
+        self._sync_overlay()
 
 
 # =============================================================================
