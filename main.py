@@ -1,5 +1,6 @@
 """Game Time Tracker - PySide6 GUI."""
 
+import atexit
 import ctypes
 import logging
 import os
@@ -10,14 +11,16 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
 
 # ロギング設定
+_file_handler = logging.FileHandler('game_time_tracker.log', encoding='utf-8')
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('game_time_tracker.log', encoding='utf-8')
+        _file_handler,
     ]
 )
+atexit.register(logging.shutdown)
 logger = logging.getLogger(__name__)
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QCloseEvent, QMouseEvent, QResizeEvent
@@ -772,6 +775,7 @@ class MainWindow(QWidget):
         self.overtime_alert_enabled = bool(
             getattr(self, "overtime_alert_enabled", DEFAULT_OVERTIME_ALERT_ENABLED)
         )
+        self._overtime_alert_toggle_connected = False
         self._overtime_alert_tracker = OvertimeAlertTracker(
             thresholds_minutes=OVERTIME_ALERT_THRESHOLDS_MINUTES,
             alerted_threshold_minutes=set(),
@@ -1079,11 +1083,13 @@ class MainWindow(QWidget):
         toggle.setChecked(self._is_overtime_alert_enabled())
         toggle.blockSignals(False)
 
-        try:
-            toggle.toggled.disconnect(self._on_overtime_alert_toggled)
-        except (TypeError, RuntimeError):
-            pass
+        if getattr(self, "_overtime_alert_toggle_connected", False):
+            try:
+                toggle.toggled.disconnect(self._on_overtime_alert_toggled)
+            except (TypeError, RuntimeError):
+                pass
         toggle.toggled.connect(self._on_overtime_alert_toggled)
+        self._overtime_alert_toggle_connected = True
 
     def _on_overtime_alert_toggled(self, checked: bool) -> None:
         """時間超過防止アラートトグル変更時の処理。"""
