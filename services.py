@@ -6,6 +6,7 @@ from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+import gspread
 import pygetwindow as gw
 
 from config_loader import Config
@@ -13,13 +14,12 @@ from gspread_service import GspreadService
 from log_handler import LogHandler
 from models import GameEntry, ParsedRecord, parse_bool, parse_record
 from text_utils import normalize_title
-from time_utils import split_by_day
+from time_utils import SECONDS_PER_MINUTE, split_by_day
 
 logger = logging.getLogger(__name__)
 
 # 定数
 MIN_PLAY_MINUTES = 5
-SECONDS_PER_MINUTE = 60
 
 
 @dataclass
@@ -330,18 +330,31 @@ class GameInfoLoader:
         except FileNotFoundError as e:
             logger.error(f'認証情報ファイルが見つかりません: {e}')
             return []
-        except Exception as e:
+        except (
+            gspread.exceptions.SpreadsheetNotFound,
+            gspread.exceptions.WorksheetNotFound,
+            gspread.exceptions.APIError,
+        ) as e:
             logger.error(f'ゲーム情報の読み込みに失敗しました: {e}')
             return []
+        except Exception:
+            logger.exception('ゲーム情報の読み込みで予期しない例外が発生しました')
+            raise
 
         return [self._record_to_entry(record) for record in records]
 
     @staticmethod
     def _record_to_entry(record: dict) -> GameEntry:
         """スプレッドシートのレコードを GameEntry に変換."""
+        window_title = str(record['window_title'])
+        if not window_title.strip():
+            logger.warning(
+                "window_title が空のゲーム情報を読み込みました: game_title=%r",
+                record.get('game_title', ''),
+            )
         return GameEntry(
             game_title=str(record['game_title']),
-            window_title=str(record['window_title']),
+            window_title=window_title,
             play_with_friends=parse_bool(record.get('play_with_friends', 'FALSE')),
             is_browser_game=parse_bool(record.get('is_browser_game', 'FALSE')),
         )

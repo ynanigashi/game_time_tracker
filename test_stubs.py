@@ -47,6 +47,14 @@ class FakeQTableWidgetItem:
         self._text = "" if text is None else str(text)
 
 
+class FakeQApplication:
+    """QApplication のスタブ."""
+
+    @staticmethod
+    def beep() -> None:
+        return None
+
+
 fake_pyside6_core: Any = types.SimpleNamespace(
     QTimer=type("QTimer", (), {}),
     Qt=types.SimpleNamespace(
@@ -59,9 +67,11 @@ fake_pyside6_gui: Any = types.SimpleNamespace(
     QResizeEvent=type("QResizeEvent", (), {}),
 )
 fake_pyside6_widgets: Any = types.SimpleNamespace(
-    QApplication=type("QApplication", (), {}),
+    QApplication=FakeQApplication,
     QWidget=FakeQWidget,
     QTableWidgetItem=FakeQTableWidgetItem,
+    QCheckBox=type("QCheckBox", (), {}),
+    QPushButton=type("QPushButton", (), {}),
     QLabel=type("QLabel", (), {}),
     QListWidget=type("QListWidget", (), {}),
     QVBoxLayout=type("QVBoxLayout", (), {}),

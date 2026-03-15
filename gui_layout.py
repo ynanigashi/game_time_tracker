@@ -1,8 +1,19 @@
 """Layout builder for Game Time Tracker GUI (PySide6)."""
 
 from dataclasses import dataclass
+from typing import Optional
 
-from PySide6.QtWidgets import QLabel, QListWidget, QVBoxLayout, QWidget, QHBoxLayout, QTableWidget, QHeaderView
+from PySide6.QtWidgets import (
+    QHeaderView,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QPushButton,
+    QTableWidget,
+    QVBoxLayout,
+    QWidget,
+)
+from window_state import DEFAULT_OVERTIME_ALERT_ENABLED
 
 # ウィジェット高さ定数
 ACTIVE_DISPLAY_HEIGHT = 30  # プレイ中ゲーム表示の高さ（1行分）
@@ -10,6 +21,53 @@ SESSION_TIME_DISPLAY_HEIGHT = 24  # セッション時間表示の高さ
 TODAY_TIME_DISPLAY_HEIGHT = 32  # 今日のプレイ時間表示の高さ
 WINDOW_LIST_MIN_HEIGHT = 200  # ウィンドウリストの最小高さ
 TODAY_GAMES_TABLE_MIN_HEIGHT = 100  # 今日のゲーム一覧テーブルの最小高さ
+
+
+class SlideToggleButton(QPushButton):
+    """ノブが左右に移動する見た目のトグルボタン."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setFixedSize(34, 16)
+        self.toggled.connect(self._apply_style)
+        self._apply_style(self.isChecked())
+
+    def _apply_style(self, checked: bool) -> None:
+        base = (
+            "QPushButton {"
+            "  border-radius: 8px;"
+            "  border: 1px solid #7A7F85;"
+            "  font-size: 10px;"
+            "  font-weight: bold;"
+            "}"
+        )
+        if checked:
+            self.setText("●")
+            self.setStyleSheet(
+                base
+                + (
+                    "QPushButton {"
+                    "  background-color: #2E7D32;"
+                    "  color: #FFFFFF;"
+                    "  text-align: right;"
+                    "  padding-right: 2px;"
+                    "}"
+                )
+            )
+        else:
+            self.setText("●")
+            self.setStyleSheet(
+                base
+                + (
+                    "QPushButton {"
+                    "  background-color: #9AA0A6;"
+                    "  color: #FFFFFF;"
+                    "  text-align: left;"
+                    "  padding-left: 2px;"
+                    "}"
+                )
+            )
 
 
 @dataclass
@@ -30,6 +88,7 @@ class LayoutWidgets:
     active_max_height: int
     today_games_min_height: int
     window_min_height: int
+    overtime_alert_toggle: Optional[QPushButton] = None
 
 
 def build_main_layout(parent: QWidget) -> LayoutWidgets:
@@ -82,6 +141,18 @@ def build_main_layout(parent: QWidget) -> LayoutWidgets:
     main_layout.addWidget(window_label)
     main_layout.addWidget(window_list)
 
+    # 設定エリア（最下部）
+    settings_label = QLabel('時間超過防止アラート', parent)
+    overtime_alert_toggle = SlideToggleButton(parent)
+    overtime_alert_toggle.setChecked(DEFAULT_OVERTIME_ALERT_ENABLED)
+    settings_row = QHBoxLayout()
+    settings_row.addWidget(settings_label)
+    settings_row.addSpacing(6)
+    settings_row.addWidget(overtime_alert_toggle)
+    settings_row.addStretch()
+    main_layout.addStretch()
+    main_layout.addLayout(settings_row)
+
     parent.setLayout(main_layout)
 
     return LayoutWidgets(
@@ -99,4 +170,5 @@ def build_main_layout(parent: QWidget) -> LayoutWidgets:
         active_max_height=active_max_height,
         today_games_min_height=today_games_min_height,
         window_min_height=window_min_height,
+        overtime_alert_toggle=overtime_alert_toggle,
     )

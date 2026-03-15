@@ -21,7 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QCloseEvent, QMouseEvent, QResizeEvent
-from PySide6.QtWidgets import QApplication, QLabel, QTableWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTableWidgetItem, QVBoxLayout, QWidget
 
 from config_loader import DEFAULT_BROWSERS, DEFAULT_EXCLUDED_TITLES, ConfigLoader, Config
 from gui_layout import LayoutWidgets, build_main_layout
@@ -36,10 +36,14 @@ from services import (
     SessionRecorder,
     WindowScanner,
     MIN_PLAY_MINUTES,
-    SECONDS_PER_MINUTE,
 )
-from time_utils import calc_today_elapsed_seconds, format_hms
-from window_state import DISPLAY_MODES, MODE_DEFAULT_SIZES, WindowState
+from time_utils import SECONDS_PER_MINUTE, calc_today_elapsed_seconds, format_hms
+from window_state import (
+    DEFAULT_OVERTIME_ALERT_ENABLED,
+    DISPLAY_MODES,
+    MODE_DEFAULT_SIZES,
+    WindowState,
+)
 
 
 # =============================================================================
@@ -54,6 +58,8 @@ MAX_WIDGET_HEIGHT = 16777215  # Qt default max height
 OVERLAY_FALLBACK_WIDTH = 240
 OVERLAY_FALLBACK_HEIGHT = 40
 MAX_Z_WALK = 32
+MIN_MODE_SAFE_WIDTH = 320
+MIN_MODE_SAFE_HEIGHT = 110
 OVERLAY_SAMPLE_RATIOS: Tuple[Tuple[float, float], ...] = (
     (0.5, 0.5),
     (0.25, 0.25),
@@ -61,11 +67,62 @@ OVERLAY_SAMPLE_RATIOS: Tuple[Tuple[float, float], ...] = (
     (0.25, 0.75),
     (0.75, 0.75),
 )
+OVERTIME_ALERT_THRESHOLDS_MINUTES: Tuple[int, ...] = (45, 50, 55, 58, 60)
 TDependency = TypeVar("TDependency")
 Point = Tuple[int, int]
 Rect = Tuple[int, int, int, int]
 
 _USER32 = ctypes.windll.user32 if sys.platform == "win32" else None
+
+
+@dataclass
+class OvertimeAlertTracker:
+    """時間超過防止アラートの進捗状態を管理する。"""
+
+    thresholds_minutes: Tuple[int, ...]
+    alerted_threshold_minutes: set[int]
+    last_checked_seconds: float = 0.0
+    initialized: bool = False
+
+    def prime(self, total_seconds: float) -> None:
+        """現在値を基準に進捗を初期化し、遡及通知を抑止する。"""
+        self.last_checked_seconds = max(0.0, float(total_seconds))
+        self.alerted_threshold_minutes = {
+            minute
+            for minute in self.thresholds_minutes
+            if self.last_checked_seconds >= minute * SECONDS_PER_MINUTE
+        }
+        self.initialized = True
+
+    def update(self, total_seconds: float, *, alerts_enabled: bool) -> List[int]:
+        """閾値跨ぎを更新し、今回通知すべき閾値（分）を返す。"""
+        if not self.initialized:
+            self.prime(total_seconds)
+            return []
+
+        previous_seconds = self.last_checked_seconds
+        current_seconds = max(0.0, float(total_seconds))
+        self.last_checked_seconds = current_seconds
+
+        if not alerts_enabled:
+            return []
+
+        triggered: List[int] = []
+        for minute in self.thresholds_minutes:
+            if minute in self.alerted_threshold_minutes:
+                continue
+            threshold_seconds = minute * SECONDS_PER_MINUTE
+            if previous_seconds < threshold_seconds <= current_seconds:
+                self.alerted_threshold_minutes.add(minute)
+                triggered.append(minute)
+        return triggered
+
+
+def clamp_mode_size(display_mode: str, width: int, height: int) -> Tuple[int, int]:
+    """表示モードごとの最低サイズを保証する。"""
+    if display_mode == "min":
+        return max(width, MIN_MODE_SAFE_WIDTH), max(height, MIN_MODE_SAFE_HEIGHT)
+    return width, height
 
 
 class _WinPoint(ctypes.Structure):
@@ -214,13 +271,13 @@ class MainWindowUiController:
         )
         self.w.session_time_display.setText(format_hms(max_elapsed))
 
-    def update_today_totals(
+    def calculate_today_total_seconds(
         self,
         active_games: Sequence[GameEntry],
         inactive_games: Sequence[GameEntry],
         now: datetime,
-    ) -> None:
-        """今日のプレイ時間（完了+進行中）を更新."""
+    ) -> float:
+        """今日のプレイ時間（完了+進行中）秒数を計算する。"""
         total_seconds = self.daily_stats.today_completed_seconds
         min_seconds = MIN_PLAY_MINUTES * SECONDS_PER_MINUTE
 
@@ -230,7 +287,18 @@ class MainWindowUiController:
                 elapsed_seconds = calc_today_elapsed_seconds(game.start_time, now)
                 if elapsed_seconds >= min_seconds:
                     total_seconds += elapsed_seconds
+        return total_seconds
+
+    def update_today_totals(
+        self,
+        active_games: Sequence[GameEntry],
+        inactive_games: Sequence[GameEntry],
+        now: datetime,
+    ) -> float:
+        """今日のプレイ時間（完了+進行中）を更新."""
+        total_seconds = self.calculate_today_total_seconds(active_games, inactive_games, now)
         self.w.today_time_display.setText(format_hms(total_seconds))
+        return total_seconds
 
     def update_window_list(self, window_titles: Sequence[str]) -> None:
         """現在のウィンドウタイトルリストを更新."""
@@ -304,6 +372,8 @@ class MainWindowDisplayController:
     ) -> None:
         """表示モードに応じたサイズを適用."""
         w, h = mode_sizes.get(display_mode, MODE_DEFAULT_SIZES[display_mode])
+        w, h = clamp_mode_size(display_mode, int(w), int(h))
+        mode_sizes[display_mode] = (w, h)
         # サイズを強制適用するため、一時的に min/max を固定
         window.setMinimumHeight(h)
         window.setMaximumHeight(h)
@@ -324,8 +394,8 @@ class MainWindowDisplayController:
         is_expanded = display_mode != "min"  # mid/maxで表示
         is_max = display_mode == "max"
 
-        # 常に表示
-        set_widget_visibility(widgets.today_label, True)
+        # minではラベルを隠して時間表示領域を優先
+        set_widget_visibility(widgets.today_label, is_expanded)
         set_widget_visibility(widgets.today_time_display, True)
 
         # mid/maxで表示
@@ -362,6 +432,9 @@ class MainWindowDisplayController:
             max_height=self.max_widget_height if is_max else 0,
         )
 
+        if widgets.overtime_alert_toggle is not None:
+            set_widget_visibility(widgets.overtime_alert_toggle, True)
+
         apply_mode_geometry()
 
     def next_display_mode(self, current_display_mode: str) -> str:
@@ -376,19 +449,41 @@ class MainWindowStateController:
     def __init__(self, state_file: Path) -> None:
         self.state_file = state_file
 
+    def load_all(self) -> Tuple[int, int, str, Dict[str, Tuple[int, int]], bool]:
+        """永続化されたウィンドウ状態と設定を読み込む."""
+        return WindowState.load_all(self.state_file)
+
     def load(self) -> Tuple[int, int, str, Dict[str, Tuple[int, int]]]:
         """永続化されたウィンドウ状態を読み込む."""
-        return WindowState.load(self.state_file)
+        x, y, mode, mode_sizes, _ = self.load_all()
+        return x, y, mode, mode_sizes
+
+    def load_overtime_alert_enabled(self) -> bool:
+        """時間超過防止アラート設定を読み込む."""
+        _, _, _, _, overtime_alert_enabled = self.load_all()
+        return overtime_alert_enabled
 
     def save(
         self,
         geom: object,
         display_mode: str,
         mode_sizes: Dict[str, Tuple[int, int]],
+        overtime_alert_enabled: bool,
     ) -> None:
         """現在状態を mode_sizes に反映して永続化."""
-        mode_sizes[display_mode] = (geom.width(), geom.height())
-        WindowState.save(self.state_file, geom.x(), geom.y(), display_mode, mode_sizes)
+        mode_sizes[display_mode] = clamp_mode_size(
+            display_mode,
+            int(geom.width()),
+            int(geom.height()),
+        )
+        WindowState.save(
+            self.state_file,
+            geom.x(),
+            geom.y(),
+            display_mode,
+            mode_sizes,
+            overtime_alert_enabled=bool(overtime_alert_enabled),
+        )
 
     @staticmethod
     def record_resize(
@@ -398,7 +493,11 @@ class MainWindowStateController:
         height: int,
     ) -> None:
         """リサイズ後サイズを mode_sizes に反映."""
-        mode_sizes[display_mode] = (width, height)
+        mode_sizes[display_mode] = clamp_mode_size(
+            display_mode,
+            int(width),
+            int(height),
+        )
 
 
 class MainWindowLoopController:
@@ -425,6 +524,7 @@ class MainWindowLoopController:
         if window.daily_stats.check_day_change():
             # 日付変更時、UIも強制クリア
             window.w.today_games_table.setRowCount(0)
+            window._prime_overtime_alert_progress(0.0)
 
         window_titles = window.scanner.get_titles()
         foreground_title = window.scanner.get_foreground_title()
@@ -436,8 +536,9 @@ class MainWindowLoopController:
         now = datetime.now()
         # セッション時間と今日の合計時間のみ更新（リストはスキャン時に更新）
         window._update_session_times(window.active_games_cache, now)
-        window._update_today_totals(window.active_games_cache, now)
+        total_seconds = window._update_today_totals(window.active_games_cache, now)
         window._update_today_games_list(now)
+        window._update_overtime_alert(total_seconds)
 
 
 class MainWindowOverlayController:
@@ -484,6 +585,9 @@ class MainWindowOverlayController:
 
     def should_show_overlay(self) -> bool:
         """メインウィンドウ背面かつtoday表示部が重なっている時のみ表示."""
+        if not self.owner._is_overtime_alert_enabled():
+            return False
+
         is_minimized = getattr(self.owner, "isMinimized", lambda: False)()
         is_visible = getattr(self.owner, "isVisible", lambda: True)()
         is_active = getattr(self.owner, "isActiveWindow", lambda: False)()
@@ -511,6 +615,12 @@ class MainWindowOverlayController:
 
     def sync_overlay(self) -> None:
         """オーバーレイの表示内容・位置・可視状態を同期する."""
+        if not self.owner._is_overtime_alert_enabled():
+            overlay_window = self.owner._get_overlay_window()
+            if overlay_window is not None:
+                overlay_window.hide()
+            return
+
         self.refresh_overlay_time()
         self.sync_overlay_geometry()
         self.sync_overlay_visibility()
@@ -639,7 +749,13 @@ class MainWindow(QWidget):
     def _initialize_window_state(self) -> None:
         """タイトルと永続化されたウィンドウ状態を初期適用する."""
         self.setWindowTitle(BASE_TITLE)
-        x, y, self.display_mode, self.mode_sizes = self._get_state_controller().load()
+        (
+            x,
+            y,
+            self.display_mode,
+            self.mode_sizes,
+            self.overtime_alert_enabled,
+        ) = self._get_state_controller().load_all()
         self.setGeometry(x, y, *self.mode_sizes[self.display_mode])
 
     def _initialize_runtime_state(self) -> None:
@@ -653,6 +769,13 @@ class MainWindow(QWidget):
         self.inactive_games_cache: List[GameEntry] = []
         self.latest_window_titles: List[str] = []
         self.overlay_window: Optional[TodayTimeOverlayWindow] = None
+        self.overtime_alert_enabled = bool(
+            getattr(self, "overtime_alert_enabled", DEFAULT_OVERTIME_ALERT_ENABLED)
+        )
+        self._overtime_alert_tracker = OvertimeAlertTracker(
+            thresholds_minutes=OVERTIME_ALERT_THRESHOLDS_MINUTES,
+            alerted_threshold_minutes=set(),
+        )
 
     def _warmup_dependencies(self) -> None:
         """起動直後に使う依存を事前生成する."""
@@ -800,6 +923,7 @@ class MainWindow(QWidget):
             return
 
         self._apply_bootstrap_result(result)
+        self._initialize_overtime_alert_toggle()
         self._apply_display_mode()
         self._apply_mode_geometry()
         self._set_status(Messages.NO_GAME_PLAYING)
@@ -859,14 +983,14 @@ class MainWindow(QWidget):
             now,
         )
 
-    def _update_today_totals(self, active_games: List[GameEntry], now: datetime) -> None:
+    def _update_today_totals(self, active_games: List[GameEntry], now: datetime) -> float:
         """今日のプレイ時間（完了+進行中）を更新.
         
         - 日跨ぎセッションは今日0:00以降のみカウント
         - 5分未満の進行中セッションは除外
         - 非アクティブ中のゲームも含む
         """
-        self._get_ui_controller().update_today_totals(
+        return self._get_ui_controller().update_today_totals(
             active_games,
             self.inactive_games_cache,
             now,
@@ -908,6 +1032,7 @@ class MainWindow(QWidget):
             self.geometry(),
             self.display_mode,
             self.mode_sizes,
+            self._is_overtime_alert_enabled(),
         )
 
     def _set_status(self, message: str) -> None:
@@ -920,6 +1045,80 @@ class MainWindow(QWidget):
     def _initialize_overlay(self) -> None:
         """今日のプレイ時間オーバーレイを初期化する."""
         self._get_overlay_controller().initialize_overlay()
+
+    def _is_overtime_alert_enabled(self) -> bool:
+        """時間超過防止アラートの有効/無効を返す。"""
+        return bool(getattr(self, "overtime_alert_enabled", DEFAULT_OVERTIME_ALERT_ENABLED))
+
+    def _set_overtime_alert_enabled(self, enabled: bool) -> None:
+        """時間超過防止アラートの有効/無効を設定する。"""
+        self.overtime_alert_enabled = bool(enabled)
+
+    def _get_overtime_alert_tracker(self) -> OvertimeAlertTracker:
+        """時間超過防止アラート進捗トラッカーを返す。"""
+        tracker = getattr(self, "_overtime_alert_tracker", None)
+        if tracker is None:
+            tracker = OvertimeAlertTracker(
+                thresholds_minutes=OVERTIME_ALERT_THRESHOLDS_MINUTES,
+                alerted_threshold_minutes=set(),
+            )
+            self._overtime_alert_tracker = tracker
+        return cast(OvertimeAlertTracker, tracker)
+
+    def _get_overtime_alert_toggle(self) -> Optional[QPushButton]:
+        """時間超過防止アラートのトグルを取得する。"""
+        return cast(Optional[QPushButton], getattr(getattr(self, "w", None), "overtime_alert_toggle", None))
+
+    def _initialize_overtime_alert_toggle(self) -> None:
+        """時間超過防止アラートトグルを初期化する。"""
+        toggle = self._get_overtime_alert_toggle()
+        if toggle is None:
+            return
+
+        toggle.blockSignals(True)
+        toggle.setChecked(self._is_overtime_alert_enabled())
+        toggle.blockSignals(False)
+
+        try:
+            toggle.toggled.disconnect(self._on_overtime_alert_toggled)
+        except (TypeError, RuntimeError):
+            pass
+        toggle.toggled.connect(self._on_overtime_alert_toggled)
+
+    def _on_overtime_alert_toggled(self, checked: bool) -> None:
+        """時間超過防止アラートトグル変更時の処理。"""
+        self._set_overtime_alert_enabled(checked)
+
+        now = datetime.now()
+        total_seconds = self._get_ui_controller().calculate_today_total_seconds(
+            self.active_games_cache,
+            self.inactive_games_cache,
+            now,
+        )
+        self._prime_overtime_alert_progress(total_seconds)
+        self._sync_overlay()
+
+    def _prime_overtime_alert_progress(self, total_seconds: float) -> None:
+        """現在値を基準にアラート進捗を初期化し、遡及通知を抑止する。"""
+        self._get_overtime_alert_tracker().prime(total_seconds)
+
+    def _emit_overtime_alert(self, threshold_minutes: int) -> None:
+        """閾値到達アラートを通知する。"""
+        try:
+            QApplication.beep()
+        except Exception:
+            pass
+        logger.info("プレイ時間アラート: %s分に到達しました", threshold_minutes)
+
+    def _update_overtime_alert(self, total_seconds: float) -> None:
+        """閾値跨ぎを検知して時間超過防止アラートを鳴らす。"""
+        tracker = self._get_overtime_alert_tracker()
+        triggered_minutes = tracker.update(
+            total_seconds,
+            alerts_enabled=self._is_overtime_alert_enabled(),
+        )
+        for minute in triggered_minutes:
+            self._emit_overtime_alert(minute)
 
     def _get_overlay_window(self) -> Optional[TodayTimeOverlayWindow]:
         """現在のオーバーレイウィンドウを返す。"""

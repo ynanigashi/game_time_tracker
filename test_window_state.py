@@ -65,6 +65,45 @@ class TestWindowState(unittest.TestCase):
         self.assertEqual(y, 0)
         self.assertEqual(mode, "max")
 
+    def test_load_overtime_alert_enabled_defaults_true(self):
+        """overtime_alert_enabled未設定時はTrueを返す."""
+        mode_sizes = {"max": (500, 400), "mid": (450, 300), "min": (300, 150)}
+        WindowState.save(self.test_path, 100, 200, "mid", mode_sizes)
+
+        self.assertTrue(WindowState.load_overtime_alert_enabled(self.test_path))
+
+    def test_save_and_load_overtime_alert_enabled_false(self):
+        """overtime_alert_enabled=Falseを保存/復元できる."""
+        mode_sizes = {"max": (500, 400), "mid": (450, 300), "min": (300, 150)}
+        WindowState.save(
+            self.test_path,
+            100,
+            200,
+            "mid",
+            mode_sizes,
+            overtime_alert_enabled=False,
+        )
+
+        self.assertFalse(WindowState.load_overtime_alert_enabled(self.test_path))
+
+    def test_load_all_includes_overtime_alert_enabled(self):
+        """load_allはovertime_alert_enabledを含めて返す."""
+        mode_sizes = {"max": (500, 400), "mid": (450, 300), "min": (300, 150)}
+        WindowState.save(
+            self.test_path,
+            100,
+            200,
+            "mid",
+            mode_sizes,
+            overtime_alert_enabled=False,
+        )
+
+        x, y, mode, loaded_sizes, overtime_alert_enabled = WindowState.load_all(self.test_path)
+
+        self.assertEqual((x, y, mode), (100, 200, "mid"))
+        self.assertEqual(loaded_sizes["mid"], (450, 300))
+        self.assertFalse(overtime_alert_enabled)
+
 
 if __name__ == "__main__":
     unittest.main()

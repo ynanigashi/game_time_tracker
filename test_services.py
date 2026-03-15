@@ -322,15 +322,14 @@ class TestGameInfoLoaderExceptions(unittest.TestCase):
         self.assertEqual(result, [])
 
     @patch('gspread_service.gspread.service_account')
-    def test_load_generic_exception_returns_empty(self, mock_sa):
-        """その他の例外の場合は空リストを返す."""
+    def test_load_generic_exception_is_reraised(self, mock_sa):
+        """想定外の例外は握りつぶさず再送出する."""
         mock_sa.side_effect = RuntimeError("Unexpected error")
         config = self._create_mock_config()
         loader = services.GameInfoLoader(config)
-        
-        result = loader.load()
-        
-        self.assertEqual(result, [])
+
+        with self.assertRaises(RuntimeError):
+            loader.load()
 
     @patch('gspread_service.gspread.service_account')
     def test_load_success_returns_entries(self, mock_sa):
@@ -839,6 +838,21 @@ class TestGameInfoLoaderRecordToEntry(unittest.TestCase):
         
         self.assertEqual(entry.game_title, '12345')
         self.assertEqual(entry.window_title, '67890')
+
+    def test_empty_window_title_emits_warning(self):
+        """window_title が空の場合は警告ログを出す."""
+        record = {
+            'game_title': 'EmptyWindowTitleGame',
+            'window_title': '   ',
+            'play_with_friends': 'FALSE',
+            'is_browser_game': 'FALSE',
+        }
+
+        with self.assertLogs('services', level='WARNING') as captured:
+            entry = services.GameInfoLoader._record_to_entry(record)
+
+        self.assertEqual(entry.window_title, '   ')
+        self.assertTrue(any('window_title が空' in message for message in captured.output))
 
 
 class TestSessionRecorderSaveToSpreadsheet(unittest.TestCase):

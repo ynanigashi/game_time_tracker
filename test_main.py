@@ -439,14 +439,16 @@ class TestMainWindowDirectMethods(unittest.TestCase):
         """_ui_tickはUI更新メソッドを呼び出す."""
         window = self._create_mock_main_window()
         window._update_session_times = MagicMock()
-        window._update_today_totals = MagicMock()
+        window._update_today_totals = MagicMock(return_value=0.0)
         window._update_today_games_list = MagicMock()
+        window._update_overtime_alert = MagicMock()
         
         window._ui_tick()
         
         window._update_session_times.assert_called_once()
         window._update_today_totals.assert_called_once()
         window._update_today_games_list.assert_called_once()
+        window._update_overtime_alert.assert_called_once()
 
 
 class TestMainWindowUIHelpers(unittest.TestCase):
@@ -685,6 +687,16 @@ class TestMainWindowDisplayModeAndState(unittest.TestCase):
         
         window.resize.assert_called_once_with(300, 200)
 
+    def test_apply_mode_geometry_clamps_min_mode_size(self):
+        """minモードのサイズは安全値以上にクランプされる."""
+        window = self._create_mock_main_window()
+        window.display_mode = 'min'
+        window.mode_sizes['min'] = (200, 60)
+
+        window._apply_mode_geometry()
+
+        window.resize.assert_called_once_with(main.MIN_MODE_SAFE_WIDTH, main.MIN_MODE_SAFE_HEIGHT)
+
     def test_save_window_state_records_current_mode_size(self):
         """_save_window_stateは現在のサイズをmode_sizesに記録."""
         window = self._create_mock_main_window()
@@ -696,6 +708,25 @@ class TestMainWindowDisplayModeAndState(unittest.TestCase):
         
         self.assertEqual(window.mode_sizes['mid'], (350, 250))
         mock_save.assert_called_once()
+        self.assertEqual(mock_save.call_args.kwargs.get('overtime_alert_enabled'), True)
+
+    def test_on_overtime_alert_toggled_off_syncs_overlay_immediately(self):
+        """トグルOFF時に状態更新し、オーバーレイ同期を即時実行する."""
+        window = self._create_mock_main_window()
+        window.active_games_cache = []
+        window.inactive_games_cache = []
+        window._sync_overlay = MagicMock()
+        mock_ui_controller = MagicMock()
+        mock_ui_controller.calculate_today_total_seconds.return_value = 1800.0
+        window._get_ui_controller = MagicMock(return_value=mock_ui_controller)
+
+        window._on_overtime_alert_toggled(False)
+
+        self.assertFalse(window.overtime_alert_enabled)
+        tracker = window._get_overtime_alert_tracker()
+        self.assertTrue(tracker.initialized)
+        self.assertEqual(tracker.last_checked_seconds, 1800.0)
+        window._sync_overlay.assert_called_once()
 
     def test_apply_display_mode_hides_widgets_in_min_mode(self):
         """_apply_display_modeはminモードでウィジェットを非表示."""
@@ -2190,6 +2221,7 @@ class TestApplyDisplayModeMaxMid(unittest.TestCase):
         window.w.today_games_min_height = 50
         window.w.window_label = MagicMock()
         window.w.window_list = MagicMock()
+        window.w.overtime_alert_toggle = MagicMock()
         
         window._apply_mode_geometry = MagicMock()
         
@@ -2261,9 +2293,20 @@ class TestApplyDisplayModeMaxMid(unittest.TestCase):
         # active関連が非表示
         window.w.active_label.setVisible.assert_called_with(False)
         window.w.active_display.setVisible.assert_called_with(False)
+        # todayラベルは非表示（時間表示を優先）
+        window.w.today_label.setVisible.assert_called_with(False)
         # window_listが非表示
         window.w.window_label.setVisible.assert_called_with(False)
         window.w.window_list.setVisible.assert_called_with(False)
+
+    def test_min_mode_keeps_overtime_toggle_visible(self):
+        """minモードでも時間超過防止アラートトグルは表示される."""
+        window = self._create_mock_main_window()
+        window.display_mode = 'min'
+
+        window._apply_display_mode()
+
+        window.w.overtime_alert_toggle.setVisible.assert_called_with(True)
 
     def test_apply_mode_geometry_called(self):
         """_apply_mode_geometryが呼び出される."""
@@ -2600,6 +2643,17 @@ class TestOverlayMethods(unittest.TestCase):
 
         self.assertTrue(result)
 
+    def test_should_show_overlay_returns_false_when_overtime_alert_disabled(self):
+        """時間超過防止アラートOFF時はオーバーレイを表示しない."""
+        window = self._create_mock_main_window()
+        window.overtime_alert_enabled = False
+        window._is_today_display_covered_by_foreground_window = MagicMock(return_value=True)
+
+        result = window._should_show_overlay()
+
+        self.assertFalse(result)
+        window._is_today_display_covered_by_foreground_window.assert_not_called()
+
     def test_covered_by_foreign_window_returns_true(self):
         """5点のいずれかが他ウィンドウで覆われればTrue."""
         window = self._create_mock_main_window()
@@ -2702,6 +2756,52 @@ class TestOverlayMethods(unittest.TestCase):
 
         self.assertEqual(result, 0)
         window._window_below.assert_not_called()
+
+
+class TestOvertimeAlertMethods(unittest.TestCase):
+    """時間超過防止アラートのテスト."""
+
+    def _create_mock_main_window(self):
+        with patch.object(main.MainWindow, '__init__', lambda self: None):
+            window = main.MainWindow()
+        return window
+
+    def test_update_overtime_alert_beeps_once_on_threshold_cross(self):
+        """閾値を跨いだときのみ1回通知する."""
+        window = self._create_mock_main_window()
+        window.overtime_alert_enabled = True
+        tracker = main.OvertimeAlertTracker(
+            thresholds_minutes=main.OVERTIME_ALERT_THRESHOLDS_MINUTES,
+            alerted_threshold_minutes=set(),
+            last_checked_seconds=44 * 60,
+            initialized=True,
+        )
+        window._overtime_alert_tracker = tracker
+
+        with patch.object(main.QApplication, "beep") as mock_beep:
+            window._update_overtime_alert((45 * 60) + 1)
+            window._update_overtime_alert((46 * 60))
+
+        self.assertEqual(mock_beep.call_count, 1)
+        self.assertIn(45, tracker.alerted_threshold_minutes)
+
+    def test_update_overtime_alert_does_not_beep_when_disabled(self):
+        """トグルOFF時は閾値を跨いでも通知しない."""
+        window = self._create_mock_main_window()
+        window.overtime_alert_enabled = False
+        tracker = main.OvertimeAlertTracker(
+            thresholds_minutes=main.OVERTIME_ALERT_THRESHOLDS_MINUTES,
+            alerted_threshold_minutes=set(),
+            last_checked_seconds=44 * 60,
+            initialized=True,
+        )
+        window._overtime_alert_tracker = tracker
+
+        with patch.object(main.QApplication, "beep") as mock_beep:
+            window._update_overtime_alert((45 * 60) + 1)
+
+        mock_beep.assert_not_called()
+        self.assertNotIn(45, tracker.alerted_threshold_minutes)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Tuple
 
 from config_loader import LogHandlerConfig
 from gspread_service import GspreadService
+from time_utils import GSS_DATETIME_FORMAT, SECONDS_PER_MINUTE
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ class LogHandler:
     @staticmethod
     def format_datetime_to_gss_style(dt: datetime) -> str:
         """datetimeをスプレッドシート形式に変換."""
-        return dt.strftime("%Y/%m/%d %H:%M:%S")
+        return dt.strftime(GSS_DATETIME_FORMAT)
 
     def get_cached_records(self) -> List[Dict[str, Any]]:
         """キャッシュされたレコードを返す（スプレッドシートにアクセスしない）."""
@@ -67,21 +68,30 @@ class LogHandler:
         
         game_minutes: Dict[str, float] = {}
         total_seconds = 0.0
+        parse_failed_count = 0
         today = datetime.now().date()
         
         try:
             for record in self.records:
                 parsed = parse_record(record)
-                if parsed is None or parsed.start.date() != today:
+                if parsed is None:
+                    parse_failed_count += 1
+                    continue
+                if parsed.start.date() != today:
                     continue
                 
                 seconds = (parsed.end - parsed.start).total_seconds()
                 total_seconds += seconds
                 
-                minutes = seconds / 60.0  # SECONDS_PER_MINUTE
+                minutes = seconds / SECONDS_PER_MINUTE
                 game_minutes[parsed.game_title] = game_minutes.get(parsed.game_title, 0) + minutes
         except Exception as e:
             logger.error(f'今日の統計情報の取得中にエラーが発生しました: {e}')
+        if parse_failed_count:
+            logger.debug(
+                "get_today_stats: parseに失敗したレコードをスキップしました (count=%s)",
+                parse_failed_count,
+            )
         
         return game_minutes, total_seconds
 

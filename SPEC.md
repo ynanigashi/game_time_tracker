@@ -96,12 +96,23 @@ classDiagram
     namespace window_state_py {
         class WindowState {
             <<static>>
+            +load_all()$ Tuple
             +load()$ Tuple
+            +load_overtime_alert_enabled()$ bool
             +save()$
         }
     }
 
     namespace main_py {
+        class OvertimeAlertTracker {
+            <<dataclass>>
+            +thresholds_minutes: Tuple~int~
+            +alerted_threshold_minutes: set~int~
+            +last_checked_seconds: float
+            +initialized: bool
+            +prime()
+            +update() List~int~
+        }
         class MainWindow {
             <<QWidget>>
             +games: List~GameEntry~
@@ -109,14 +120,31 @@ classDiagram
             +recorder: SessionRecorder
             +daily_stats: DailyStatsTracker
             +state_tracker: GameStateTracker
+            +overtime_alert_enabled: bool
             -_init_components()
             -_scan_tick()
             -_ui_tick()
             -_update_game_states()
+            -_get_overtime_alert_tracker()
+            -_initialize_overtime_alert_toggle()
+            -_on_overtime_alert_toggled()
+            -_update_overtime_alert()
+        }
+        class MainWindowStateController {
+            +load_all() Tuple
+            +load() Tuple
+            +load_overtime_alert_enabled() bool
+            +save()
+            +record_resize()$
         }
     }
 
     namespace gui_layout_py {
+        class SlideToggleButton {
+            <<QPushButton>>
+            +__init__()
+            -_apply_style()
+        }
         class LayoutWidgets {
             <<dataclass>>
             +today_label: QLabel
@@ -133,6 +161,7 @@ classDiagram
             +active_max_height: int
             +today_games_min_height: int
             +window_min_height: int
+            +overtime_alert_toggle: Optional~QPushButton~
         }
     }
 
@@ -405,12 +434,29 @@ UIから独立した状態遷移ロジックを提供。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `load(path)` | ファイルから (x, y, display_mode, mode_sizes) を読込。**display_modeが不正な場合は"max"にフォールバック** | `MainWindow.__init__()` |
-| `save(path, x, y, display_mode, mode_sizes)` | 現在の状態をファイルに保存 | `MainWindow._save_window_state()` |
+| `load_all(path)` | ファイルから `(x, y, display_mode, mode_sizes, overtime_alert_enabled)` を読込。**display_modeが不正な場合は"max"にフォールバック** | `MainWindowStateController.load_all()`, `load()`, `load_overtime_alert_enabled()` |
+| `load(path)` | ファイルから `(x, y, display_mode, mode_sizes)` を読込（`load_all()` のラッパー） | `MainWindowStateController.load()` |
+| `load_overtime_alert_enabled(path)` | ファイルから `overtime_alert_enabled` を読込（未設定時は `True`） | `MainWindowStateController.load_overtime_alert_enabled()` |
+| `save(path, x, y, display_mode, mode_sizes, overtime_alert_enabled=True)` | 現在の状態をファイルに保存（`overtime_alert_enabled` を含む） | `MainWindowStateController.save()` |
 
 ---
 
 ### main.py
+
+#### `OvertimeAlertTracker` (dataclass)
+時間超過防止アラートの閾値通知状態を管理する。
+
+| フィールド | 説明 |
+|------------|------|
+| `thresholds_minutes` | 通知対象の閾値（分） |
+| `alerted_threshold_minutes` | 当日中に通知済みの閾値（分）の集合 |
+| `last_checked_seconds` | 直近の判定秒数 |
+| `initialized` | 進捗初期化済みかどうか |
+
+| メソッド | 説明 | 呼び出し元 |
+|----------|------|------------|
+| `prime(total_seconds)` | 現在値を基準に進捗を初期化し、遡及通知を抑止 | `MainWindow._prime_overtime_alert_progress()`, `update()` 初回 |
+| `update(total_seconds, alerts_enabled)` | 閾値跨ぎを判定し、今回通知すべき閾値（分）一覧を返す | `MainWindow._update_overtime_alert()` |
 
 #### `MainWindow` (QWidget)
 GUI版メインウィンドウ。
@@ -446,6 +492,15 @@ GUI版メインウィンドウ。
 | `_update_today_games_list()` | 今日プレイしたゲーム一覧をUIに反映。**日跨ぎセッションは0:00以降のみ、5分未満は除外** | `_ui_tick()` 内部 |
 | `_load_today_completed_seconds()` | 起動時に今日分の完了時間をロード | `_init_components()` 内部 |
 | `_save_window_state()` | ウィンドウ位置・サイズ・モードを保存 | `closeEvent()`, `_cycle_display_mode()` |
+| `_is_overtime_alert_enabled()` | 時間超過防止アラートの有効状態を返す | `_save_window_state()`, `_update_overtime_alert()`, オーバーレイ判定 |
+| `_set_overtime_alert_enabled(enabled)` | 時間超過防止アラートの有効状態を更新 | `_on_overtime_alert_toggled()` |
+| `_get_overtime_alert_tracker()` | アラート閾値跨ぎ判定用トラッカーを取得（必要時生成） | `_prime_overtime_alert_progress()`, `_update_overtime_alert()` |
+| `_get_overtime_alert_toggle()` | レイアウト上のアラートトグルウィジェット参照を取得 | `_initialize_overtime_alert_toggle()` |
+| `_initialize_overtime_alert_toggle()` | トグル初期状態を反映し、`toggled` シグナルを接続 | `_init_components()` |
+| `_on_overtime_alert_toggled(checked)` | トグル変更時に有効状態を更新し、進捗再初期化とオーバーレイ同期を実行 | `QPushButton.toggled` |
+| `_prime_overtime_alert_progress(total_seconds)` | 現在値を基準に通知進捗を初期化（遡及通知防止） | 日付変更時, `_on_overtime_alert_toggled()` |
+| `_emit_overtime_alert(threshold_minutes)` | 閾値到達アラートを通知（`QApplication.beep()` + ログ） | `_update_overtime_alert()` |
+| `_update_overtime_alert(total_seconds)` | 閾値跨ぎを検知して未通知閾値のみアラート通知 | `_ui_tick()` |
 | `_set_status(message)` | ステータスをタイトルバーに反映 | 各所 |
 | `_apply_mode_geometry()` | 表示モードに応じたサイズを適用 | `_apply_display_mode()` 内部 |
 | `_apply_display_mode()` | 表示モードに応じてウィジェット表示を切替 | `_init_components()`, `_cycle_display_mode()` |
@@ -460,13 +515,14 @@ GUI版メインウィンドウ。
 
 #### `MainWindow` 内部コントローラー
 
-| クラス | 役割 |
-|--------|------|
-| `MainWindowUiController` | `active/session/today/windows` のUI更新を担当 |
-| `MainWindowDisplayController` | `min/mid/max` 表示モードの可視性・サイズ制約・ジオメトリ適用を担当 |
-| `MainWindowStateController` | ウィンドウ状態の読み書きとリサイズ記録を担当 |
-| `MainWindowLoopController` | タイマー生成と `scan_tick/ui_tick` 実行フローを担当 |
-| `MainWindowBootstrapper` | 初期化依存構築と初期統計ロードを担当（失敗時は `MainWindowBootstrapError`） |
+| クラス | 役割 | 主要メソッド |
+|--------|------|--------------|
+| `MainWindowUiController` | `active/session/today/windows` のUI更新を担当 | `update_session_times()`, `update_today_totals()`, `update_today_games_list()` |
+| `MainWindowDisplayController` | `min/mid/max` 表示モードの可視性・サイズ制約・ジオメトリ適用を担当 | `apply_display_mode()`, `apply_mode_geometry()`, `next_display_mode()` |
+| `MainWindowStateController` | ウィンドウ状態の読み書きとリサイズ記録を担当 | `load_all()`, `save()`, `record_resize()` |
+| `MainWindowLoopController` | タイマー生成と `scan_tick/ui_tick` 実行フローを担当 | `start_timer()`, `run_scan_tick()`, `run_ui_tick()` |
+| `MainWindowBootstrapper` | 初期化依存構築と初期統計ロードを担当（失敗時は `MainWindowBootstrapError`） | `bootstrap()` |
+| `MainWindowOverlayController` | オーバーレイの初期化・表示条件判定・可視同期を担当 | `initialize_overlay()`, `should_show_overlay()`, `sync_overlay()` |
 
 ---
 
@@ -482,7 +538,16 @@ GUI版メインウィンドウ。
 | `active_label`, `active_display` | プレイ中ゲーム表示 |
 | `today_games_label`, `today_games_table` | 今日プレイしたゲーム一覧 |
 | `window_label`, `window_list` | ウィンドウタイトル一覧 |
+| `overtime_alert_toggle` | 時間超過防止アラートのON/OFFトグル（`SlideToggleButton`） |
 | `active_min_height`, `active_max_height`, `today_games_min_height`, `window_min_height` | 各ウィジェットの高さ定数 |
+
+#### `SlideToggleButton` (QPushButton)
+時間超過防止アラート用の小型スライドトグル。
+
+| メソッド | 説明 | 呼び出し元 |
+|----------|------|------------|
+| `__init__(parent=None)` | チェック可能ボタンとして初期化し、トグル時スタイル更新を接続 | `build_main_layout()` |
+| `_apply_style(checked)` | ON/OFFでノブ位置（左/右）と色を切り替える | `__init__()`, `toggled` シグナル |
 
 #### `build_main_layout(parent)` (関数)
 メインレイアウトを構築して `LayoutWidgets` を返す。
@@ -579,7 +644,7 @@ Google Spreadsheet操作を抽象化するサービスクラス。
   - ステータスをタイトルバーに表示し、左クリックで表示モード切替（max/mid/min）。
   - ウィンドウ検出は1秒間隔、UI更新は0.1秒間隔。
   - 位置・サイズ・モードを `window_state.txt` に保存/復元。
-  - `WindowState` クラス: 静的メソッドのみのシンプルなユーティリティクラス（`load()`/`save()`）。
+  - `WindowState` クラス: 静的メソッドのみのシンプルなユーティリティクラス（`load_all()`/`load()`/`save()`）。
   - `MainWindow`: ウィジェット参照を `self.w` に統合、タイマー初期化ヘルパー `_start_timer()` で簡潔化。
   - 状態管理の二重化を解消し、約30行のコード削減を実現。
   - **今日プレイしたゲーム一覧表示**（mid/maxモード）:
@@ -767,15 +832,75 @@ def matches_window(self, window_title: str, browsers: Sequence[str]) -> bool:
 - プレイ中のゲーム
 - 今日プレイしたゲーム一覧（ゲーム名: XX分）
 - 現在のウィンドウタイトル一覧
+- 設定エリア（最下部）
+  - `時間超過防止アラート` トグル
 
 ### mid モード
 - 今日のプレイ時間（HH:MM:SS.F形式）
 - 現在のセッション時間
 - プレイ中のゲーム
 - 今日プレイしたゲーム一覧（ゲーム名: XX分）
+- 設定エリア（最下部）
+  - `時間超過防止アラート` トグル
 
 ### min モード（最小表示）
-- 今日のプレイ時間のみ
+- 今日のプレイ時間
+- 設定エリア（最下部）
+  - `時間超過防止アラート` トグル
+
+## 1時間アラート（時間超過防止）
+
+### 目的
+- プレイ時間を1日1時間（60分）の目安で管理するため、段階的にアラートを鳴らす。
+- 「時間超過防止アラート」を無効化したいときは、トグルで即時OFFできるようにする。
+- トグルがOFFの間は、オーバーレイの時間表示を完全に無効化する。
+
+### 仕様（ユーザー向け）
+- 追加UI: `時間超過防止アラート` トグル（ON/OFF）
+  - 初期値: ON
+  - 配置: ウィンドウ最下部の設定エリア
+  - 配置詳細: 設定エリア内で左詰め（ラベルの右にスイッチ）
+  - 表示モード: `max/mid/min` すべてで表示（特に `mid/min` でも常時表示）
+  - 表示形式: ノブが左右に移動する小型スライドスイッチ（コンパクト表示）
+- アラート閾値（分）:
+  - `45, 50, 55, 58, 60`
+- アラート音:
+  - 各閾値に到達した瞬間に1回のみ鳴る（同一日で再通知しない）
+- トグルOFF時:
+  - アラート音を鳴らさない
+  - オーバーレイ時間表示を非表示にする（表示中なら即時で閉じる/隠す）
+
+### 判定ルール（内部仕様）
+- アラート判定に使う「今日のプレイ時間」は、既存の `today_time_display` と同じ計算値を使用する。
+  - `完了分 + 進行中分`（日跨ぎ時は当日0:00以降のみ）
+- 閾値判定は「閾値を下から上にまたいだ瞬間」に発火する。
+  - 例: 前回 44:59、今回 45:01 -> 45分アラート発火
+- 当日中に発火済みの閾値は再通知しない（重複防止）。
+- 日付変更時に発火済み状態をリセットする。
+- 起動時またはトグル再ON時に既に閾値を超過している場合:
+  - 過去分をさかのぼって一括通知しない
+  - その時点以降に未到達閾値をまたいだときのみ通知する
+- 曜日・祝日判定は行わない（システム側のカレンダー判定なし）。
+  - 通知可否は `時間超過防止アラート` トグル状態のみで決定する。
+
+### オーバーレイ連携
+- 既存のオーバーレイ表示条件に以下を追加:
+  - `時間超過防止アラート == ON` のときのみオーバーレイ表示判定を実行
+- `時間超過防止アラート == OFF` の間は、オーバーレイ表示判定をスキップし常時非表示。
+
+### 永続化
+- トグル状態は `window_state.txt` に保存・復元する。
+  - 追加キー（案）: `overtime_alert_enabled: bool`
+  - 旧形式ファイル（キーなし）読み込み時は `True` 扱い
+
+### 受け入れ条件
+1. トグルONで、45/50/55/58/60分到達時に各1回だけアラートが鳴る。
+2. 同一閾値は同日中に重複して鳴らない。
+3. `mid/min` モードでも、`時間超過防止アラート` トグルがウィンドウ最下部に表示される。
+4. トグルOFF直後にオーバーレイが非表示になり、以後表示されない。
+5. トグルOFF中はアラートが鳴らない。
+6. 日付変更で閾値通知状態がリセットされる。
+7. アプリ再起動後もトグル状態が復元される。
 
 ## 日を跨いだ時の処理
 
