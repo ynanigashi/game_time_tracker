@@ -8,3 +8,6 @@
 !*.txt
 !*.template
 !*.example
+
+# 実行時に更新されるローカル状態ファイル
+window_state.txt
