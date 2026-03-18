@@ -744,6 +744,7 @@ class MainWindow(QWidget):
         self._initialize_window_state()
         self.w = build_main_layout(self)
         self._initialize_runtime_state()
+        self._initialize_window_title_copy()
         self._warmup_dependencies()
         self._init_components()
         self._start_background_timers()
@@ -780,6 +781,74 @@ class MainWindow(QWidget):
             thresholds_minutes=OVERTIME_ALERT_THRESHOLDS_MINUTES,
             alerted_threshold_minutes=set(),
         )
+        self._window_title_copy_connected = False
+
+    def _get_window_list_widget(self) -> Optional[QWidget]:
+        """window_list ウィジェットを安全に取得する。"""
+        return cast(Optional[QWidget], getattr(getattr(self, "w", None), "window_list", None))
+
+    def _initialize_window_title_copy(self) -> None:
+        """現在のウィンドウタイトル一覧のクリックコピーを初期化する。"""
+        window_list = self._get_window_list_widget()
+        if window_list is None or self._window_title_copy_connected:
+            return
+
+        item_clicked_signal = getattr(window_list, "itemClicked", None)
+        if item_clicked_signal is None:
+            return
+
+        try:
+            item_clicked_signal.connect(self._on_window_title_item_clicked)
+        except Exception:
+            return
+
+        self._window_title_copy_connected = True
+
+        set_tooltip = getattr(window_list, "setToolTip", None)
+        if callable(set_tooltip):
+            set_tooltip("クリックした行のタイトルをコピー")
+
+    def _on_window_title_item_clicked(self, item: object) -> None:
+        """現在のウィンドウタイトル一覧の行クリック時に文字列をコピーする。"""
+        if item is None:
+            return
+
+        text_getter = getattr(item, "text", None)
+        if not callable(text_getter):
+            return
+
+        try:
+            text = str(text_getter())
+        except Exception:
+            return
+
+        self._copy_text_to_clipboard(text)
+
+    def _copy_text_to_clipboard(self, text: str) -> None:
+        """指定テキストをクリップボードへコピーする。"""
+        if not text or not text.strip():
+            return
+
+        clipboard_getter = getattr(QApplication, "clipboard", None)
+        if not callable(clipboard_getter):
+            return
+
+        try:
+            clipboard = clipboard_getter()
+        except Exception:
+            return
+        if clipboard is None:
+            return
+
+        set_text = getattr(clipboard, "setText", None)
+        if not callable(set_text):
+            return
+
+        try:
+            set_text(text)
+        except Exception:
+            return
+        self._set_status("ウィンドウタイトルをコピーしました")
 
     def _warmup_dependencies(self) -> None:
         """起動直後に使う依存を事前生成する."""

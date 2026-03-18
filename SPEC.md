@@ -488,6 +488,9 @@ GUI版メインウィンドウ。
 | `_update_session_times(active_games, now)` | 現在のセッション時間をUIに反映 | `_ui_tick()` 内部 |
 | `_update_today_totals(active_games, now)` | 今日の合計時間をUIに反映。**日跨ぎセッションは0:00以降のみ、5分未満は除外** | `_ui_tick()` 内部 |
 | `_update_window_list(window_titles)` | ウィンドウタイトル一覧をUIに反映 | `_scan_tick()` 内部 |
+| `_initialize_window_title_copy()` | `window_list.itemClicked` を接続し、クリックコピー機能を初期化 | `__init__()` |
+| `_on_window_title_item_clicked(item)` | クリックしたウィンドウタイトル項目の文字列をコピー | `QListWidget.itemClicked` |
+| `_copy_text_to_clipboard(text)` | テキストをクリップボードに設定し、ステータス更新 | `_on_window_title_item_clicked()` |
 | `_load_today_game_minutes()` | スプレッドシートから今日のゲーム別時間を集計 | `_init_components()`, `_scan_games()` |
 | `_update_today_games_list()` | 今日プレイしたゲーム一覧をUIに反映。**日跨ぎセッションは0:00以降のみ、5分未満は除外** | `_ui_tick()` 内部 |
 | `_load_today_completed_seconds()` | 起動時に今日分の完了時間をロード | `_init_components()` 内部 |
@@ -832,6 +835,7 @@ def matches_window(self, window_title: str, browsers: Sequence[str]) -> bool:
 - プレイ中のゲーム
 - 今日プレイしたゲーム一覧（ゲーム名: XX分）
 - 現在のウィンドウタイトル一覧
+  - 各行をクリックするとそのタイトル文字列をクリップボードへコピー可能
 - 設定エリア（最下部）
   - `時間超過防止アラート` トグル
 

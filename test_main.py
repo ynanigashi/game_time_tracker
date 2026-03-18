@@ -581,6 +581,35 @@ class TestMainWindowUIHelpers(unittest.TestCase):
         window.w.window_list.clear.assert_called_once()
         self.assertEqual(window.w.window_list.addItem.call_count, 2)
 
+    def test_on_window_title_item_clicked_copies_to_clipboard(self):
+        """ウィンドウタイトル行クリックでクリップボードへコピーする."""
+        window = self._create_mock_main_window()
+        window._set_status = MagicMock()
+        item = MagicMock()
+        item.text.return_value = "Game Window Title"
+        clipboard = MagicMock()
+
+        with patch.object(main.QApplication, "clipboard", return_value=clipboard, create=True):
+            window._on_window_title_item_clicked(item)
+
+        clipboard.setText.assert_called_once_with("Game Window Title")
+        window._set_status.assert_called_once_with("ウィンドウタイトルをコピーしました")
+
+    def test_initialize_window_title_copy_connects_item_clicked(self):
+        """_initialize_window_title_copyはitemClickedシグナルを接続する."""
+        window = self._create_mock_main_window()
+        window._window_title_copy_connected = False
+        window.w.window_list.itemClicked = MagicMock()
+        window.w.window_list.setToolTip = MagicMock()
+
+        window._initialize_window_title_copy()
+
+        window.w.window_list.itemClicked.connect.assert_called_once_with(
+            window._on_window_title_item_clicked
+        )
+        window.w.window_list.setToolTip.assert_called_once()
+        self.assertTrue(window._window_title_copy_connected)
+
     def test_update_today_games_list_clears_when_empty(self):
         """_update_today_games_listは空のとき最終コンテンツを更新."""
         window = self._create_mock_main_window()
