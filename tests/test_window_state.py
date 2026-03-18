@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 # 蜈ｱ騾壹せ繧ｿ繝悶ｒ繧､繝ｳ繧ｹ繝医・繝ｫ
-from test_stubs import install_stubs
+from tests.test_stubs import install_stubs
 install_stubs()
 
 import window_state
@@ -107,3 +107,4 @@ class TestWindowState(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -1,4 +1,4 @@
-# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false, reportOptionalMemberAccess=false
+﻿# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false, reportOptionalMemberAccess=false
 """models.py のユニットテスト."""
 
 import unittest
@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
 # 共通スタブをインストール（他モジュール import 前に実行）
-from test_stubs import install_stubs
+from tests.test_stubs import install_stubs
 install_stubs()
 
 import models
@@ -361,3 +361,4 @@ class TestParseBool(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

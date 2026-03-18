@@ -1,4 +1,4 @@
-# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
+﻿# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
 """config_loader.py のユニットテスト."""
 
 import configparser
@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 # 共通スタブをインストール
-from test_stubs import install_stubs
+from tests.test_stubs import install_stubs
 install_stubs()
 
 import main
@@ -257,3 +257,4 @@ exclude_titles =
 
 if __name__ == "__main__":
     unittest.main()
+

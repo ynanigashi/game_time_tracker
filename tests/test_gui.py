@@ -1,10 +1,10 @@
-"""GUIモジュールのテスト（PySide6を必要としないユニットテスト）."""
+﻿"""GUIモジュールのテスト（PySide6を必要としないユニットテスト）."""
 
 import unittest
 from datetime import date
 
 # 共通スタブをインストール（他モジュール import 前に実行）
-from test_stubs import install_stubs
+from tests.test_stubs import install_stubs
 install_stubs()
 
 # Now import the gui module
@@ -128,3 +128,4 @@ class TestFormatHms(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

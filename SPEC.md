@@ -1021,15 +1021,15 @@ game_time_tracker.bat
   - Google スプレッドシートへ自動保存
 
 ## 開発
-- テスト: `python -m unittest discover`
-  - `test_stubs.py` - 共通テストスタブ（PySide6/gspread/pygetwindowのフェイク、FakeLogHandler）
-  - `test_main.py` - MainWindow/GUI関連テスト
-  - `test_models.py` - models.pyのテスト
-  - `test_services.py` - services.pyのテスト
-  - `test_time_utils.py` - time_utils.pyのテスト
-  - `test_config.py` - config_loader.pyのテスト
-  - `test_log_handler.py` - log_handler.py/gspread_service.pyのテスト
-  - `test_window_state.py` - window_state.pyのテスト
-  - `test_gui.py` - DailyStatsTracker/format_hmsのテスト
+- テスト: `python -m unittest`（`tests/` 配下を検出）
+  - `tests/test_stubs.py` - 共通テストスタブ（PySide6/gspread/pygetwindowのフェイク、FakeLogHandler）
+  - `tests/test_main.py` - MainWindow/GUI関連テスト
+  - `tests/test_models.py` - models.pyのテスト
+  - `tests/test_services.py` - services.pyのテスト
+  - `tests/test_time_utils.py` - time_utils.pyのテスト
+  - `tests/test_config.py` - config_loader.pyのテスト
+  - `tests/test_log_handler.py` - log_handler.py/gspread_service.pyのテスト
+  - `tests/test_window_state.py` - window_state.pyのテスト
+  - `tests/test_gui.py` - DailyStatsTracker/format_hmsのテスト
 - ポーリング間隔・最小記録時間: `main.py` の `POLL_INTERVAL_SECONDS`, `MIN_PLAY_MINUTES` で調整。
 - 対応ブラウザ・除外ウィンドウ: `config.ini` の `[WINDOW_SCAN]` または `config_loader.DEFAULT_BROWSERS/DEFAULT_EXCLUDED_TITLES` で設定。

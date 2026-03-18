@@ -200,7 +200,7 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
 - 仮想環境: `python -m venv .venv && .\.venv\Scripts\activate && pip install -r requirements.txt`
 - 実行: `python main.py`（Google Sheets への書き込みが発生するため必要なら別シートで検証）
 - 設定: `config.ini` にログシート・ゲーム情報シートのキーと gid、サービスアカウント JSON のパスを指定
-- テスト: 依存をスタブ化した単体テストを `python -m unittest` で実行（244件のテスト）
+- テスト: 依存をスタブ化した単体テストを `python -m unittest` で実行（`tests/` 配下, 308件のテスト）
 - 拡張例:
   - ポーリング間隔の変更は `main.py` の `POLL_INTERVAL_SECONDS`
   - 最小記録時間の変更は `services.py` の `MIN_PLAY_MINUTES`

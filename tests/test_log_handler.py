@@ -1,4 +1,4 @@
-# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false
+﻿# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false
 """log_handler.py / gspread_service.py のユニットテスト."""
 
 import unittest
@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 # 共通スタブをインストール
-from test_stubs import install_stubs, fake_gspread, FakeLogHandler
+from tests.test_stubs import install_stubs, fake_gspread, FakeLogHandler
 install_stubs()
 
 from log_handler import LogHandler
@@ -521,3 +521,4 @@ class TestGspreadServiceSheetProperty(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

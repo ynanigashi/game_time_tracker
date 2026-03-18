@@ -1,4 +1,4 @@
-# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
+﻿# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
 """テスト用共通スタブ・フェイク定義.
 
 PySide6, gspread, pygetwindow の外部依存をスタブで置き換え、
@@ -227,3 +227,4 @@ class FakeLogHandler:
                 }
             )
         return True
+

@@ -1,11 +1,11 @@
-# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
+﻿# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
 """time_utils.py のユニットテスト."""
 
 import unittest
 from datetime import datetime, time, timedelta
 
 # 共通スタブをインストール
-from test_stubs import install_stubs
+from tests.test_stubs import install_stubs
 install_stubs()
 
 import time_utils
@@ -13,7 +13,7 @@ from time_utils import format_hms, split_by_day, calc_today_elapsed_seconds, GSS
 
 import models
 import services
-from test_stubs import FakeLogHandler
+from tests.test_stubs import FakeLogHandler
 
 
 class TestSplitByDay(unittest.TestCase):
@@ -243,3 +243,4 @@ class TestTimeUtilsCalcTodayElapsedSeconds(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

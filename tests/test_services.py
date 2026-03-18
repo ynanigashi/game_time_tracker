@@ -1,4 +1,4 @@
-# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false, reportOptionalMemberAccess=false
+﻿# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false, reportOptionalMemberAccess=false
 """services.py のユニットテスト."""
 
 import sys
@@ -7,7 +7,7 @@ from datetime import datetime, date, time, timedelta
 from unittest.mock import MagicMock, patch
 
 # 共通スタブをインストール
-from test_stubs import install_stubs, fake_gspread, FakeLogHandler
+from tests.test_stubs import install_stubs, fake_gspread, FakeLogHandler
 install_stubs()
 
 import main
@@ -1080,3 +1080,4 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

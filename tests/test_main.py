@@ -1,4 +1,4 @@
-# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false, reportOptionalMemberAccess=false
+﻿# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false, reportOptionalMemberAccess=false
 
 import configparser
 import sys
@@ -10,7 +10,7 @@ import tempfile
 import os
 
 # 共通スタブをインストール（他モジュール import 前に実行）
-from test_stubs import install_stubs, fake_gspread, FakeLogHandler
+from tests.test_stubs import install_stubs, fake_gspread, FakeLogHandler
 install_stubs()
 
 import main
@@ -2835,3 +2835,4 @@ class TestOvertimeAlertMethods(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -8,7 +8,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
+from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence, Tuple, TypeVar, cast
 
 # ロギング設定
 _file_handler = logging.FileHandler('game_time_tracker.log', encoding='utf-8')
@@ -76,6 +76,15 @@ Point = Tuple[int, int]
 Rect = Tuple[int, int, int, int]
 
 _USER32 = ctypes.windll.user32 if sys.platform == "win32" else None
+
+
+class _GeometryLike(Protocol):
+    """QRect 互換の最小インターフェース."""
+
+    def width(self) -> int: ...
+    def height(self) -> int: ...
+    def x(self) -> int: ...
+    def y(self) -> int: ...
 
 
 @dataclass
@@ -164,11 +173,11 @@ class TodayTimeOverlayWindow(QWidget):
         self.resize(OVERLAY_FALLBACK_WIDTH, OVERLAY_FALLBACK_HEIGHT)
 
     @staticmethod
-    def _window_flag(flag_name: str) -> object:
+    def _window_flag(flag_name: str) -> int:
         window_type = getattr(Qt, "WindowType", None)
         if window_type is not None and hasattr(window_type, flag_name):
-            return getattr(window_type, flag_name)
-        return getattr(Qt, flag_name, 0)
+            return int(cast(Any, getattr(window_type, flag_name)))
+        return int(cast(Any, getattr(Qt, flag_name, 0)))
 
     @staticmethod
     def _widget_attribute(attribute_name: str) -> Optional[object]:
@@ -180,7 +189,7 @@ class TodayTimeOverlayWindow(QWidget):
     def _set_widget_attribute(self, attribute_name: str, enabled: bool = True) -> None:
         attribute = self._widget_attribute(attribute_name)
         if attribute is not None:
-            self.setAttribute(attribute, enabled)
+            self.setAttribute(cast(Any, attribute), enabled)
 
     def _configure_window(self) -> None:
         flags = (
@@ -189,7 +198,7 @@ class TodayTimeOverlayWindow(QWidget):
             | self._window_flag("WindowStaysOnTopHint")
             | self._window_flag("WindowTransparentForInput")
         )
-        self.setWindowFlags(flags)
+        self.setWindowFlags(cast(Any, flags))
         self.setWindowOpacity(0.88)
 
         self._set_widget_attribute("WA_TranslucentBackground")
@@ -468,7 +477,7 @@ class MainWindowStateController:
 
     def save(
         self,
-        geom: object,
+        geom: _GeometryLike,
         display_mode: str,
         mode_sizes: Dict[str, Tuple[int, int]],
         overtime_alert_enabled: bool,
@@ -1199,9 +1208,9 @@ class MainWindow(QWidget):
         """現在のオーバーレイウィンドウを返す。"""
         return cast(Optional[TodayTimeOverlayWindow], getattr(self, "overlay_window", None))
 
-    def _get_today_time_display(self) -> Optional[QWidget]:
+    def _get_today_time_display(self) -> Optional[QLabel]:
         """today_time_display ウィジェットを安全に取得する。"""
-        return cast(Optional[QWidget], getattr(getattr(self, "w", None), "today_time_display", None))
+        return cast(Optional[QLabel], getattr(getattr(self, "w", None), "today_time_display", None))
 
     def _refresh_overlay_time(self) -> None:
         """オーバーレイの時刻表示を更新する."""
@@ -1310,7 +1319,7 @@ class MainWindow(QWidget):
         if not callable(win_id_callable):
             return 0
         try:
-            return int(win_id_callable())
+            return int(cast(Any, win_id_callable()))
         except Exception:
             return 0
 
