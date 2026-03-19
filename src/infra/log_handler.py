@@ -22,7 +22,7 @@ class LogHandler:
 
     def __init__(self, config: LogHandlerConfig) -> None:
         """スプレッドシートに接続し、全レコードをキャッシュに保存.
-        
+
         Args:
             config: ログハンドラー設定（認証情報パスとシートキー）
 
@@ -58,19 +58,19 @@ class LogHandler:
 
     def get_today_stats(self) -> Tuple[Dict[str, float], float]:
         """今日のゲーム時間統計を取得（1回のパースで取得）.
-        
+
         Returns:
-            (game_minutes, total_seconds): 
+            (game_minutes, total_seconds):
                 - game_minutes: ゲームタイトルごとの分数の辞書
                 - total_seconds: 今日の完了プレイ時間の合計（秒）
         """
         from src.core.models import parse_record
-        
+
         game_minutes: Dict[str, float] = {}
         total_seconds = 0.0
         parse_failed_count = 0
         today = datetime.now().date()
-        
+
         try:
             for record in self.records:
                 parsed = parse_record(record)
@@ -79,12 +79,13 @@ class LogHandler:
                     continue
                 if parsed.start.date() != today:
                     continue
-                
+
                 seconds = (parsed.end - parsed.start).total_seconds()
                 total_seconds += seconds
-                
+
                 minutes = seconds / SECONDS_PER_MINUTE
-                game_minutes[parsed.game_title] = game_minutes.get(parsed.game_title, 0) + minutes
+                game_minutes[parsed.game_title] = game_minutes.get(
+                    parsed.game_title, 0) + minutes
         except Exception as e:
             logger.error('今日の統計情報の取得中にエラーが発生しました: %s', e)
         if parse_failed_count:
@@ -92,15 +93,15 @@ class LogHandler:
                 "get_today_stats: parseに失敗したレコードをスキップしました (count=%s)",
                 parse_failed_count,
             )
-        
+
         return game_minutes, total_seconds
 
     def save_record(self, values: List[Any]) -> bool:
         """レコードをスプレッドシートに保存。
-        
+
         Args:
             values: [index, start_time, end_time, title, play_with_friends] の形式。
-        
+
         Returns:
             保存成功時True、失敗時False。
         """

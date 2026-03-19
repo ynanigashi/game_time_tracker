@@ -1,5 +1,64 @@
-﻿"""Game Time Tracker - PySide6 GUI."""
+"""Game Time Tracker - PySide6 GUI."""
 
+from PySide6.QtCore import QTimer, Qt
+from src.app.win32_helpers import (
+    Point,
+    Rect,
+    global_rect_of_widget,
+    rect_contains_point,
+    rects_intersect,
+    sample_points_from_rect,
+    window_rect,
+    window_at_point,
+    window_below,
+    root_window,
+    window_handle_of,
+    get_foreground_hwnd,
+    is_own_process_window,
+)
+from src.ui.gui_layout import build_main_layout
+from src.infra.log_handler import LogHandler
+from src.infra.config_loader import (
+    DEFAULT_BROWSERS,
+    DEFAULT_EXCLUDED_TITLES,
+    ConfigLoader,
+)
+from src.core.window_state import (
+    DEFAULT_OVERTIME_ALERT_ENABLED,
+    DISPLAY_MODES,
+    MODE_DEFAULT_SIZES,
+    WindowState,
+)
+from src.core.time_utils import (
+    SECONDS_PER_MINUTE,
+    calc_today_elapsed_seconds,
+    format_hms,
+)
+from src.core.services import (
+    DailyStatsTracker,
+    GameInfoLoader,
+    ScanResult,
+    GameStateTracker,
+    Messages,
+    SessionRecorder,
+    WindowScanner,
+    MIN_PLAY_MINUTES,
+)
+from src.core.models import GameEntry
+from src.app.main_components import (
+    MainWindowBootstrapError,
+    MainWindowBootstrapResult,
+    MainWindowBootstrapper,
+    MainWindowDisplayController,
+    MainWindowLoopController,
+    MainWindowOverlayController,
+    MainWindowStateController,
+    MainWindowUiController,
+    TodayTimeOverlayWindow,
+)
+from src.app import main_components as components
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QWidget
+from PySide6.QtGui import QCloseEvent, QMouseEvent, QResizeEvent
 import atexit
 import logging
 import sys
@@ -35,58 +94,6 @@ def configure_logging() -> None:
     )
     atexit.register(logging.shutdown)
     _LOGGING_CONFIGURED = True
-from PySide6.QtCore import QTimer, Qt
-from PySide6.QtGui import QCloseEvent, QMouseEvent, QResizeEvent
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QWidget
-
-from src.app import main_components as components
-from src.app.main_components import (
-    MainWindowBootstrapError,
-    MainWindowBootstrapResult,
-    MainWindowBootstrapper,
-    MainWindowDisplayController,
-    MainWindowLoopController,
-    MainWindowOverlayController,
-    MainWindowStateController,
-    MainWindowUiController,
-    TodayTimeOverlayWindow,
-)
-from src.core.models import GameEntry
-from src.core.services import (
-    DailyStatsTracker,
-    GameInfoLoader,
-    ScanResult,
-    GameStateTracker,
-    Messages,
-    SessionRecorder,
-    WindowScanner,
-    MIN_PLAY_MINUTES,
-)
-from src.core.time_utils import SECONDS_PER_MINUTE, calc_today_elapsed_seconds, format_hms
-from src.core.window_state import (
-    DEFAULT_OVERTIME_ALERT_ENABLED,
-    DISPLAY_MODES,
-    MODE_DEFAULT_SIZES,
-    WindowState,
-)
-from src.infra.config_loader import DEFAULT_BROWSERS, DEFAULT_EXCLUDED_TITLES, ConfigLoader
-from src.infra.log_handler import LogHandler
-from src.ui.gui_layout import build_main_layout
-from src.app.win32_helpers import (
-    Point,
-    Rect,
-    global_rect_of_widget,
-    rect_contains_point,
-    rects_intersect,
-    sample_points_from_rect,
-    window_rect,
-    window_at_point,
-    window_below,
-    root_window,
-    window_handle_of,
-    get_foreground_hwnd,
-    is_own_process_window,
-)
 
 
 # =============================================================================
@@ -312,7 +319,11 @@ class MainWindow(QWidget):
             if game.is_playing and game.start_time
         ]
 
-    def _start_timer(self, interval_seconds: float, callback: Callable[[], None]) -> QTimer:
+    def _start_timer(
+        self,
+        interval_seconds: float,
+        callback: Callable[[],
+                           None]) -> QTimer:
         """タイマーを作成して開始."""
         return self._get_loop_controller().start_timer(self, interval_seconds, callback)
 
@@ -435,7 +446,10 @@ class MainWindow(QWidget):
         """監視サイクル（1秒間隔）."""
         self._get_loop_controller().run_scan_tick(self)
 
-    def _scan_games(self, window_titles: List[str], foreground_title: Optional[str]) -> ScanResult:
+    def _scan_games(
+            self,
+            window_titles: List[str],
+            foreground_title: Optional[str]) -> ScanResult:
         """GameStateTracker にゲーム状態スキャンを委譲."""
         return self.state_tracker.scan(
             games=self.games,
@@ -464,19 +478,29 @@ class MainWindow(QWidget):
         else:
             self._set_status(Messages.NO_GAME_PLAYING)
 
-    def _update_active_list(self, active_games: List[GameEntry], inactive_games: List[GameEntry]) -> None:
+    def _update_active_list(
+            self,
+            active_games: List[GameEntry],
+            inactive_games: List[GameEntry]) -> None:
         """プレイ中ゲームリストを更新."""
         self._get_ui_controller().update_active_list(active_games, inactive_games)
 
-    def _all_playing_games(self, active_games: Optional[Sequence[GameEntry]] = None) -> List[GameEntry]:
+    def _all_playing_games(
+            self,
+            active_games: Optional[Sequence[GameEntry]] = None) -> List[GameEntry]:
         """アクティブ/非アクティブを統合した、現在プレイ中のゲーム一覧を返す."""
         active = active_games if active_games is not None else self.active_games_cache
-        return self._get_ui_controller().all_playing_games(active, self.inactive_games_cache)
+        return self._get_ui_controller().all_playing_games(
+            active,
+            self.inactive_games_cache,
+        )
 
-
-    def _update_session_times(self, active_games: List[GameEntry], now: datetime) -> None:
+    def _update_session_times(
+            self,
+            active_games: List[GameEntry],
+            now: datetime) -> None:
         """現在のセッション時間を更新（最長セッションを表示）.
-        
+
         active_games と inactive_games_cache を合わせた全プレイ中ゲームから最長を表示。
         """
         self._get_ui_controller().update_session_times(
@@ -485,9 +509,12 @@ class MainWindow(QWidget):
             now,
         )
 
-    def _update_today_totals(self, active_games: List[GameEntry], now: datetime) -> float:
+    def _update_today_totals(
+            self,
+            active_games: List[GameEntry],
+            now: datetime) -> float:
         """今日のプレイ時間（完了+進行中）を更新.
-        
+
         - 日跨ぎセッションは今日0:00以降のみカウント
         - 5分未満の進行中セッションは除外
         - 非アクティブ中のゲームも含む
@@ -550,7 +577,11 @@ class MainWindow(QWidget):
 
     def _is_overtime_alert_enabled(self) -> bool:
         """時間超過防止アラートの有効/無効を返す。"""
-        return bool(getattr(self, "overtime_alert_enabled", DEFAULT_OVERTIME_ALERT_ENABLED))
+        return bool(
+            getattr(
+                self,
+                "overtime_alert_enabled",
+                DEFAULT_OVERTIME_ALERT_ENABLED))
 
     def _set_overtime_alert_enabled(self, enabled: bool) -> None:
         """時間超過防止アラートの有効/無効を設定する。"""
@@ -768,7 +799,8 @@ class MainWindow(QWidget):
 
         sample_points = self._sample_points_from_rect(target_rect)
         return any(
-            self._find_covering_foreign_window_at_point(*self._to_native_point(x, y)) != 0
+            self._find_covering_foreign_window_at_point(
+                *self._to_native_point(x, y)) != 0
             for x, y in sample_points
         )
 
@@ -810,7 +842,13 @@ class MainWindow(QWidget):
         """ウィジェットの表示/非表示を設定."""
         self._get_display_controller().set_widget_visibility(widget, visible)
 
-    def _set_widget_with_height(self, widget: QWidget, visible: bool, *, min_height: int, max_height: int) -> None:
+    def _set_widget_with_height(
+            self,
+            widget: QWidget,
+            visible: bool,
+            *,
+            min_height: int,
+            max_height: int) -> None:
         """ウィジェットの表示/非表示と高さ制約を設定."""
         self._get_display_controller().set_widget_with_height(
             widget,
@@ -832,7 +870,9 @@ class MainWindow(QWidget):
 
     def _cycle_display_mode(self) -> None:
         """表示モードを循環。"""
-        self.display_mode = self._get_display_controller().next_display_mode(self.display_mode)
+        self.display_mode = self._get_display_controller().next_display_mode(
+            self.display_mode
+        )
         self._apply_display_mode()
         self._save_window_state()
 

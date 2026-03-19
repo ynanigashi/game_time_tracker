@@ -12,13 +12,13 @@ GSS_DATETIME_FORMAT = "%Y/%m/%d %H:%M:%S"
 
 def format_hms(total_seconds: float) -> str:
     """秒を HH:MM:SS.F 形式に整形（Fは0.1秒単位）.
-    
+
     Args:
         total_seconds: 秒数（浮動小数点数）
-    
+
     Returns:
         "HH:MM:SS.F" 形式の文字列
-    
+
     Examples:
         >>> format_hms(0)
         '00:00:00.0'
@@ -36,14 +36,14 @@ def format_hms(total_seconds: float) -> str:
 
 def split_by_day(start: datetime, end: datetime) -> List[Tuple[datetime, datetime]]:
     """セッションを日付境界で分割.
-    
+
     Args:
         start: セッション開始時刻
         end: セッション終了時刻
-    
+
     Returns:
         日付境界で分割されたセグメントのリスト
-    
+
     Examples:
         >>> start = datetime(2026, 1, 10, 23, 30, 0)
         >>> end = datetime(2026, 1, 11, 1, 30, 0)
@@ -73,14 +73,14 @@ def split_by_day(start: datetime, end: datetime) -> List[Tuple[datetime, datetim
 
 def calc_today_elapsed_seconds(start_time: datetime, now: datetime) -> float:
     """ゲームの今日分の経過秒数を計算（日跨ぎ対応）.
-    
+
     Args:
         start_time: セッション開始時刻
         now: 現在時刻
-    
+
     Returns:
         今日分の経過秒数
-    
+
     Examples:
         >>> now = datetime(2026, 1, 18, 10, 0, 0)
         >>> # 今日の8時に開始した場合

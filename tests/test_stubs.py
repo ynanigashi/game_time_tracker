@@ -134,7 +134,7 @@ else:
 # =============================================================================
 def install_stubs() -> None:
     """外部依存のスタブを sys.modules に登録する.
-    
+
     テストモジュールの先頭（他モジュール import 前）で呼び出すこと。
     """
     sys.modules.setdefault("PySide6", types.ModuleType("PySide6"))
@@ -227,4 +227,3 @@ class FakeLogHandler:
                 }
             )
         return True
-

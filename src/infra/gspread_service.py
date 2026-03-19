@@ -16,19 +16,20 @@ if TYPE_CHECKING:
 
 class GspreadService:
     """Google Spreadsheet操作を抽象化するサービスクラス.
-    
+
     スプレッドシートへの接続、読み込み、書き込みを一元管理し、
     例外処理を統一する。
     """
 
-    def __init__(self, cert_file_path: str, sheet_key: str, *, sheet_gid: Optional[int] = None) -> None:
+    def __init__(self, cert_file_path: str, sheet_key: str, *,
+                 sheet_gid: Optional[int] = None) -> None:
         """Google Spreadsheetに接続.
-        
+
         Args:
             cert_file_path: サービスアカウント認証情報ファイルのパス
             sheet_key: スプレッドシートのキー
             sheet_gid: ワークシートのGID（省略時はsheet1に接続）
-        
+
         Raises:
             FileNotFoundError: 認証情報ファイルが存在しない場合
             gspread.exceptions.SpreadsheetNotFound: スプレッドシートが見つからない場合
@@ -40,7 +41,7 @@ class GspreadService:
         self.sheet_gid = sheet_gid
         self._sheet: Optional["Worksheet"] = None
         self._connect()
-    
+
     def _connect(self) -> None:
         """スプレッドシートに接続."""
         gc = gspread.service_account(filename=Path(self.cert_file_path))
@@ -49,31 +50,31 @@ class GspreadService:
             self._sheet = spreadsheet.get_worksheet_by_id(self.sheet_gid)
         else:
             self._sheet = spreadsheet.sheet1
-    
+
     @property
     def sheet(self) -> "Worksheet":
         """ワークシートオブジェクトを取得."""
         if self._sheet is None:
             raise RuntimeError("Spreadsheet is not connected")
         return self._sheet
-    
+
     def get_all_records(self) -> List[Dict[str, Any]]:
         """全レコードをスプレッドシートから取得.
-        
+
         Returns:
             レコードのリスト（辞書形式）
-        
+
         Raises:
             gspread.exceptions.APIError: API呼び出しに失敗した場合
         """
         return self.sheet.get_all_records()
-    
+
     def append_row(self, values: List[Any]) -> bool:
         """行をスプレッドシートに追加.
-        
+
         Args:
             values: 追加する値のリスト
-        
+
         Returns:
             成功時True、失敗時False
         """

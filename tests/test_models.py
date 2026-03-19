@@ -1,6 +1,9 @@
-# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false, reportOptionalMemberAccess=false
+# pyright: reportAttributeAccessIssue=false, reportArgumentType=false,
+# reportCallIssue=false, reportOptionalMemberAccess=false
 """models.py のユニットテスト."""
 
+from src.core.text_utils import normalize_title
+from src.core import models
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
@@ -9,13 +12,11 @@ from unittest.mock import MagicMock
 from tests.test_stubs import install_stubs
 install_stubs()
 
-from src.core import models
-from src.core.text_utils import normalize_title
-
 
 class TestGameEntry(unittest.TestCase):
     def test_matches_window_browser_game_allows_browser_titles(self):
-        game = models.GameEntry(game_title="BrowserGame", window_title="BrowserGame", is_browser_game=True)
+        game = models.GameEntry(game_title="BrowserGame",
+                                window_title="BrowserGame", is_browser_game=True)
         self.assertTrue(
             game.matches_window(
                 normalize_title("BrowserGame - Chrome"),
@@ -38,7 +39,8 @@ class TestGameEntry(unittest.TestCase):
         )
 
     def test_matches_window_normal_game_excludes_browsers(self):
-        game = models.GameEntry(game_title="NormalGame", window_title="NormalGame", is_browser_game=False)
+        game = models.GameEntry(game_title="NormalGame",
+                                window_title="NormalGame", is_browser_game=False)
         self.assertFalse(
             game.matches_window(
                 normalize_title("NormalGame - Chrome"),
@@ -143,7 +145,7 @@ class TestParseRecord(unittest.TestCase):
             'title': 'TestGame',
         }
         result = models.parse_record(record)
-        
+
         self.assertIsNotNone(result)
         self.assertEqual(result.start, datetime(2026, 1, 18, 10, 0, 0))
         self.assertEqual(result.end, datetime(2026, 1, 18, 11, 30, 0))
@@ -156,7 +158,7 @@ class TestParseRecord(unittest.TestCase):
             'end_time': '2026/01/18 11:00:00',
         }
         result = models.parse_record(record)
-        
+
         self.assertIsNotNone(result)
         self.assertEqual(result.game_title, '不明')
 
@@ -277,7 +279,8 @@ class TestGameEntryMatchesWindow(unittest.TestCase):
         """window_titleがウィンドウタイトルの一部として含まれる場合にマッチ."""
         game = models.GameEntry(game_title="Terraria", window_title="Terraria")
         self.assertTrue(
-            game.matches_window(normalize_title("Terraria: Official Server"), browsers=[])
+            game.matches_window(normalize_title(
+                "Terraria: Official Server"), browsers=[])
         )
 
     def test_no_match_if_not_contained(self):
@@ -361,4 +364,3 @@ class TestParseBool(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

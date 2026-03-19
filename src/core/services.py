@@ -1,4 +1,4 @@
-﻿"""ビジネスロジック - ゲーム情報ローダー、ウィンドウスキャナー、セッション記録、統計追跡."""
+"""ビジネスロジック - ゲーム情報ローダー、ウィンドウスキャナー、セッション記録、統計追跡."""
 
 import logging
 from datetime import datetime
@@ -8,7 +8,12 @@ import gspread
 import pygetwindow as gw
 
 from src.core.models import GameEntry, parse_bool
-from src.core.services_domain import DailyStatsTracker, GameStateTracker, MIN_PLAY_MINUTES, ScanResult
+from src.core.services_domain import (
+    DailyStatsTracker,
+    GameStateTracker,
+    MIN_PLAY_MINUTES,
+    ScanResult,
+)
 from src.core.time_utils import SECONDS_PER_MINUTE, split_by_day
 from src.infra.config_loader import Config
 from src.infra.gspread_service import GspreadService
@@ -90,7 +95,7 @@ class WindowScanner:
 
     def get_foreground_title(self) -> Optional[str]:
         """フォアグラウンド（最前面）ウィンドウのタイトルを取得.
-        
+
         Returns:
             フォアグラウンドウィンドウのタイトル。取得できない場合はNone。
         """
@@ -135,9 +140,9 @@ class SessionRecorder:
         end_time: datetime,
     ) -> Optional[float]:
         """指定された開始・終了時刻でセッションを記録。日を跨いだ場合は分割。
-        
+
         ゲームの状態（is_playing, start_time）は変更しない。
-        
+
         Returns:
             当日分のみの記録秒数。5分未満や書き込み失敗など保存が一件も発生しない場合はNone。
         """
@@ -150,7 +155,7 @@ class SessionRecorder:
         end_time: datetime,
     ) -> Optional[float]:
         """セグメント分割と記録の共通ロジック.
-        
+
         Returns:
             当日分のみの記録秒数。保存が一件も発生しない場合はNone。
         """
@@ -168,7 +173,8 @@ class SessionRecorder:
                     # 当日分のみ加算
                     if seg_start.date() == today:
                         today_seconds += (seg_end - seg_start).total_seconds()
-                    logger.info(Messages.GAME_RECORDED.format(game_title=game.game_title))
+                    logger.info(Messages.GAME_RECORDED.format(
+                        game_title=game.game_title))
                 else:
                     logger.warning('%sの記録保存に失敗しました', game.game_title)
             else:
@@ -197,5 +203,3 @@ class SessionRecorder:
             game.game_title,
             game.play_with_friends,
         ])
-
-

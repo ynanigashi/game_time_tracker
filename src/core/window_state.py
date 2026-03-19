@@ -112,7 +112,7 @@ class WindowState:
         """時間超過防止アラート設定を読み込む（未設定時はTrue）。"""
         _, _, _, _, overtime_alert_enabled = WindowState.load_all(path)
         return overtime_alert_enabled
-    
+
     @staticmethod
     def save(
         path: Path,

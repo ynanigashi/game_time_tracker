@@ -1,6 +1,9 @@
 # pyright: reportAttributeAccessIssue=false, reportArgumentType=false
 """config_loader.py のユニットテスト."""
 
+from src.core import services
+from src.infra.config_loader import ConfigLoader
+from src.app import main
 import configparser
 import os
 import tempfile
@@ -11,10 +14,6 @@ from unittest.mock import patch
 # 共通スタブをインストール
 from tests.test_stubs import install_stubs
 install_stubs()
-
-from src.app import main
-from src.infra.config_loader import ConfigLoader
-from src.core import services
 
 
 class TestConfigLoaderValidation(unittest.TestCase):
@@ -34,12 +33,12 @@ class TestConfigLoaderValidation(unittest.TestCase):
         config_path = os.path.join(self.temp_dir, 'test_config.ini')
         with open(config_path, 'w', encoding='utf-8') as f:
             f.write("[OTHER]\nkey=value\n")
-        
+
         # config_loaderをインポート（mainからではなく直接）
         from src.infra import config_loader
         with self.assertRaises(KeyError) as ctx:
             config_loader.ConfigLoader(config_path)
-        
+
         self.assertIn('LOGHANDLER', str(ctx.exception))
 
     def test_missing_key_raises_key_error(self):
@@ -48,11 +47,11 @@ class TestConfigLoaderValidation(unittest.TestCase):
         with open(config_path, 'w', encoding='utf-8') as f:
             f.write("[LOGHANDLER]\njson_file_path=test.json\n")
             f.write("[GAMEINFO]\nsheet_key=abc\nsheet_gid=123\n")
-        
+
         from src.infra import config_loader
         with self.assertRaises(KeyError) as ctx:
             config_loader.ConfigLoader(config_path)
-        
+
         self.assertIn('sheet_key', str(ctx.exception))
 
     def test_invalid_sheet_gid_raises_value_error(self):
@@ -61,11 +60,11 @@ class TestConfigLoaderValidation(unittest.TestCase):
         with open(config_path, 'w', encoding='utf-8') as f:
             f.write("[LOGHANDLER]\njson_file_path=test.json\nsheet_key=abc\n")
             f.write("[GAMEINFO]\nsheet_key=abc\nsheet_gid=not_an_int\n")
-        
+
         from src.infra import config_loader
         with self.assertRaises(ValueError) as ctx:
             config_loader.ConfigLoader(config_path).load()
-        
+
         self.assertIn('sheet_gid', str(ctx.exception))
 
     def test_valid_config_loads_successfully(self):
@@ -74,10 +73,10 @@ class TestConfigLoaderValidation(unittest.TestCase):
         with open(config_path, 'w', encoding='utf-8') as f:
             f.write("[LOGHANDLER]\njson_file_path=test.json\nsheet_key=log_key\n")
             f.write("[GAMEINFO]\nsheet_key=game_key\nsheet_gid=12345\n")
-        
+
         from src.infra import config_loader
         cfg = config_loader.ConfigLoader(config_path).load()
-        
+
         self.assertEqual(cfg.log_handler.cert_file_path, 'test.json')
         self.assertEqual(cfg.log_handler.sheet_key, 'log_key')
         self.assertEqual(cfg.game_info.sheet_key, 'game_key')
@@ -102,10 +101,10 @@ class TestConfigLoaderGetList(unittest.TestCase):
         with open(config_path, 'w', encoding='utf-8') as f:
             f.write("[LOGHANDLER]\njson_file_path=test.json\nsheet_key=log_key\n")
             f.write("[GAMEINFO]\nsheet_key=game_key\nsheet_gid=12345\n")
-        
+
         from src.infra import config_loader
         cfg = config_loader.ConfigLoader(config_path).load()
-        
+
         # WINDOW_SCANセクションがないのでデフォルト
         self.assertEqual(cfg.window_scan.browsers, config_loader.DEFAULT_BROWSERS)
 
@@ -116,10 +115,10 @@ class TestConfigLoaderGetList(unittest.TestCase):
             f.write("[LOGHANDLER]\njson_file_path=test.json\nsheet_key=log_key\n")
             f.write("[GAMEINFO]\nsheet_key=game_key\nsheet_gid=12345\n")
             f.write("[WINDOW_SCAN]\n")  # セクションはあるがキーがない
-        
+
         from src.infra import config_loader
         cfg = config_loader.ConfigLoader(config_path).load()
-        
+
         self.assertEqual(cfg.window_scan.browsers, config_loader.DEFAULT_BROWSERS)
 
     def test_returns_default_when_value_empty(self):
@@ -129,10 +128,10 @@ class TestConfigLoaderGetList(unittest.TestCase):
             f.write("[LOGHANDLER]\njson_file_path=test.json\nsheet_key=log_key\n")
             f.write("[GAMEINFO]\nsheet_key=game_key\nsheet_gid=12345\n")
             f.write("[WINDOW_SCAN]\nbrowsers=\n")  # 空の値
-        
+
         from src.infra import config_loader
         cfg = config_loader.ConfigLoader(config_path).load()
-        
+
         self.assertEqual(cfg.window_scan.browsers, config_loader.DEFAULT_BROWSERS)
 
     def test_returns_default_when_value_only_whitespace(self):
@@ -142,10 +141,10 @@ class TestConfigLoaderGetList(unittest.TestCase):
             f.write("[LOGHANDLER]\njson_file_path=test.json\nsheet_key=log_key\n")
             f.write("[GAMEINFO]\nsheet_key=game_key\nsheet_gid=12345\n")
             f.write("[WINDOW_SCAN]\nbrowsers=  ,  ,  \n")  # 空白とカンマのみ
-        
+
         from src.infra import config_loader
         cfg = config_loader.ConfigLoader(config_path).load()
-        
+
         self.assertEqual(cfg.window_scan.browsers, config_loader.DEFAULT_BROWSERS)
 
     def test_parses_comma_separated_values(self):
@@ -155,10 +154,10 @@ class TestConfigLoaderGetList(unittest.TestCase):
             f.write("[LOGHANDLER]\njson_file_path=test.json\nsheet_key=log_key\n")
             f.write("[GAMEINFO]\nsheet_key=game_key\nsheet_gid=12345\n")
             f.write("[WINDOW_SCAN]\nbrowsers=Chrome, Firefox, Edge\n")
-        
+
         from src.infra import config_loader
         cfg = config_loader.ConfigLoader(config_path).load()
-        
+
         self.assertEqual(cfg.window_scan.browsers, ['Chrome', 'Firefox', 'Edge'])
 
 
@@ -184,9 +183,10 @@ browsers = Chrome
             loader.config = configparser.ConfigParser()
             loader.config.read_string(config_content)
             cfg = loader.load()
-        
+
         # デフォルト値が設定される
-        self.assertEqual(cfg.window_scan.excluded_titles, list(main.DEFAULT_EXCLUDED_TITLES))
+        self.assertEqual(cfg.window_scan.excluded_titles,
+                         list(main.DEFAULT_EXCLUDED_TITLES))
 
     def test_excluded_titles_custom_comma_separated(self):
         """excluded_titlesのカンマ区切り値."""
@@ -208,9 +208,10 @@ exclude_titles = Settings, Task Manager, Control Panel
             loader.config = configparser.ConfigParser()
             loader.config.read_string(config_content)
             cfg = loader.load()
-        
+
         # カスタム値が設定される
-        self.assertEqual(cfg.window_scan.excluded_titles, ['Settings', 'Task Manager', 'Control Panel'])
+        self.assertEqual(cfg.window_scan.excluded_titles, [
+                         'Settings', 'Task Manager', 'Control Panel'])
 
     def test_excluded_titles_empty_uses_default(self):
         """excluded_titlesが空ならデフォルト."""
@@ -225,31 +226,32 @@ sheet_gid = 123
 
 [WINDOW_SCAN]
 browsers = Chrome
-exclude_titles = 
+exclude_titles =
 """
         with patch.object(main.ConfigLoader, '__init__', lambda self: None):
             loader = main.ConfigLoader()
             loader.config = configparser.ConfigParser()
             loader.config.read_string(config_content)
             cfg = loader.load()
-        
+
         # デフォルト値が設定される
-        self.assertEqual(cfg.window_scan.excluded_titles, list(main.DEFAULT_EXCLUDED_TITLES))
+        self.assertEqual(cfg.window_scan.excluded_titles,
+                         list(main.DEFAULT_EXCLUDED_TITLES))
 
     def test_excluded_titles_reflected_in_window_scanner(self):
         """excluded_titlesがWindowScannerに反映される."""
         excluded = ['CustomExclude1', 'CustomExclude2']
-        
+
         scanner = services.WindowScanner(excluded_titles=excluded)
-        
+
         self.assertEqual(scanner.excluded_titles, set(excluded))
 
     def test_window_scanner_excludes_matching_titles(self):
         """WindowScannerが除外タイトルにマッチするウィンドウを除外."""
         excluded = ['Settings', 'Task Manager']
-        
+
         scanner = services.WindowScanner(excluded_titles=excluded)
-        
+
         # 除外タイトルがセットに含まれる
         self.assertIn('Settings', scanner.excluded_titles)
         self.assertIn('Task Manager', scanner.excluded_titles)
@@ -257,4 +259,3 @@ exclude_titles =
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -58,7 +58,7 @@ class Config:
 # 設定ファイルの読み込み
 class ConfigLoader:
     """設定ファイルを読み込むクラス."""
-    
+
     # 必須の設定キー
     REQUIRED_KEYS = {
         'LOGHANDLER': ['json_file_path', 'sheet_key'],
@@ -86,10 +86,10 @@ class ConfigLoader:
 
     def load(self) -> Config:
         """設定を読み込んでConfigオブジェクトを返す.
-        
+
         Returns:
             Config: 設定データクラス
-        
+
         Raises:
             ValueError: sheet_gidが整数でない場合
             KeyError: 必須キーが不足している場合
@@ -103,7 +103,11 @@ class ConfigLoader:
         try:
             sheet_gid = int(self.config['GAMEINFO']['sheet_gid'])
         except ValueError:
-            raise ValueError(f"config.ini の [GAMEINFO] sheet_gid は整数である必要があります: {self.config['GAMEINFO']['sheet_gid']}")
+            configured_sheet_gid = self.config['GAMEINFO']['sheet_gid']
+            raise ValueError(
+                "config.ini の [GAMEINFO] sheet_gid は整数である必要があります: "
+                f"{configured_sheet_gid}"
+            )
 
         game_info = GameInfoConfig(
             sheet_key=self.config['GAMEINFO']['sheet_key'],
@@ -112,7 +116,8 @@ class ConfigLoader:
 
         window_scan = WindowScanConfig(
             browsers=self._get_list('WINDOW_SCAN', 'browsers', DEFAULT_BROWSERS),
-            excluded_titles=self._get_list('WINDOW_SCAN', 'exclude_titles', DEFAULT_EXCLUDED_TITLES),
+            excluded_titles=self._get_list(
+                'WINDOW_SCAN', 'exclude_titles', DEFAULT_EXCLUDED_TITLES),
         )
 
         return Config(

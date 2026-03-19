@@ -1,5 +1,7 @@
 """GUIモジュールのテスト（PySide6を必要としないユニットテスト）."""
 
+from src.core.time_utils import format_hms
+from src.core.services import DailyStatsTracker
 import unittest
 from datetime import date
 
@@ -8,8 +10,6 @@ from tests.test_stubs import install_stubs
 install_stubs()
 
 # Now import the gui module
-from src.core.services import DailyStatsTracker
-from src.core.time_utils import format_hms
 
 
 class TestDailyStatsTracker(unittest.TestCase):
@@ -26,7 +26,7 @@ class TestDailyStatsTracker(unittest.TestCase):
         """日付が変わっていない場合はFalseを返す."""
         current_date = date(2026, 1, 18)
         tracker = DailyStatsTracker(get_current_date=lambda: current_date)
-        
+
         # 同日なのでFalse
         result = tracker.check_day_change()
         self.assertFalse(result)
@@ -37,18 +37,18 @@ class TestDailyStatsTracker(unittest.TestCase):
         # 1/18から開始
         dates = [date(2026, 1, 18)]
         tracker = DailyStatsTracker(get_current_date=lambda: dates[0])
-        
+
         # データを追加
         tracker.today_completed_seconds = 3600.0  # 1時間
         tracker.today_game_minutes_cache = {"GameA": 60.0}
         tracker.last_today_games_content = "GameA: 60分"
-        
+
         # 日付を1/19に変更
         dates[0] = date(2026, 1, 19)
-        
+
         # check_day_changeを呼ぶとリセットされる
         result = tracker.check_day_change()
-        
+
         self.assertTrue(result)
         self.assertEqual(tracker.today_completed_seconds, 0.0)
         self.assertEqual(tracker.today_game_minutes_cache, {})
@@ -58,11 +58,11 @@ class TestDailyStatsTracker(unittest.TestCase):
         """日付変更後、_last_checked_dateが更新される."""
         dates = [date(2026, 1, 18)]
         tracker = DailyStatsTracker(get_current_date=lambda: dates[0])
-        
+
         # 日付を変更
         dates[0] = date(2026, 1, 19)
         tracker.check_day_change()
-        
+
         # 再度呼んでもFalse（既に同日）
         result = tracker.check_day_change()
         self.assertFalse(result)
@@ -72,7 +72,7 @@ class TestDailyStatsTracker(unittest.TestCase):
         tracker = DailyStatsTracker()
         tracker.add_completed_seconds(1800.0)  # 30分
         self.assertEqual(tracker.today_completed_seconds, 1800.0)
-        
+
         tracker.add_completed_seconds(900.0)  # 15分追加
         self.assertEqual(tracker.today_completed_seconds, 2700.0)
 
@@ -87,19 +87,19 @@ class TestDailyStatsTracker(unittest.TestCase):
         """複数回の日付変更でも正しくリセットされる."""
         dates = [date(2026, 1, 18)]
         tracker = DailyStatsTracker(get_current_date=lambda: dates[0])
-        
+
         # 1日目のデータ
         tracker.add_completed_seconds(3600.0)
-        
+
         # 2日目に変更
         dates[0] = date(2026, 1, 19)
         tracker.check_day_change()
         self.assertEqual(tracker.today_completed_seconds, 0.0)
-        
+
         # 2日目のデータ
         tracker.add_completed_seconds(1800.0)
         self.assertEqual(tracker.today_completed_seconds, 1800.0)
-        
+
         # 3日目に変更
         dates[0] = date(2026, 1, 20)
         tracker.check_day_change()
@@ -128,4 +128,3 @@ class TestFormatHms(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

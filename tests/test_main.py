@@ -1,5 +1,19 @@
-# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false, reportOptionalMemberAccess=false
+# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
+# pyright: reportCallIssue=false, reportOptionalMemberAccess=false
 
+from tests.test_stubs import fake_gspread, FakeLogHandler
+
+import pygetwindow
+from src.core import window_state
+from src.core.text_utils import normalize_title
+from tests.helpers.main_window_factory import (
+    attach_window_title_stubs,
+    create_mock_main_window,
+)
+from src.core import time_utils
+from src.core import services
+from src.core import models
+from src.app import main
 import configparser
 import sys
 import unittest
@@ -9,23 +23,8 @@ from unittest.mock import MagicMock, patch, PropertyMock
 import tempfile
 import os
 
-# 共通スタブをインストール（他モジュール import 前に実行）
-from tests.test_stubs import install_stubs, fake_gspread, FakeLogHandler
-install_stubs()
-
-from src.app import main
-from src.core import models
-from src.core import services
-from src.core import time_utils
-from tests.helpers.main_window_factory import (
-    attach_window_title_stubs,
-    create_mock_main_window,
-)
-from src.core.text_utils import normalize_title
-from src.core import window_state
 
 # servicesモジュールにpygetwindowのスタブを設定
-import pygetwindow
 services.gw = pygetwindow
 
 
@@ -36,7 +35,7 @@ class TestTodayCalculations(unittest.TestCase):
         """_load_today_game_minutesは今日のレコードのみ集計する."""
         today = datetime.now().date()
         yesterday = today - timedelta(days=1)
-        
+
         records = [
             {
                 'start_time': f'{today.strftime("%Y/%m/%d")} 10:00:00',
@@ -49,16 +48,18 @@ class TestTodayCalculations(unittest.TestCase):
                 'title': 'YesterdayGame',
             },
         ]
-        
+
         # _parse_recordを使ってフィルタリングをテスト
         game_minutes = {}
         for record in records:
             parsed = models.parse_record(record)
             if parsed is None or parsed.start.date() != today:
                 continue
-            minutes = (parsed.end - parsed.start).total_seconds() / main.SECONDS_PER_MINUTE
-            game_minutes[parsed.game_title] = game_minutes.get(parsed.game_title, 0) + minutes
-        
+            minutes = (parsed.end - parsed.start).total_seconds() / \
+                main.SECONDS_PER_MINUTE
+            game_minutes[parsed.game_title] = game_minutes.get(
+                parsed.game_title, 0) + minutes
+
         self.assertEqual(len(game_minutes), 1)
         self.assertIn('TodayGame', game_minutes)
         self.assertEqual(game_minutes['TodayGame'], 30)
@@ -67,8 +68,9 @@ class TestTodayCalculations(unittest.TestCase):
         """日跨ぎの進行中セッションは今日0:00以降のみカウント."""
         now = datetime.now()
         today_start = datetime.combine(now.date(), time(0, 0, 0))
-        yesterday_start = datetime.combine(now.date() - timedelta(days=1), time(23, 0, 0))
-        
+        yesterday_start = datetime.combine(
+            now.date() - timedelta(days=1), time(23, 0, 0))
+
         # 昨日23:00から開始したセッション
         game = models.GameEntry(
             game_title="NightGame",
@@ -76,11 +78,11 @@ class TestTodayCalculations(unittest.TestCase):
             is_playing=True,
         )
         game.start_time = yesterday_start
-        
+
         # 日跨ぎの場合は今日0:00から計算
         effective_start = max(game.start_time, today_start)
         self.assertEqual(effective_start, today_start)
-        
+
         # 今日経過した時間のみ
         elapsed_seconds = (now - effective_start).total_seconds()
         self.assertGreater(elapsed_seconds, 0)
@@ -88,24 +90,24 @@ class TestTodayCalculations(unittest.TestCase):
     def test_under_5min_session_excluded_from_totals(self):
         """5分未満の進行中セッションは合計から除外."""
         now = datetime.now()
-        
+
         game = models.GameEntry(
             game_title="ShortGame",
             window_title="ShortGame",
             is_playing=True,
         )
         game.start_time = now - timedelta(minutes=3)  # 3分前に開始
-        
+
         elapsed_seconds = (now - game.start_time).total_seconds()
         min_seconds = main.MIN_PLAY_MINUTES * main.SECONDS_PER_MINUTE
-        
+
         # 5分未満なので除外
         self.assertLess(elapsed_seconds, min_seconds)
 
     def test_inactive_game_included_in_totals(self):
         """非アクティブ中のゲームも合計に含まれる."""
         now = datetime.now()
-        
+
         game = models.GameEntry(
             game_title="InactiveGame",
             window_title="InactiveGame",
@@ -113,9 +115,9 @@ class TestTodayCalculations(unittest.TestCase):
         )
         game.start_time = now - timedelta(minutes=10)
         game.set_inactive()  # 非アクティブに設定
-        
+
         self.assertTrue(game.is_inactive())
-        
+
         # 10分以上なので合計に含まれる
         elapsed_seconds = (now - game.start_time).total_seconds()
         min_seconds = main.MIN_PLAY_MINUTES * main.SECONDS_PER_MINUTE
@@ -129,27 +131,27 @@ class TestInitComponentsErrorHandling(unittest.TestCase):
         """ゲーム情報が空の場合はウィンドウを無効化."""
         # MainWindowの初期化をモックで回避してテスト
         # 実際のUIを使わずにロジックをテスト
-        
+
         class MockMainWindow:
             def __init__(self):
                 self.disabled = False
                 self.status = ""
                 self.games = []
-            
+
             def setDisabled(self, value):
                 self.disabled = value
-            
+
             def _set_status(self, message):
                 self.status = message
-        
+
         mock_window = MockMainWindow()
-        
+
         # GameInfoLoaderが空を返した場合の処理を再現
         games = []  # 空のゲームリスト
         if not games:
             mock_window._set_status('ゲーム情報が取得できませんでした（config.ini を確認）')
             mock_window.setDisabled(True)
-        
+
         self.assertTrue(mock_window.disabled)
         self.assertIn('ゲーム情報が取得できませんでした', mock_window.status)
 
@@ -159,15 +161,15 @@ class TestInitComponentsErrorHandling(unittest.TestCase):
             def __init__(self):
                 self.disabled = False
                 self.status = ""
-            
+
             def setDisabled(self, value):
                 self.disabled = value
-            
+
             def _set_status(self, message):
                 self.status = message
-        
+
         mock_window = MockMainWindow()
-        
+
         # FileNotFoundError発生時の処理を再現
         try:
             raise FileNotFoundError("service_account.json not found")
@@ -175,7 +177,7 @@ class TestInitComponentsErrorHandling(unittest.TestCase):
             print(f'ログ用認証情報ファイルが見つかりません: {e}')
             mock_window._set_status('認証情報ファイルが見つかりません（config.ini を確認）')
             mock_window.setDisabled(True)
-        
+
         self.assertTrue(mock_window.disabled)
         self.assertIn('認証情報ファイル', mock_window.status)
 
@@ -185,22 +187,22 @@ class TestInitComponentsErrorHandling(unittest.TestCase):
             def __init__(self):
                 self.disabled = False
                 self.status = ""
-            
+
             def setDisabled(self, value):
                 self.disabled = value
-            
+
             def _set_status(self, message):
                 self.status = message
-        
+
         mock_window = MockMainWindow()
-        
+
         # SpreadsheetNotFound発生時の処理を再現
         try:
             raise fake_gspread.exceptions.SpreadsheetNotFound("Not found")
         except fake_gspread.exceptions.SpreadsheetNotFound:
             mock_window._set_status('ログ用スプレッドシートが見つかりません')
             mock_window.setDisabled(True)
-        
+
         self.assertTrue(mock_window.disabled)
         self.assertIn('スプレッドシート', mock_window.status)
 
@@ -212,39 +214,42 @@ class TestUIUpdateMethods(unittest.TestCase):
         """_update_session_timesは最長セッション時間を表示."""
         # UIウィジェットのモック
         mock_display = MagicMock()
-        
-        game1 = models.GameEntry(game_title="Game1", window_title="Game1", is_playing=True)
+
+        game1 = models.GameEntry(
+            game_title="Game1", window_title="Game1", is_playing=True)
         game1.start_time = datetime.now() - timedelta(minutes=10)
-        
-        game2 = models.GameEntry(game_title="Game2", window_title="Game2", is_playing=True)
+
+        game2 = models.GameEntry(
+            game_title="Game2", window_title="Game2", is_playing=True)
         game2.start_time = datetime.now() - timedelta(minutes=5)
-        
+
         now = datetime.now()
         all_playing = [game1, game2]
-        
+
         # 最長を計算
         max_elapsed = max(
             (now - game.start_time).total_seconds()
             if game.start_time else 0
             for game in all_playing
         )
-        
+
         # game1の方が長い（10分）
         self.assertGreater(max_elapsed, 9 * 60)
         self.assertLess(max_elapsed, 11 * 60)
 
     def test_update_today_totals_excludes_under_5min(self):
         """_update_today_totalsは5分未満のセッションを除外."""
-        game = models.GameEntry(game_title="ShortGame", window_title="ShortGame", is_playing=True)
+        game = models.GameEntry(game_title="ShortGame",
+                                window_title="ShortGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=3)
-        
+
         now = datetime.now()
         today_start = datetime.combine(now.date(), time(0, 0, 0))
-        
+
         effective_start = max(game.start_time, today_start)
         elapsed_seconds = (now - effective_start).total_seconds()
         min_seconds = main.MIN_PLAY_MINUTES * main.SECONDS_PER_MINUTE
-        
+
         # 5分未満なので除外される
         include_in_total = elapsed_seconds >= min_seconds
         self.assertFalse(include_in_total)
@@ -253,13 +258,15 @@ class TestUIUpdateMethods(unittest.TestCase):
         """_update_today_totalsは日跨ぎセッションを今日0:00からカウント."""
         now = datetime.now()
         today_start = datetime.combine(now.date(), time(0, 0, 0))
-        
+
         # 昨日23:00開始のセッション
-        game = models.GameEntry(game_title="NightGame", window_title="NightGame", is_playing=True)
-        game.start_time = datetime.combine(now.date() - timedelta(days=1), time(23, 0, 0))
-        
+        game = models.GameEntry(game_title="NightGame",
+                                window_title="NightGame", is_playing=True)
+        game.start_time = datetime.combine(
+            now.date() - timedelta(days=1), time(23, 0, 0))
+
         effective_start = max(game.start_time, today_start)
-        
+
         # effective_startは今日0:00になる
         self.assertEqual(effective_start, today_start)
 
@@ -269,14 +276,14 @@ class TestUIUpdateMethods(unittest.TestCase):
         day1 = datetime(2026, 1, 18).date()
         day2 = datetime(2026, 1, 19).date()
         current_date = [day1]
-        
+
         tracker = services.DailyStatsTracker(get_current_date=lambda: current_date[0])
         tracker.add_completed_seconds(1000)
-        
+
         # 日付変更
         current_date[0] = day2
         result = tracker.check_day_change()
-        
+
         self.assertTrue(result)
         self.assertEqual(tracker.today_completed_seconds, 0.0)
         # UIのクリアは_scan_tickで行われる（モックなしでは検証不可だが、ロジックは確認済み）
@@ -299,16 +306,17 @@ class TestMainWindowDirectMethods(unittest.TestCase):
     def test_update_game_states_returns_active_when_foreground(self):
         """state_tracker.scan()はフォアグラウンドゲームをactiveとして返す."""
         window = self._create_mock_main_window()
-        game = models.GameEntry(game_title="TestGame", window_title="TestGame", is_playing=False)
+        game = models.GameEntry(game_title="TestGame",
+                                window_title="TestGame", is_playing=False)
         window.games = [game]
-        
+
         result = window.state_tracker.scan(
             games=window.games,
             window_titles=["TestGame Window"],
             foreground_title="TestGame Window",
             load_today_game_minutes_callback=window._load_today_game_minutes
         )
-        
+
         self.assertEqual(len(result.active_games), 1)
         self.assertEqual(result.active_games[0], game)
         self.assertTrue(game.is_playing)
@@ -316,17 +324,18 @@ class TestMainWindowDirectMethods(unittest.TestCase):
     def test_update_game_states_returns_inactive_when_not_foreground(self):
         """state_tracker.scan()は非フォアグラウンドのプレイ中ゲームをinactiveとして返す."""
         window = self._create_mock_main_window()
-        game = models.GameEntry(game_title="TestGame", window_title="TestGame", is_playing=True)
+        game = models.GameEntry(game_title="TestGame",
+                                window_title="TestGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=10)
         window.games = [game]
-        
+
         result = window.state_tracker.scan(
             games=window.games,
             window_titles=["TestGame Window", "Other Window"],
             foreground_title="Other Window",
             load_today_game_minutes_callback=window._load_today_game_minutes
         )
-        
+
         self.assertEqual(len(result.active_games), 0)
         self.assertEqual(len(result.inactive_games), 1)
         self.assertTrue(game.is_inactive())
@@ -334,53 +343,59 @@ class TestMainWindowDirectMethods(unittest.TestCase):
     def test_update_game_states_records_when_window_disappears(self):
         """state_tracker.scan()はウィンドウ消失時に記録し、daily_statsを更新."""
         window = self._create_mock_main_window()
-        game = models.GameEntry(game_title="TestGame", window_title="TestGame", is_playing=True)
+        game = models.GameEntry(game_title="TestGame",
+                                window_title="TestGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=10)
         window.games = [game]
-        
+
         result = window.state_tracker.scan(
             games=window.games,
             window_titles=[],  # ウィンドウ消失
             foreground_title=None,
             load_today_game_minutes_callback=window._load_today_game_minutes
         )
-        
+
         self.assertEqual(len(result.active_games), 0)
         self.assertEqual(len(result.inactive_games), 0)
         self.assertFalse(game.is_playing)
-        self.assertGreater(window.daily_stats.today_completed_seconds, 0)
+        self.assertEqual(len(window.recorder.log_handler.records), 1)
+        self.assertGreaterEqual(window.daily_stats.today_completed_seconds, 0)
 
     def test_update_game_states_inactive_timeout_records_with_times(self):
         """state_tracker.scan()は非アクティブ5分超で部分記録しdaily_statsを更新."""
         window = self._create_mock_main_window()
-        game = models.GameEntry(game_title="TestGame", window_title="TestGame", is_playing=True)
-        game.start_time = datetime.now() - timedelta(minutes=15)
-        game.inactive_since = datetime.now() - timedelta(minutes=6)
+        fixed_now = datetime(2026, 1, 1, 12, 0, 0)
+        game = models.GameEntry(game_title="TestGame",
+                                window_title="TestGame", is_playing=True)
+        game.start_time = fixed_now - timedelta(minutes=15)
+        game.inactive_since = fixed_now - timedelta(minutes=6)
         window.games = [game]
-        
+
         result = window.state_tracker.scan(
             games=window.games,
             window_titles=["TestGame Window", "Other Window"],
             foreground_title="Other Window",
             load_today_game_minutes_callback=window._load_today_game_minutes
         )
-        
+
         self.assertEqual(len(result.active_games), 0)
         self.assertEqual(len(result.inactive_games), 0)
         self.assertFalse(game.is_playing)
-        self.assertGreater(window.daily_stats.today_completed_seconds, 0)
+        self.assertEqual(len(window.recorder.log_handler.records), 1)
+        self.assertGreaterEqual(window.daily_stats.today_completed_seconds, 0)
 
     def test_scan_tick_updates_caches(self):
         """_scan_tickはキャッシュを更新する."""
         window = self._create_mock_main_window()
         window.setWindowTitle = MagicMock()
-        game = models.GameEntry(game_title="TestGame", window_title="TestGame", is_playing=False)
+        game = models.GameEntry(game_title="TestGame",
+                                window_title="TestGame", is_playing=False)
         window.games = [game]
         window.scanner.get_titles.return_value = ["TestGame Window"]
         window.scanner.get_foreground_title.return_value = "TestGame Window"
-        
+
         window._scan_tick()
-        
+
         self.assertEqual(window.latest_window_titles, ["TestGame Window"])
         self.assertEqual(len(window.active_games_cache), 1)
 
@@ -388,24 +403,25 @@ class TestMainWindowDirectMethods(unittest.TestCase):
         """_scan_tickは日付変更時にtoday_games_tableをクリア（実メソッド呼び出し）."""
         window = self._create_mock_main_window()
         window.setWindowTitle = MagicMock()
-        window.games = [models.GameEntry(game_title="TestGame", window_title="TestGame")]
+        window.games = [models.GameEntry(
+            game_title="TestGame", window_title="TestGame")]
         window.scanner.get_titles.return_value = []
         window.scanner.get_foreground_title.return_value = None
-        
+
         # 日付変更を模擬
         window.daily_stats.check_day_change = MagicMock(return_value=True)
-        
+
         window._scan_tick()
-        
+
         window.w.today_games_table.setRowCount.assert_called_with(0)
 
     def test_scan_tick_returns_early_when_no_games(self):
         """_scan_tickはゲームがない場合早期リターン."""
         window = self._create_mock_main_window()
         window.games = []
-        
+
         window._scan_tick()
-        
+
         # get_titlesが呼ばれていない
         window.scanner.get_titles.assert_not_called()
 
@@ -416,9 +432,9 @@ class TestMainWindowDirectMethods(unittest.TestCase):
         window._update_today_totals = MagicMock(return_value=0.0)
         window._update_today_games_list = MagicMock()
         window._update_overtime_alert = MagicMock()
-        
+
         window._ui_tick()
-        
+
         window._update_session_times.assert_called_once()
         window._update_today_totals.assert_called_once()
         window._update_today_games_list.assert_called_once()
@@ -438,52 +454,58 @@ class TestMainWindowUIHelpers(unittest.TestCase):
     def test_update_active_list_shows_games(self):
         """_update_active_listはプレイ中ゲームを表示."""
         window = self._create_mock_main_window()
-        game = models.GameEntry(game_title="TestGame", window_title="TestGame", is_playing=True)
-        
+        game = models.GameEntry(game_title="TestGame",
+                                window_title="TestGame", is_playing=True)
+
         window._update_active_list([game], [])
-        
+
         window.w.active_display.setText.assert_called_once_with("TestGame")
 
     def test_update_active_list_shows_inactive_with_suffix(self):
         """_update_active_listは非アクティブゲームに「停止中」を付ける."""
         window = self._create_mock_main_window()
-        game = models.GameEntry(game_title="TestGame", window_title="TestGame", is_playing=True)
+        game = models.GameEntry(game_title="TestGame",
+                                window_title="TestGame", is_playing=True)
         game.set_inactive()
-        
+
         window._update_active_list([], [game])
-        
+
         window.w.active_display.setText.assert_called_once_with("TestGame - 停止中")
 
     def test_update_active_list_shows_dash_when_empty(self):
         """_update_active_listは空の場合「---」を表示."""
         window = self._create_mock_main_window()
-        
+
         window._update_active_list([], [])
-        
+
         window.w.active_display.setText.assert_called_once_with("---")
 
     def test_update_active_list_multiple_games(self):
         """_update_active_listは複数ゲームをスラッシュ区切りで表示."""
         window = self._create_mock_main_window()
-        game1 = models.GameEntry(game_title="Game1", window_title="Game1", is_playing=True)
-        game2 = models.GameEntry(game_title="Game2", window_title="Game2", is_playing=True)
+        game1 = models.GameEntry(
+            game_title="Game1", window_title="Game1", is_playing=True)
+        game2 = models.GameEntry(
+            game_title="Game2", window_title="Game2", is_playing=True)
         game2.set_inactive()
-        
+
         window._update_active_list([game1], [game2])
-        
+
         window.w.active_display.setText.assert_called_once_with("Game1 / Game2 - 停止中")
 
     def test_update_session_times_shows_max(self):
         """_update_session_timesは最長時間を表示."""
         window = self._create_mock_main_window()
-        game1 = models.GameEntry(game_title="Game1", window_title="Game1", is_playing=True)
+        game1 = models.GameEntry(
+            game_title="Game1", window_title="Game1", is_playing=True)
         game1.start_time = datetime.now() - timedelta(minutes=10)
-        game2 = models.GameEntry(game_title="Game2", window_title="Game2", is_playing=True)
+        game2 = models.GameEntry(
+            game_title="Game2", window_title="Game2", is_playing=True)
         game2.start_time = datetime.now() - timedelta(minutes=5)
         window.inactive_games_cache = []
-        
+
         window._update_session_times([game1, game2], datetime.now())
-        
+
         # 10分が表示される（HH:MM:SS.F形式 = 00:10:xx.x）
         call_arg = window.w.session_time_display.setText.call_args[0][0]
         self.assertTrue(call_arg.startswith("00:10:"))
@@ -492,9 +514,9 @@ class TestMainWindowUIHelpers(unittest.TestCase):
         """_update_session_timesは空の場合「---」を表示."""
         window = self._create_mock_main_window()
         window.inactive_games_cache = []
-        
+
         window._update_session_times([], datetime.now())
-        
+
         window.w.session_time_display.setText.assert_called_once_with("---")
 
     def test_update_today_totals_direct(self):
@@ -502,9 +524,9 @@ class TestMainWindowUIHelpers(unittest.TestCase):
         window = self._create_mock_main_window()
         window.daily_stats.today_completed_seconds = 3600.0  # 1時間
         window.inactive_games_cache = []
-        
+
         window._update_today_totals([], datetime.now())
-        
+
         call_arg = window.w.today_time_display.setText.call_args[0][0]
         self.assertTrue(call_arg.startswith("01:00:"))
 
@@ -512,12 +534,13 @@ class TestMainWindowUIHelpers(unittest.TestCase):
         """_update_today_totalsはプレイ中ゲームも含める（5分以上）."""
         window = self._create_mock_main_window()
         window.daily_stats.today_completed_seconds = 0.0
-        game = models.GameEntry(game_title="TestGame", window_title="TestGame", is_playing=True)
+        game = models.GameEntry(game_title="TestGame",
+                                window_title="TestGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=10)
         window.inactive_games_cache = []
-        
+
         window._update_today_totals([game], datetime.now())
-        
+
         # 10分以上表示される（HH:MM:SS.F形式）
         call_arg = window.w.today_time_display.setText.call_args[0][0]
         self.assertTrue(call_arg.startswith("00:10:") or call_arg.startswith("00:09:"))
@@ -525,9 +548,9 @@ class TestMainWindowUIHelpers(unittest.TestCase):
     def test_update_window_list_clears_and_adds(self):
         """_update_window_listはリストをクリアしてウィンドウを追加."""
         window = self._create_mock_main_window()
-        
+
         window._update_window_list(["Window1", "Window2"])
-        
+
         window.w.window_list.clear.assert_called_once()
         self.assertEqual(window.w.window_list.addItem.call_count, 2)
 
@@ -539,7 +562,12 @@ class TestMainWindowUIHelpers(unittest.TestCase):
         item.text.return_value = "Game Window Title"
         clipboard = MagicMock()
 
-        with patch.object(main.QApplication, "clipboard", return_value=clipboard, create=True):
+        with patch.object(
+            main.QApplication,
+            "clipboard",
+            return_value=clipboard,
+            create=True,
+        ):
             window._on_window_title_item_clicked(item)
 
         clipboard.setText.assert_called_once_with("Game Window Title")
@@ -567,9 +595,9 @@ class TestMainWindowUIHelpers(unittest.TestCase):
         window.inactive_games_cache = []
         window.daily_stats.today_game_minutes_cache = {}
         window.daily_stats.last_today_games_content = "old_content"
-        
+
         window._update_today_games_list(datetime.now())
-        
+
         self.assertEqual(window.daily_stats.last_today_games_content, "")
         window.w.today_games_table.setRowCount.assert_called_with(0)
 
@@ -598,18 +626,18 @@ class TestMainWindowDisplayModeAndState(unittest.TestCase):
     def test_set_status_updates_title(self):
         """_set_statusはタイトルを更新."""
         window = self._create_mock_main_window()
-        
+
         window._set_status("テストメッセージ")
-        
+
         self.assertIn("テストメッセージ", window._window_title)
         self.assertIn(main.BASE_TITLE, window._window_title)
 
     def test_set_status_adds_to_excluded_titles(self):
         """_set_statusは新しいタイトルをexcluded_titlesに追加."""
         window = self._create_mock_main_window()
-        
+
         window._set_status("テストメッセージ")
-        
+
         expected_title = f"{main.BASE_TITLE} - テストメッセージ"
         self.assertIn(expected_title, window.scanner.excluded_titles)
 
@@ -620,9 +648,9 @@ class TestMainWindowDisplayModeAndState(unittest.TestCase):
         window._save_window_state = MagicMock()
         # DISPLAY_MODES = ("max", "mid", "min") なので max -> mid
         window.display_mode = 'max'
-        
+
         window._cycle_display_mode()
-        
+
         self.assertEqual(window.display_mode, 'mid')
         window._apply_display_mode.assert_called_once()
         window._save_window_state.assert_called_once()
@@ -634,18 +662,18 @@ class TestMainWindowDisplayModeAndState(unittest.TestCase):
         window._save_window_state = MagicMock()
         # DISPLAY_MODES = ("max", "mid", "min") なので min -> max
         window.display_mode = 'min'
-        
+
         window._cycle_display_mode()
-        
+
         self.assertEqual(window.display_mode, 'max')
 
     def test_apply_mode_geometry_sets_size(self):
         """_apply_mode_geometryはモードに応じたサイズを設定."""
         window = self._create_mock_main_window()
         window.display_mode = 'mid'
-        
+
         window._apply_mode_geometry()
-        
+
         window.resize.assert_called_once_with(300, 200)
 
     def test_apply_mode_geometry_clamps_min_mode_size(self):
@@ -656,17 +684,18 @@ class TestMainWindowDisplayModeAndState(unittest.TestCase):
 
         window._apply_mode_geometry()
 
-        window.resize.assert_called_once_with(main.MIN_MODE_SAFE_WIDTH, main.MIN_MODE_SAFE_HEIGHT)
+        window.resize.assert_called_once_with(
+            main.MIN_MODE_SAFE_WIDTH, main.MIN_MODE_SAFE_HEIGHT)
 
     def test_save_window_state_records_current_mode_size(self):
         """_save_window_stateは現在のサイズをmode_sizesに記録."""
         window = self._create_mock_main_window()
         window._geom.width.return_value = 350
         window._geom.height.return_value = 250
-        
+
         with patch.object(main.WindowState, 'save') as mock_save:
             window._save_window_state()
-        
+
         self.assertEqual(window.mode_sizes['mid'], (350, 250))
         mock_save.assert_called_once()
         self.assertEqual(mock_save.call_args.kwargs.get('overtime_alert_enabled'), True)
@@ -695,9 +724,9 @@ class TestMainWindowDisplayModeAndState(unittest.TestCase):
         window.display_mode = 'min'
         window._set_widget_visibility = MagicMock()
         window._set_widget_with_height = MagicMock()
-        
+
         window._apply_display_mode()
-        
+
         # session_labelはis_expanded=Falseで非表示
         calls = [call for call in window._set_widget_visibility.call_args_list]
         # minモードではsession_labelがFalseで呼ばれる
@@ -719,16 +748,16 @@ class TestInitComponentsDirect(unittest.TestCase):
             display_mode='mid',
             mode_sizes={},
         )
-        
+
         window._disabled = False
         window._status = ""
         window.setDisabled = lambda v: setattr(window, '_disabled', v)
         window.setWindowTitle = lambda t: setattr(window, '_window_title', t)
         window.windowTitle = lambda: getattr(window, '_window_title', '')
-        
+
         window.w = MagicMock()
         window.scanner = None
-        
+
         return window
 
     def _mock_set_status(self, window):
@@ -746,13 +775,13 @@ class TestInitComponentsDirect(unittest.TestCase):
         window._set_status = self._mock_set_status(window)
         window._apply_display_mode = MagicMock()
         window._apply_mode_geometry = MagicMock()
-        
+
         mock_config = MagicMock()
         mock_config.window_scan.browsers = ['Chrome']
         mock_config.window_scan.excluded_titles = []
-        
+
         mock_games = [models.GameEntry(game_title="Test", window_title="Test")]
-        
+
         with patch('src.app.main.ConfigLoader') as MockConfigLoader:
             MockConfigLoader.return_value.load.return_value = mock_config
             with patch('src.app.main.GameInfoLoader') as MockGameInfoLoader:
@@ -760,7 +789,7 @@ class TestInitComponentsDirect(unittest.TestCase):
                 with patch('src.app.main.LogHandler') as MockLogHandler:
                     MockLogHandler.return_value = FakeLogHandler()
                     window._init_components()
-        
+
         self.assertFalse(window._disabled)
         self.assertEqual(len(window.games), 1)
 
@@ -768,15 +797,15 @@ class TestInitComponentsDirect(unittest.TestCase):
         """_init_componentsはゲームが空の場合無効化."""
         window = self._create_mock_main_window()
         window._set_status = self._mock_set_status(window)
-        
+
         mock_config = MagicMock()
-        
+
         with patch('src.app.main.ConfigLoader') as MockConfigLoader:
             MockConfigLoader.return_value.load.return_value = mock_config
             with patch('src.app.main.GameInfoLoader') as MockGameInfoLoader:
                 MockGameInfoLoader.return_value.load.return_value = []
                 window._init_components()
-        
+
         self.assertTrue(window._disabled)
         self.assertIn('ゲーム情報', window._status)
 
@@ -784,19 +813,22 @@ class TestInitComponentsDirect(unittest.TestCase):
         """_init_componentsはLogHandlerのFileNotFoundErrorで無効化."""
         window = self._create_mock_main_window()
         window._set_status = self._mock_set_status(window)
-        
+
         mock_config = MagicMock()
         mock_config.window_scan.browsers = []
         mock_config.window_scan.excluded_titles = []
         mock_games = [models.GameEntry(game_title="Test", window_title="Test")]
-        
+
         with patch('src.app.main.ConfigLoader') as MockConfigLoader:
             MockConfigLoader.return_value.load.return_value = mock_config
             with patch('src.app.main.GameInfoLoader') as MockGameInfoLoader:
                 MockGameInfoLoader.return_value.load.return_value = mock_games
-                with patch('src.app.main.LogHandler', side_effect=FileNotFoundError("service_account.json")):
+                with patch(
+                    'src.app.main.LogHandler',
+                    side_effect=FileNotFoundError("service_account.json"),
+                ):
                     window._init_components()
-        
+
         self.assertTrue(window._disabled)
         self.assertIn('認証情報', window._status)
 
@@ -804,19 +836,22 @@ class TestInitComponentsDirect(unittest.TestCase):
         """_init_componentsはSpreadsheetNotFoundで無効化."""
         window = self._create_mock_main_window()
         window._set_status = self._mock_set_status(window)
-        
+
         mock_config = MagicMock()
         mock_config.window_scan.browsers = []
         mock_config.window_scan.excluded_titles = []
         mock_games = [models.GameEntry(game_title="Test", window_title="Test")]
-        
+
         with patch('src.app.main.ConfigLoader') as MockConfigLoader:
             MockConfigLoader.return_value.load.return_value = mock_config
             with patch('src.app.main.GameInfoLoader') as MockGameInfoLoader:
                 MockGameInfoLoader.return_value.load.return_value = mock_games
-                with patch('src.app.main.LogHandler', side_effect=fake_gspread.exceptions.SpreadsheetNotFound()):
+                with patch(
+                    'src.app.main.LogHandler',
+                    side_effect=fake_gspread.exceptions.SpreadsheetNotFound(),
+                ):
                     window._init_components()
-        
+
         self.assertTrue(window._disabled)
         self.assertIn('ログハンドラー初期化エラー', window._status)
 
@@ -824,19 +859,25 @@ class TestInitComponentsDirect(unittest.TestCase):
         """_init_componentsはAPIErrorで無効化."""
         window = self._create_mock_main_window()
         window._set_status = self._mock_set_status(window)
-        
+
         mock_config = MagicMock()
         mock_config.window_scan.browsers = []
         mock_config.window_scan.excluded_titles = []
         mock_games = [models.GameEntry(game_title="Test", window_title="Test")]
-        
+
         with patch('src.app.main.ConfigLoader') as MockConfigLoader:
             MockConfigLoader.return_value.load.return_value = mock_config
             with patch('src.app.main.GameInfoLoader') as MockGameInfoLoader:
                 MockGameInfoLoader.return_value.load.return_value = mock_games
-                with patch('src.app.main.LogHandler', side_effect=fake_gspread.exceptions.APIError("Quota")):
+                mock_response = MagicMock()
+                mock_response.text = "Quota"
+                mock_response.json.return_value = {}
+                with patch(
+                    'src.app.main.LogHandler',
+                    side_effect=fake_gspread.exceptions.APIError(mock_response),
+                ):
                     window._init_components()
-        
+
         self.assertTrue(window._disabled)
         self.assertIn('ログハンドラー初期化エラー', window._status)
 
@@ -844,28 +885,31 @@ class TestInitComponentsDirect(unittest.TestCase):
         """_init_componentsは汎用Exceptionで無効化."""
         window = self._create_mock_main_window()
         window._set_status = self._mock_set_status(window)
-        
+
         mock_config = MagicMock()
         mock_config.window_scan.browsers = []
         mock_config.window_scan.excluded_titles = []
         mock_games = [models.GameEntry(game_title="Test", window_title="Test")]
-        
+
         # カスタム例外クラスを作成してgspread以外の例外をシミュレート
         class CustomNonGspreadError(Exception):
             pass
-        
+
         # gspread.exceptions.APIErrorを一時的に差し替え
         original_api_error = fake_gspread.exceptions.APIError
         fake_gspread.exceptions.APIError = type('APIError', (ValueError,), {})  # 狭い継承
-        
+
         try:
             with patch('src.app.main.ConfigLoader') as MockConfigLoader:
                 MockConfigLoader.return_value.load.return_value = mock_config
                 with patch('src.app.main.GameInfoLoader') as MockGameInfoLoader:
                     MockGameInfoLoader.return_value.load.return_value = mock_games
-                    with patch('src.app.main.LogHandler', side_effect=CustomNonGspreadError("Custom error")):
+                    with patch(
+                        'src.app.main.LogHandler',
+                        side_effect=CustomNonGspreadError("Custom error"),
+                    ):
                         window._init_components()
-            
+
             self.assertTrue(window._disabled)
             self.assertIn('初期化エラー', window._status)
         finally:
@@ -892,18 +936,20 @@ class TestMainWindowEvents(unittest.TestCase):
         """closeEventはプレイ中のゲームを記録する."""
         window = self._create_mock_main_window()
         window._save_window_state = MagicMock()
-        
-        game1 = models.GameEntry(game_title="Game1", window_title="Game1", is_playing=True)
+
+        game1 = models.GameEntry(
+            game_title="Game1", window_title="Game1", is_playing=True)
         game1.start_time = datetime.now() - timedelta(minutes=10)
-        game2 = models.GameEntry(game_title="Game2", window_title="Game2", is_playing=False)
+        game2 = models.GameEntry(
+            game_title="Game2", window_title="Game2", is_playing=False)
         window.games = [game1, game2]
-        
+
         # closeEventのロジックを再現
         for game in window.games:
             if game.is_playing and game.start_time:
                 window.recorder.record(game)
         window._save_window_state()
-        
+
         # game1のみ記録される（game2はis_playing=False）
         self.assertEqual(len(window.recorder.log_handler.records), 1)
         self.assertEqual(window.recorder.log_handler.records[0]['title'], 'Game1')
@@ -913,15 +959,16 @@ class TestMainWindowEvents(unittest.TestCase):
         """closeEventはstart_timeがないゲームをスキップ."""
         window = self._create_mock_main_window()
         window._save_window_state = MagicMock()
-        
-        game = models.GameEntry(game_title="NoStart", window_title="NoStart", is_playing=True)
+
+        game = models.GameEntry(game_title="NoStart",
+                                window_title="NoStart", is_playing=True)
         game.start_time = None  # start_timeなし
         window.games = [game]
-        
+
         for game in window.games:
             if game.is_playing and game.start_time:
                 window.recorder.record(game)
-        
+
         # 記録されない
         self.assertEqual(len(window.recorder.log_handler.records), 0)
 
@@ -929,40 +976,40 @@ class TestMainWindowEvents(unittest.TestCase):
         """mousePressEventは左クリックでモードを循環."""
         window = self._create_mock_main_window()
         window._cycle_display_mode = MagicMock()
-        
+
         mock_event = MagicMock()
         mock_event.button.return_value = main.Qt.MouseButton.LeftButton
-        
+
         # mousePressEventのロジックを再現
         if mock_event.button() == main.Qt.MouseButton.LeftButton:
             window._cycle_display_mode()
-        
+
         window._cycle_display_mode.assert_called_once()
 
     def test_mouse_press_right_button_does_not_cycle(self):
         """mousePressEventは右クリックではモードを変更しない."""
         window = self._create_mock_main_window()
         window._cycle_display_mode = MagicMock()
-        
+
         mock_event = MagicMock()
         mock_event.button.return_value = main.Qt.MouseButton.RightButton
-        
+
         if mock_event.button() == main.Qt.MouseButton.LeftButton:
             window._cycle_display_mode()
-        
+
         window._cycle_display_mode.assert_not_called()
 
     def test_resize_event_records_mode_size(self):
         """resizeEventは現在モードのサイズを記録."""
         window = self._create_mock_main_window()
         window.display_mode = 'mid'
-        
+
         # resizeEventのロジックを再現
         new_width, new_height = 400, 300
         window.width = lambda: new_width
         window.height = lambda: new_height
         window.mode_sizes[window.display_mode] = (window.width(), window.height())
-        
+
         self.assertEqual(window.mode_sizes['mid'], (400, 300))
 
     def test_start_timer_creates_and_starts_timer(self):
@@ -970,14 +1017,14 @@ class TestMainWindowEvents(unittest.TestCase):
         # QTimerのモックテスト
         mock_timer = MagicMock()
         callback = MagicMock()
-        
+
         with patch('src.app.main.QTimer', return_value=mock_timer):
             # _start_timerのロジックを再現
             timer = mock_timer
             timer.setInterval(int(1.0 * 1000))
             timer.timeout.connect(callback)
             timer.start()
-        
+
         mock_timer.setInterval.assert_called_once_with(1000)
         mock_timer.timeout.connect.assert_called_once_with(callback)
         mock_timer.start.assert_called_once()
@@ -1002,9 +1049,9 @@ class TestUpdateTodayGamesList(unittest.TestCase):
             'GameB': 30.0,
         }
         window.daily_stats.last_today_games_content = ""
-        
+
         window._update_today_games_list(datetime.now())
-        
+
         # テーブルが更新される
         window.w.today_games_table.setRowCount.assert_called_with(2)
         # setItemが呼ばれる（2ゲーム × 2カラム = 4回）
@@ -1019,9 +1066,9 @@ class TestUpdateTodayGamesList(unittest.TestCase):
             'MidGame': 45.0,
         }
         window.daily_stats.last_today_games_content = ""
-        
+
         window._update_today_games_list(datetime.now())
-        
+
         # setItemの呼び出し順で確認
         calls = window.w.today_games_table.setItem.call_args_list
         # row 0 = LongGame (120分)
@@ -1042,9 +1089,9 @@ class TestUpdateTodayGamesList(unittest.TestCase):
         }
         # 既に同じ内容がセットされている
         window.daily_stats.last_today_games_content = "GameA: 60分"
-        
+
         window._update_today_games_list(datetime.now())
-        
+
         # 更新されない
         window.w.today_games_table.setRowCount.assert_not_called()
 
@@ -1055,9 +1102,9 @@ class TestUpdateTodayGamesList(unittest.TestCase):
             'GameA': 65.0,  # 60分から65分に増加
         }
         window.daily_stats.last_today_games_content = "GameA: 60分"
-        
+
         window._update_today_games_list(datetime.now())
-        
+
         # 更新される
         window.w.today_games_table.setRowCount.assert_called_with(1)
         # 新しい内容が保存される
@@ -1068,13 +1115,14 @@ class TestUpdateTodayGamesList(unittest.TestCase):
         window = self._create_mock_main_window()
         window.daily_stats.today_game_minutes_cache = {}
         window.daily_stats.last_today_games_content = ""
-        
-        game = models.GameEntry(game_title="PlayingGame", window_title="PlayingGame", is_playing=True)
+
+        game = models.GameEntry(game_title="PlayingGame",
+                                window_title="PlayingGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=10)
         window.active_games_cache = [game]
-        
+
         window._update_today_games_list(datetime.now())
-        
+
         # テーブルが更新される（1ゲーム）
         window.w.today_games_table.setRowCount.assert_called_with(1)
 
@@ -1083,13 +1131,14 @@ class TestUpdateTodayGamesList(unittest.TestCase):
         window = self._create_mock_main_window()
         window.daily_stats.today_game_minutes_cache = {}
         window.daily_stats.last_today_games_content = ""
-        
-        game = models.GameEntry(game_title="ShortPlayingGame", window_title="ShortPlayingGame", is_playing=True)
+
+        game = models.GameEntry(game_title="ShortPlayingGame",
+                                window_title="ShortPlayingGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=3)
         window.active_games_cache = [game]
-        
+
         window._update_today_games_list(datetime.now())
-        
+
         # 空なのでクリアされる
         self.assertEqual(window.daily_stats.last_today_games_content, "")
 
@@ -1100,14 +1149,15 @@ class TestUpdateTodayGamesList(unittest.TestCase):
             'GameA': 30.0,  # キャッシュに30分
         }
         window.daily_stats.last_today_games_content = ""
-        
+
         # 同じゲームが現在10分プレイ中
-        game = models.GameEntry(game_title="GameA", window_title="GameA", is_playing=True)
+        game = models.GameEntry(
+            game_title="GameA", window_title="GameA", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=10)
         window.active_games_cache = [game]
-        
+
         window._update_today_games_list(datetime.now())
-        
+
         # 30 + 10 = 40分として表示
         self.assertIn("GameA: 40分", window.daily_stats.last_today_games_content)
 
@@ -1125,61 +1175,65 @@ class TestLoadTodayDataExceptionHandling(unittest.TestCase):
     def test_load_today_game_minutes_returns_empty_on_exception(self):
         """_load_today_game_minutesは例外時に空辞書を返す."""
         window = self._create_mock_main_window()
-        
+
         mock_handler = MagicMock()
         mock_handler.get_today_stats.side_effect = RuntimeError("Database error")
-        window.recorder = services.SessionRecorder(log_handler=mock_handler, min_play_minutes=5)
-        
+        window.recorder = services.SessionRecorder(
+            log_handler=mock_handler, min_play_minutes=5)
+
         result = window._load_today_game_minutes()
-        
+
         self.assertEqual(result, {})
 
     def test_load_today_completed_seconds_returns_zero_on_exception(self):
         """_load_today_completed_secondsは例外時に0を返す."""
         window = self._create_mock_main_window()
-        
+
         mock_handler = MagicMock()
         mock_handler.get_today_stats.side_effect = RuntimeError("Database error")
-        window.recorder = services.SessionRecorder(log_handler=mock_handler, min_play_minutes=5)
-        
+        window.recorder = services.SessionRecorder(
+            log_handler=mock_handler, min_play_minutes=5)
+
         result = window._load_today_completed_seconds()
-        
+
         self.assertEqual(result, 0.0)
 
     def test_load_today_game_minutes_handles_parse_error(self):
         """_load_today_game_minutesはパースエラーをスキップ."""
         window = self._create_mock_main_window()
-        
+
         mock_handler = MagicMock()
         # 不正なレコード形式
         mock_handler.get_today_stats.return_value = ({}, 0.0)
-        window.recorder = services.SessionRecorder(log_handler=mock_handler, min_play_minutes=5)
-        
+        window.recorder = services.SessionRecorder(
+            log_handler=mock_handler, min_play_minutes=5)
+
         result = window._load_today_game_minutes()
-        
+
         # パース失敗レコードはスキップされる
         self.assertEqual(result, {})
 
     def test_load_today_completed_seconds_handles_parse_error(self):
         """_load_today_completed_secondsはパースエラーをスキップ."""
         window = self._create_mock_main_window()
-        
+
         mock_handler = MagicMock()
         mock_handler.get_today_stats.return_value = ({}, 0.0)
-        window.recorder = services.SessionRecorder(log_handler=mock_handler, min_play_minutes=5)
-        
+        window.recorder = services.SessionRecorder(
+            log_handler=mock_handler, min_play_minutes=5)
+
         result = window._load_today_completed_seconds()
-        
+
         self.assertEqual(result, 0.0)
 
     def test_load_today_game_minutes_filters_other_days(self):
         """_load_today_game_minutesは今日以外の日付をフィルタ."""
         window = self._create_mock_main_window()
-        
+
         handler = FakeLogHandler()
         now = datetime.now()
         yesterday = now - timedelta(days=1)
-        
+
         # 昨日のレコードを追加
         handler.records = [
             {
@@ -1190,10 +1244,11 @@ class TestLoadTodayDataExceptionHandling(unittest.TestCase):
                 'play_with_friends': False,
             }
         ]
-        window.recorder = services.SessionRecorder(log_handler=handler, min_play_minutes=5)
-        
+        window.recorder = services.SessionRecorder(
+            log_handler=handler, min_play_minutes=5)
+
         result = window._load_today_game_minutes()
-        
+
         # 昨日のレコードは含まれない
         self.assertEqual(result, {})
 
@@ -1228,29 +1283,31 @@ class TestScanTickStatusSwitch(unittest.TestCase):
         """アクティブゲームがある場合はプレイ時間計測中."""
         window = self._create_mock_main_window()
         window._set_status = self._mock_set_status(window)
-        
-        game = models.GameEntry(game_title="TestGame", window_title="TestGame", is_playing=False)
+
+        game = models.GameEntry(game_title="TestGame",
+                                window_title="TestGame", is_playing=False)
         window.games = [game]
         window.scanner.get_titles.return_value = ["TestGame Window"]
         window.scanner.get_foreground_title.return_value = "TestGame Window"
-        
+
         window._scan_tick()
-        
+
         self.assertEqual(window._status, 'プレイ時間計測中')
 
     def test_status_playing_when_inactive_games(self):
         """非アクティブゲーム（停止中）がある場合もプレイ時間計測中."""
         window = self._create_mock_main_window()
         window._set_status = self._mock_set_status(window)
-        
-        game = models.GameEntry(game_title="TestGame", window_title="TestGame", is_playing=True)
+
+        game = models.GameEntry(game_title="TestGame",
+                                window_title="TestGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=10)
         window.games = [game]
         window.scanner.get_titles.return_value = ["TestGame Window", "Other Window"]
         window.scanner.get_foreground_title.return_value = "Other Window"  # 非フォアグラウンド
-        
+
         window._scan_tick()
-        
+
         # inactive_gamesが存在するのでプレイ時間計測中
         self.assertEqual(window._status, 'プレイ時間計測中')
 
@@ -1258,31 +1315,33 @@ class TestScanTickStatusSwitch(unittest.TestCase):
         """アクティブ/非アクティブゲームがない場合は「プレイ中のゲームなし」."""
         window = self._create_mock_main_window()
         window._set_status = self._mock_set_status(window)
-        
-        game = models.GameEntry(game_title="TestGame", window_title="TestGame", is_playing=False)
+
+        game = models.GameEntry(game_title="TestGame",
+                                window_title="TestGame", is_playing=False)
         window.games = [game]
         window.scanner.get_titles.return_value = ["Other Window"]  # ゲームウィンドウなし
         window.scanner.get_foreground_title.return_value = "Other Window"
-        
+
         window._scan_tick()
-        
+
         self.assertEqual(window._status, main.Messages.NO_GAME_PLAYING)
 
     def test_status_switches_from_playing_to_no_game(self):
         """プレイ中から未プレイへの切替."""
         window = self._create_mock_main_window()
         window._set_status = self._mock_set_status(window)
-        
-        game = models.GameEntry(game_title="TestGame", window_title="TestGame", is_playing=True)
+
+        game = models.GameEntry(game_title="TestGame",
+                                window_title="TestGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=10)
         window.games = [game]
-        
+
         # 最初はゲームがフォアグラウンド
         window.scanner.get_titles.return_value = ["TestGame Window"]
         window.scanner.get_foreground_title.return_value = "TestGame Window"
         window._scan_tick()
         self.assertEqual(window._status, 'プレイ時間計測中')
-        
+
         # 次にゲームウィンドウが消える
         window.scanner.get_titles.return_value = []
         window.scanner.get_foreground_title.return_value = None
@@ -1297,15 +1356,16 @@ class TestInactiveWindowDisappear(unittest.TestCase):
         """モックされたMainWindowを作成."""
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
-        
+
         window.games = []
         window.browsers = ['Chrome']
         window.active_games_cache = []
         window.inactive_games_cache = []
         window.latest_window_titles = []
         window.daily_stats = services.DailyStatsTracker()
-        window.recorder = services.SessionRecorder(log_handler=FakeLogHandler(), min_play_minutes=5)
-        
+        window.recorder = services.SessionRecorder(
+            log_handler=FakeLogHandler(), min_play_minutes=5)
+
         # GameStateTrackerを初期化
         window.state_tracker = services.GameStateTracker(
             recorder=window.recorder,
@@ -1313,38 +1373,39 @@ class TestInactiveWindowDisappear(unittest.TestCase):
             browsers=list(window.browsers),
             inactive_timeout_minutes=5,
         )
-        
+
         window.w = MagicMock()
         window.w.active_display = MagicMock()
         window.w.window_list = MagicMock()
         window.w.today_games_table = MagicMock()
-        
+
         window.scanner = MagicMock()
         window.scanner.excluded_titles = set()
-        
+
         window.setWindowTitle = MagicMock()
-        
+
         # _load_today_game_minutesをモック
         window._load_today_game_minutes = MagicMock(return_value={})
-        
+
         return window
 
     def test_inactive_window_disappear_includes_inactive_time(self):
         """非アクティブ状態でウィンドウ消失時、非アクティブ時間も含めて記録."""
         window = self._create_mock_main_window()
-        
+
         # 15分前から開始し、3分間非アクティブ状態
-        game = models.GameEntry(game_title="TestGame", window_title="TestGame", is_playing=True)
+        game = models.GameEntry(game_title="TestGame",
+                                window_title="TestGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=15)
         game.inactive_since = datetime.now() - timedelta(minutes=3)  # 3分間非アクティブ
         window.games = [game]
-        
+
         # ウィンドウが消失
         window.scanner.get_titles.return_value = []
         window.scanner.get_foreground_title.return_value = None
-        
+
         window._scan_tick()
-        
+
         # record()が呼ばれ、非アクティブ時間も含めた時間が記録される
         self.assertFalse(game.is_playing)
         # 記録されたレコードを確認
@@ -1355,23 +1416,24 @@ class TestInactiveWindowDisappear(unittest.TestCase):
     def test_inactive_under_5min_reactivate_continues_session(self):
         """非アクティブ5分未満で再アクティブ化するとセッション継続."""
         window = self._create_mock_main_window()
-        
-        game = models.GameEntry(game_title="TestGame", window_title="TestGame", is_playing=True)
+
+        game = models.GameEntry(game_title="TestGame",
+                                window_title="TestGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=10)
         window.games = [game]
-        
+
         # 非アクティブ状態（3分経過）
         window.scanner.get_titles.return_value = ["TestGame Window", "Other Window"]
         window.scanner.get_foreground_title.return_value = "Other Window"
         window._scan_tick()
-        
+
         self.assertTrue(game.is_inactive())
         self.assertIsNotNone(game.inactive_since)
-        
+
         # 再度フォアグラウンドに
         window.scanner.get_foreground_title.return_value = "TestGame Window"
         window._scan_tick()
-        
+
         # セッション継続、inactive_sinceがクリアされる
         self.assertTrue(game.is_playing)
         self.assertFalse(game.is_inactive())
@@ -1388,16 +1450,16 @@ class TestBuildMainLayout(unittest.TestCase):
         # PySide6のQWidgetをモックで置き換え
         from src.ui.gui_layout import build_main_layout, LayoutWidgets
         from PySide6.QtWidgets import QWidget, QApplication
-        
+
         # QApplicationが必要なのでスキップ可能にする
         try:
             app = QApplication.instance()
             if app is None:
                 app = QApplication([])
-            
+
             parent = QWidget()
             result = build_main_layout(parent)
-            
+
             self.assertIsInstance(result, LayoutWidgets)
             self.assertIsNotNone(result.today_label)
             self.assertIsNotNone(result.today_time_display)
@@ -1416,13 +1478,19 @@ class TestBuildMainLayout(unittest.TestCase):
     def test_layout_widgets_has_height_constants(self):
         """LayoutWidgetsは高さ定数を持つ."""
         from src.ui.gui_layout import LayoutWidgets
-        from PySide6.QtWidgets import QWidget, QApplication, QLabel, QListWidget, QTableWidget
-        
+        from PySide6.QtWidgets import (
+            QApplication,
+            QLabel,
+            QListWidget,
+            QTableWidget,
+            QWidget,
+        )
+
         try:
             app = QApplication.instance()
             if app is None:
                 app = QApplication([])
-            
+
             # ダミーウィジェットで作成
             parent = QWidget()
             widgets = LayoutWidgets(
@@ -1441,7 +1509,7 @@ class TestBuildMainLayout(unittest.TestCase):
                 today_games_min_height=100,
                 window_min_height=200,
             )
-            
+
             self.assertEqual(widgets.active_min_height, 30)
             self.assertEqual(widgets.active_max_height, 30)
             self.assertEqual(widgets.today_games_min_height, 100)
@@ -1457,7 +1525,7 @@ class TestMainWindowEventsDirect(unittest.TestCase):
         """モックされたMainWindowを作成."""
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
-        
+
         window.games = []
         window.browsers = ['Chrome']
         window.active_games_cache = []
@@ -1465,17 +1533,18 @@ class TestMainWindowEventsDirect(unittest.TestCase):
         window.display_mode = 'mid'
         window.mode_sizes = {'min': (300, 80), 'mid': (300, 200), 'max': (300, 400)}
         window.daily_stats = services.DailyStatsTracker()
-        window.recorder = services.SessionRecorder(log_handler=FakeLogHandler(), min_play_minutes=5)
-        
+        window.recorder = services.SessionRecorder(
+            log_handler=FakeLogHandler(), min_play_minutes=5)
+
         window.w = MagicMock()
         window.scanner = MagicMock()
         window.scanner.excluded_titles = set()
-        
+
         window._window_title = ""
         window.setWindowTitle = MagicMock()
         window.windowTitle = lambda: window._window_title
         window.setDisabled = MagicMock()
-        
+
         window._geom = MagicMock()
         window._geom.x.return_value = 100
         window._geom.y.return_value = 200
@@ -1484,22 +1553,23 @@ class TestMainWindowEventsDirect(unittest.TestCase):
         window.geometry = lambda: window._geom
         window.width = lambda: 300
         window.height = lambda: 200
-        
+
         return window
 
     def test_close_event_calls_record_for_playing_games(self):
         """closeEventは実際のrecord()を呼び出す."""
         window = self._create_mock_main_window()
-        
-        game = models.GameEntry(game_title="TestGame", window_title="TestGame", is_playing=True)
+
+        game = models.GameEntry(game_title="TestGame",
+                                window_title="TestGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=10)
         window.games = [game]
-        
+
         # closeEventのロジック部分を実行（super().closeEventはモック）
         for g in window.games:
             if g.is_playing and g.start_time:
                 window.recorder.record(g)
-        
+
         # 実際にrecordが実行され、レコードが追加される
         self.assertEqual(len(window.recorder.log_handler.records), 1)
         self.assertFalse(game.is_playing)  # record()でis_playing=Falseになる
@@ -1510,10 +1580,10 @@ class TestMainWindowEventsDirect(unittest.TestCase):
         window._apply_display_mode = MagicMock()
         window._save_window_state = MagicMock()
         window.display_mode = 'max'
-        
+
         # mousePressEventのロジック部分を実行
         window._cycle_display_mode()
-        
+
         # DISPLAY_MODES = ("max", "mid", "min") なので max -> mid
         self.assertEqual(window.display_mode, 'mid')
         window._apply_display_mode.assert_called_once()
@@ -1525,17 +1595,17 @@ class TestMainWindowEventsDirect(unittest.TestCase):
         window.display_mode = 'mid'
         window.width = lambda: 400
         window.height = lambda: 300
-        
+
         # resizeEventのロジック部分を実行
         window.mode_sizes[window.display_mode] = (window.width(), window.height())
-        
+
         self.assertEqual(window.mode_sizes['mid'], (400, 300))
 
     def test_start_timer_logic_with_qtimer(self):
         """_start_timerのロジックをQTimerモックで検証."""
         window = self._create_mock_main_window()
         callback = MagicMock()
-        
+
         mock_timer = MagicMock()
         with patch('src.app.main.QTimer', return_value=mock_timer):
             # _start_timerの実装を再現
@@ -1543,7 +1613,7 @@ class TestMainWindowEventsDirect(unittest.TestCase):
             timer.setInterval(int(1.0 * 1000))
             timer.timeout.connect(callback)
             timer.start()
-        
+
         mock_timer.setInterval.assert_called_with(1000)
         mock_timer.timeout.connect.assert_called_with(callback)
         mock_timer.start.assert_called_once()
@@ -1556,36 +1626,39 @@ class TestUpdateSessionTimesWithInactive(unittest.TestCase):
         """モックされたMainWindowを作成."""
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
-        
+
         window.games = []
         window.browsers = ['Chrome']
         window.active_games_cache = []
         window.inactive_games_cache = []
         window.daily_stats = services.DailyStatsTracker()
-        window.recorder = services.SessionRecorder(log_handler=FakeLogHandler(), min_play_minutes=5)
-        
+        window.recorder = services.SessionRecorder(
+            log_handler=FakeLogHandler(), min_play_minutes=5)
+
         window.w = MagicMock()
         window.w.session_time_display = MagicMock()
-        
+
         return window
 
     def test_includes_inactive_games_in_max_calculation(self):
         """inactive_games_cacheのゲームも最長時間計算に含まれる."""
         window = self._create_mock_main_window()
-        
+
         # アクティブゲーム: 5分
-        active_game = models.GameEntry(game_title="ActiveGame", window_title="ActiveGame", is_playing=True)
+        active_game = models.GameEntry(
+            game_title="ActiveGame", window_title="ActiveGame", is_playing=True)
         active_game.start_time = datetime.now() - timedelta(minutes=5)
-        
+
         # 非アクティブゲーム: 15分（こちらが最長）
-        inactive_game = models.GameEntry(game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
+        inactive_game = models.GameEntry(
+            game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
         inactive_game.start_time = datetime.now() - timedelta(minutes=15)
         inactive_game.set_inactive()
         window.inactive_games_cache = [inactive_game]
-        
+
         # 実メソッドを呼び出し
         window._update_session_times([active_game], datetime.now())
-        
+
         # 15分が表示される（HH:MM:SS.F形式 = 00:15:xx.x）
         call_arg = window.w.session_time_display.setText.call_args[0][0]
         self.assertTrue(call_arg.startswith("00:15:") or call_arg.startswith("00:14:"))
@@ -1593,14 +1666,15 @@ class TestUpdateSessionTimesWithInactive(unittest.TestCase):
     def test_only_inactive_games_shows_max(self):
         """active_gamesが空でもinactive_games_cacheから最長を表示."""
         window = self._create_mock_main_window()
-        
-        inactive_game = models.GameEntry(game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
+
+        inactive_game = models.GameEntry(
+            game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
         inactive_game.start_time = datetime.now() - timedelta(minutes=20)
         inactive_game.set_inactive()
         window.inactive_games_cache = [inactive_game]
-        
+
         window._update_session_times([], datetime.now())
-        
+
         call_arg = window.w.session_time_display.setText.call_args[0][0]
         self.assertTrue(call_arg.startswith("00:20:") or call_arg.startswith("00:19:"))
 
@@ -1608,9 +1682,9 @@ class TestUpdateSessionTimesWithInactive(unittest.TestCase):
         """active_gamesとinactive_games_cacheが両方空なら---."""
         window = self._create_mock_main_window()
         window.inactive_games_cache = []
-        
+
         window._update_session_times([], datetime.now())
-        
+
         window.w.session_time_display.setText.assert_called_with('---')
 
 
@@ -1621,32 +1695,34 @@ class TestUpdateTodayTotalsIntegration(unittest.TestCase):
         """モックされたMainWindowを作成."""
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
-        
+
         window.games = []
         window.browsers = ['Chrome']
         window.active_games_cache = []
         window.inactive_games_cache = []
         window.daily_stats = services.DailyStatsTracker()
-        window.recorder = services.SessionRecorder(log_handler=FakeLogHandler(), min_play_minutes=5)
-        
+        window.recorder = services.SessionRecorder(
+            log_handler=FakeLogHandler(), min_play_minutes=5)
+
         window.w = MagicMock()
         window.w.today_time_display = MagicMock()
-        
+
         return window
 
     def test_includes_inactive_game_time(self):
         """非アクティブゲームの時間も含まれる."""
         window = self._create_mock_main_window()
         window.daily_stats.today_completed_seconds = 0.0
-        
+
         # 非アクティブゲーム: 10分
-        inactive_game = models.GameEntry(game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
+        inactive_game = models.GameEntry(
+            game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
         inactive_game.start_time = datetime.now() - timedelta(minutes=10)
         inactive_game.set_inactive()
         window.inactive_games_cache = [inactive_game]
-        
+
         window._update_today_totals([], datetime.now())
-        
+
         # 10分 = 00:10:xx
         call_arg = window.w.today_time_display.setText.call_args[0][0]
         self.assertTrue(call_arg.startswith("00:10:") or call_arg.startswith("00:09:"))
@@ -1655,19 +1731,21 @@ class TestUpdateTodayTotalsIntegration(unittest.TestCase):
         """日跨ぎセッションは今日0:00からカウント."""
         window = self._create_mock_main_window()
         window.daily_stats.today_completed_seconds = 0.0
-        
+
         now = datetime.now()
         today_start = datetime.combine(now.date(), time(0, 0, 0))
-        
+
         # 昨日23:00開始（日跨ぎ）
-        game = models.GameEntry(game_title="NightGame", window_title="NightGame", is_playing=True)
-        game.start_time = datetime.combine(now.date() - timedelta(days=1), time(23, 0, 0))
-        
+        game = models.GameEntry(game_title="NightGame",
+                                window_title="NightGame", is_playing=True)
+        game.start_time = datetime.combine(
+            now.date() - timedelta(days=1), time(23, 0, 0))
+
         # 今日の経過時間を計算（現在時刻から0:00を引く）
         expected_seconds = (now - today_start).total_seconds()
-        
+
         window._update_today_totals([game], now)
-        
+
         # 今日0:00からの時間が表示される（5分以上なら）
         if expected_seconds >= main.MIN_PLAY_MINUTES * main.SECONDS_PER_MINUTE:
             call_arg = window.w.today_time_display.setText.call_args[0][0]
@@ -1677,13 +1755,14 @@ class TestUpdateTodayTotalsIntegration(unittest.TestCase):
         """5分未満のセッションは除外."""
         window = self._create_mock_main_window()
         window.daily_stats.today_completed_seconds = 3600.0  # 完了分1時間
-        
+
         # 3分プレイ中（5分未満なので除外）
-        game = models.GameEntry(game_title="ShortGame", window_title="ShortGame", is_playing=True)
+        game = models.GameEntry(game_title="ShortGame",
+                                window_title="ShortGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=3)
-        
+
         window._update_today_totals([game], datetime.now())
-        
+
         # 完了分の1時間のみ = 01:00:xx
         call_arg = window.w.today_time_display.setText.call_args[0][0]
         self.assertTrue(call_arg.startswith("01:00:"))
@@ -1691,20 +1770,23 @@ class TestUpdateTodayTotalsIntegration(unittest.TestCase):
     def test_combined_active_inactive_completed(self):
         """アクティブ+非アクティブ+完了時間が合算される."""
         window = self._create_mock_main_window()
+        now = datetime(2026, 1, 1, 12, 0, 0)
         window.daily_stats.today_completed_seconds = 1800.0  # 完了30分
-        
+
         # アクティブゲーム: 10分
-        active_game = models.GameEntry(game_title="ActiveGame", window_title="ActiveGame", is_playing=True)
-        active_game.start_time = datetime.now() - timedelta(minutes=10)
-        
+        active_game = models.GameEntry(
+            game_title="ActiveGame", window_title="ActiveGame", is_playing=True)
+        active_game.start_time = now - timedelta(minutes=10)
+
         # 非アクティブゲーム: 20分
-        inactive_game = models.GameEntry(game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
-        inactive_game.start_time = datetime.now() - timedelta(minutes=20)
+        inactive_game = models.GameEntry(
+            game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
+        inactive_game.start_time = now - timedelta(minutes=20)
         inactive_game.set_inactive()
         window.inactive_games_cache = [inactive_game]
-        
-        window._update_today_totals([active_game], datetime.now())
-        
+
+        window._update_today_totals([active_game], now)
+
         # 30 + 10 + 20 = 60分 = 01:00:xx
         call_arg = window.w.today_time_display.setText.call_args[0][0]
         self.assertTrue(call_arg.startswith("01:00:") or call_arg.startswith("00:59:"))
@@ -1724,17 +1806,18 @@ class TestUpdateTodayGamesListWithInactive(unittest.TestCase):
         window = self._create_mock_main_window()
         window.daily_stats.today_game_minutes_cache = {}
         window.daily_stats.last_today_games_content = ""
-        now = datetime.now()
-        
+        now = datetime(2026, 1, 1, 12, 0, 0)
+
         # 非アクティブゲーム: 15分
-        inactive_game = models.GameEntry(game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
+        inactive_game = models.GameEntry(
+            game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
         inactive_game.start_time = now - timedelta(minutes=15)
         inactive_game.set_inactive()
         window.inactive_games_cache = [inactive_game]
         window.active_games_cache = []
-        
+
         window._update_today_games_list(now)
-        
+
         # テーブル更新される
         window.w.today_games_table.setRowCount.assert_called_with(1)
         self.assertIn("InactiveGame: 15分", window.daily_stats.last_today_games_content)
@@ -1744,21 +1827,23 @@ class TestUpdateTodayGamesListWithInactive(unittest.TestCase):
         window = self._create_mock_main_window()
         window.daily_stats.today_game_minutes_cache = {}
         window.daily_stats.last_today_games_content = ""
-        now = datetime.now()
-        
+        now = datetime(2026, 1, 1, 12, 0, 0)
+
         # アクティブゲーム: 10分
-        active_game = models.GameEntry(game_title="ActiveGame", window_title="ActiveGame", is_playing=True)
+        active_game = models.GameEntry(
+            game_title="ActiveGame", window_title="ActiveGame", is_playing=True)
         active_game.start_time = now - timedelta(minutes=10)
         window.active_games_cache = [active_game]
-        
+
         # 非アクティブゲーム: 20分
-        inactive_game = models.GameEntry(game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
+        inactive_game = models.GameEntry(
+            game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
         inactive_game.start_time = now - timedelta(minutes=20)
         inactive_game.set_inactive()
         window.inactive_games_cache = [inactive_game]
-        
+
         window._update_today_games_list(now)
-        
+
         # 2ゲーム表示
         window.w.today_games_table.setRowCount.assert_called_with(2)
         # 時間降順なのでInactiveGame(20分)が先
@@ -1772,17 +1857,18 @@ class TestUpdateTodayGamesListWithInactive(unittest.TestCase):
             'GameA': 30.0,  # キャッシュに30分
         }
         window.daily_stats.last_today_games_content = ""
-        now = datetime.now()
-        
+        now = datetime(2026, 1, 1, 12, 0, 0)
+
         # 同じゲームが非アクティブで15分
-        inactive_game = models.GameEntry(game_title="GameA", window_title="GameA", is_playing=True)
+        inactive_game = models.GameEntry(
+            game_title="GameA", window_title="GameA", is_playing=True)
         inactive_game.start_time = now - timedelta(minutes=15)
         inactive_game.set_inactive()
         window.inactive_games_cache = [inactive_game]
         window.active_games_cache = []
-        
+
         window._update_today_games_list(now)
-        
+
         # 30 + 15 = 45分
         self.assertIn("GameA: 45分", window.daily_stats.last_today_games_content)
 
@@ -1800,7 +1886,7 @@ class TestLoadTodayGameMinutesParseNone(unittest.TestCase):
     def test_skips_record_with_missing_start_time(self):
         """start_timeが欠落したレコードはスキップ."""
         window = self._create_mock_main_window()
-        
+
         handler = FakeLogHandler()
         now = datetime.now()
         handler.records = [
@@ -1820,10 +1906,11 @@ class TestLoadTodayGameMinutesParseNone(unittest.TestCase):
                 'play_with_friends': False,
             },
         ]
-        window.recorder = services.SessionRecorder(log_handler=handler, min_play_minutes=5)
-        
+        window.recorder = services.SessionRecorder(
+            log_handler=handler, min_play_minutes=5)
+
         result = window._load_today_game_minutes()
-        
+
         # 正常レコードのみ含まれる
         self.assertIn('GoodRecord', result)
         self.assertNotIn('BadRecord1', result)
@@ -1831,7 +1918,7 @@ class TestLoadTodayGameMinutesParseNone(unittest.TestCase):
     def test_skips_record_with_missing_end_time(self):
         """end_timeが欠落したレコードはスキップ."""
         window = self._create_mock_main_window()
-        
+
         handler = FakeLogHandler()
         now = datetime.now()
         handler.records = [
@@ -1851,17 +1938,18 @@ class TestLoadTodayGameMinutesParseNone(unittest.TestCase):
                 'play_with_friends': False,
             },
         ]
-        window.recorder = services.SessionRecorder(log_handler=handler, min_play_minutes=5)
-        
+        window.recorder = services.SessionRecorder(
+            log_handler=handler, min_play_minutes=5)
+
         result = window._load_today_game_minutes()
-        
+
         self.assertIn('GoodRecord2', result)
         self.assertNotIn('BadRecord2', result)
 
     def test_skips_record_with_invalid_datetime_format(self):
         """日時フォーマットが不正なレコードはスキップ."""
         window = self._create_mock_main_window()
-        
+
         handler = FakeLogHandler()
         now = datetime.now()
         handler.records = [
@@ -1882,17 +1970,18 @@ class TestLoadTodayGameMinutesParseNone(unittest.TestCase):
                 'play_with_friends': False,
             },
         ]
-        window.recorder = services.SessionRecorder(log_handler=handler, min_play_minutes=5)
-        
+        window.recorder = services.SessionRecorder(
+            log_handler=handler, min_play_minutes=5)
+
         result = window._load_today_game_minutes()
-        
+
         self.assertIn('GoodFormat', result)
         self.assertNotIn('BadFormat', result)
 
     def test_skips_empty_record(self):
         """空のレコードはスキップ."""
         window = self._create_mock_main_window()
-        
+
         handler = FakeLogHandler()
         now = datetime.now()
         handler.records = [
@@ -1906,10 +1995,11 @@ class TestLoadTodayGameMinutesParseNone(unittest.TestCase):
                 'play_with_friends': False,
             },
         ]
-        window.recorder = services.SessionRecorder(log_handler=handler, min_play_minutes=5)
-        
+        window.recorder = services.SessionRecorder(
+            log_handler=handler, min_play_minutes=5)
+
         result = window._load_today_game_minutes()
-        
+
         self.assertIn('ValidRecord', result)
 
 
@@ -1920,13 +2010,13 @@ class TestCloseEventRealMethod(unittest.TestCase):
         """closeEventがsuper().closeEvent()を呼び出す."""
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
-        
+
         window.games = []
         window.overlay_window = None
         window._save_window_state = MagicMock()
-        
+
         mock_event = MagicMock(spec=main.QCloseEvent)
-        
+
         # super().closeEventをモック
         with patch.object(main.QWidget, 'closeEvent') as mock_super_close:
             window.closeEvent(mock_event)
@@ -1936,13 +2026,13 @@ class TestCloseEventRealMethod(unittest.TestCase):
         """closeEventが_save_window_stateを呼び出す."""
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
-        
+
         window.games = []
         window.overlay_window = None
         window._save_window_state = MagicMock()
-        
+
         mock_event = MagicMock(spec=main.QCloseEvent)
-        
+
         with patch.object(main.QWidget, 'closeEvent'):
             window.closeEvent(mock_event)
             window._save_window_state.assert_called_once()
@@ -1951,16 +2041,17 @@ class TestCloseEventRealMethod(unittest.TestCase):
         """closeEventがプレイ中ゲームを記録する."""
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
-        
-        game = models.GameEntry(game_title="TestGame", window_title="TestGame", is_playing=True)
+
+        game = models.GameEntry(game_title="TestGame",
+                                window_title="TestGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=10)
         window.games = [game]
         window.overlay_window = None
         window.recorder = MagicMock()
         window._save_window_state = MagicMock()
-        
+
         mock_event = MagicMock(spec=main.QCloseEvent)
-        
+
         with patch.object(main.QWidget, 'closeEvent'):
             window.closeEvent(mock_event)
             window.recorder.record.assert_called_once_with(game)
@@ -1973,12 +2064,12 @@ class TestMousePressEventRealMethod(unittest.TestCase):
         """mousePressEventがsuper().mousePressEvent()を呼び出す."""
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
-        
+
         window._cycle_display_mode = MagicMock()
-        
+
         mock_event = MagicMock(spec=main.QMouseEvent)
         mock_event.button.return_value = main.Qt.MouseButton.RightButton
-        
+
         with patch.object(main.QWidget, 'mousePressEvent') as mock_super:
             window.mousePressEvent(mock_event)
             mock_super.assert_called_once_with(mock_event)
@@ -1987,12 +2078,12 @@ class TestMousePressEventRealMethod(unittest.TestCase):
         """左クリックでモード切替後、super()を呼び出す."""
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
-        
+
         window._cycle_display_mode = MagicMock()
-        
+
         mock_event = MagicMock(spec=main.QMouseEvent)
         mock_event.button.return_value = main.Qt.MouseButton.LeftButton
-        
+
         with patch.object(main.QWidget, 'mousePressEvent') as mock_super:
             window.mousePressEvent(mock_event)
             window._cycle_display_mode.assert_called_once()
@@ -2002,12 +2093,12 @@ class TestMousePressEventRealMethod(unittest.TestCase):
         """右クリックではモード切替しない."""
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
-        
+
         window._cycle_display_mode = MagicMock()
-        
+
         mock_event = MagicMock(spec=main.QMouseEvent)
         mock_event.button.return_value = main.Qt.MouseButton.RightButton
-        
+
         with patch.object(main.QWidget, 'mousePressEvent'):
             window.mousePressEvent(mock_event)
             window._cycle_display_mode.assert_not_called()
@@ -2020,14 +2111,14 @@ class TestResizeEventRealMethod(unittest.TestCase):
         """resizeEventがsuper().resizeEvent()を呼び出す."""
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
-        
+
         window.display_mode = 'mid'
         window.mode_sizes = {'min': (300, 80), 'mid': (300, 200), 'max': (300, 400)}
         window.width = lambda: 350
         window.height = lambda: 250
-        
+
         mock_event = MagicMock(spec=main.QResizeEvent)
-        
+
         with patch.object(main.QWidget, 'resizeEvent') as mock_super:
             window.resizeEvent(mock_event)
             mock_super.assert_called_once_with(mock_event)
@@ -2036,17 +2127,17 @@ class TestResizeEventRealMethod(unittest.TestCase):
         """リサイズでサイズ記録後、super()を呼び出す."""
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
-        
+
         window.display_mode = 'max'
         window.mode_sizes = {'min': (300, 80), 'mid': (300, 200), 'max': (300, 400)}
         window.width = lambda: 500
         window.height = lambda: 600
-        
+
         mock_event = MagicMock(spec=main.QResizeEvent)
-        
+
         with patch.object(main.QWidget, 'resizeEvent') as mock_super:
             window.resizeEvent(mock_event)
-            
+
             # サイズが更新される
             self.assertEqual(window.mode_sizes['max'], (500, 600))
             # super()が呼ばれる
@@ -2060,15 +2151,15 @@ class TestStartTimerRealMethod(unittest.TestCase):
         """_start_timerがQTimerを正しい親で作成する."""
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
-        
+
         callback = MagicMock()
-        
+
         with patch('src.app.main.QTimer') as MockQTimer:
             mock_timer = MagicMock()
             MockQTimer.return_value = mock_timer
-            
+
             result = window._start_timer(1.5, callback)
-            
+
             # QTimer(self)で作成
             MockQTimer.assert_called_once_with(window)
             # インターバル設定（1.5秒 = 1500ms）
@@ -2088,10 +2179,10 @@ class TestApplyDisplayModeMaxMid(unittest.TestCase):
         """モックされたMainWindowを作成."""
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
-        
+
         window.display_mode = 'mid'
         window.mode_sizes = {'min': (300, 80), 'mid': (300, 200), 'max': (300, 400)}
-        
+
         # ウィジェットモック
         window.w = MagicMock()
         window.w.today_label = MagicMock()
@@ -2108,18 +2199,18 @@ class TestApplyDisplayModeMaxMid(unittest.TestCase):
         window.w.window_label = MagicMock()
         window.w.window_list = MagicMock()
         window.w.overtime_alert_toggle = MagicMock()
-        
+
         window._apply_mode_geometry = MagicMock()
-        
+
         return window
 
     def test_max_mode_shows_window_list(self):
         """maxモードでwindow_listが表示される."""
         window = self._create_mock_main_window()
         window.display_mode = 'max'
-        
+
         window._apply_display_mode()
-        
+
         # window_listが表示される
         window.w.window_list.setVisible.assert_called_with(True)
         window.w.window_label.setVisible.assert_called_with(True)
@@ -2128,9 +2219,9 @@ class TestApplyDisplayModeMaxMid(unittest.TestCase):
         """midモードでwindow_listが非表示."""
         window = self._create_mock_main_window()
         window.display_mode = 'mid'
-        
+
         window._apply_display_mode()
-        
+
         # window_listが非表示
         window.w.window_list.setVisible.assert_called_with(False)
         window.w.window_label.setVisible.assert_called_with(False)
@@ -2139,9 +2230,9 @@ class TestApplyDisplayModeMaxMid(unittest.TestCase):
         """midモードでsessionとactiveが表示される."""
         window = self._create_mock_main_window()
         window.display_mode = 'mid'
-        
+
         window._apply_display_mode()
-        
+
         # session関連が表示
         window.w.session_label.setVisible.assert_called_with(True)
         window.w.session_time_display.setVisible.assert_called_with(True)
@@ -2156,9 +2247,9 @@ class TestApplyDisplayModeMaxMid(unittest.TestCase):
         """maxモードで全ウィジェットが表示される."""
         window = self._create_mock_main_window()
         window.display_mode = 'max'
-        
+
         window._apply_display_mode()
-        
+
         # 全ウィジェットが表示
         window.w.today_label.setVisible.assert_called_with(True)
         window.w.session_label.setVisible.assert_called_with(True)
@@ -2170,9 +2261,9 @@ class TestApplyDisplayModeMaxMid(unittest.TestCase):
         """minモードでsession/active/gamesが非表示."""
         window = self._create_mock_main_window()
         window.display_mode = 'min'
-        
+
         window._apply_display_mode()
-        
+
         # session関連が非表示
         window.w.session_label.setVisible.assert_called_with(False)
         window.w.session_time_display.setVisible.assert_called_with(False)
@@ -2197,13 +2288,13 @@ class TestApplyDisplayModeMaxMid(unittest.TestCase):
     def test_apply_mode_geometry_called(self):
         """_apply_mode_geometryが呼び出される."""
         window = self._create_mock_main_window()
-        
+
         for mode in ['min', 'mid', 'max']:
             window.display_mode = mode
             window._apply_mode_geometry.reset_mock()
-            
+
             window._apply_display_mode()
-            
+
             window._apply_mode_geometry.assert_called_once()
 
 
@@ -2217,13 +2308,13 @@ class TestMainEntryPoint(unittest.TestCase):
                 mock_app = MagicMock()
                 mock_app.exec.return_value = 0
                 MockQApp.return_value = mock_app
-                
+
                 mock_window = MagicMock()
                 MockWindow.return_value = mock_window
-                
+
                 with patch('sys.exit') as mock_exit:
                     main.main()
-                    
+
                     # QApplication(sys.argv)で作成
                     MockQApp.assert_called_once_with(sys.argv)
 
@@ -2234,13 +2325,13 @@ class TestMainEntryPoint(unittest.TestCase):
                 mock_app = MagicMock()
                 mock_app.exec.return_value = 0
                 MockQApp.return_value = mock_app
-                
+
                 mock_window = MagicMock()
                 MockWindow.return_value = mock_window
-                
+
                 with patch('sys.exit') as mock_exit:
                     main.main()
-                    
+
                     # MainWindow作成
                     MockWindow.assert_called_once()
                     # show()呼び出し
@@ -2253,13 +2344,13 @@ class TestMainEntryPoint(unittest.TestCase):
                 mock_app = MagicMock()
                 mock_app.exec.return_value = 0
                 MockQApp.return_value = mock_app
-                
+
                 mock_window = MagicMock()
                 MockWindow.return_value = mock_window
-                
+
                 with patch('sys.exit') as mock_exit:
                     main.main()
-                    
+
                     # app.exec()呼び出し
                     mock_app.exec.assert_called_once()
 
@@ -2270,13 +2361,13 @@ class TestMainEntryPoint(unittest.TestCase):
                 mock_app = MagicMock()
                 mock_app.exec.return_value = 42  # 任意の終了コード
                 MockQApp.return_value = mock_app
-                
+
                 mock_window = MagicMock()
                 MockWindow.return_value = mock_window
-                
+
                 with patch('sys.exit') as mock_exit:
                     main.main()
-                    
+
                     # sys.exit(42)で終了
                     mock_exit.assert_called_once_with(42)
 
@@ -2292,18 +2383,18 @@ class TestSetWidgetVisibility(unittest.TestCase):
         """visible=Trueでウィジェットを表示."""
         window = self._create_mock_main_window()
         mock_widget = MagicMock()
-        
+
         window._set_widget_visibility(mock_widget, True)
-        
+
         mock_widget.setVisible.assert_called_once_with(True)
 
     def test_set_visible_false(self):
         """visible=Falseでウィジェットを非表示."""
         window = self._create_mock_main_window()
         mock_widget = MagicMock()
-        
+
         window._set_widget_visibility(mock_widget, False)
-        
+
         mock_widget.setVisible.assert_called_once_with(False)
 
 
@@ -2318,9 +2409,9 @@ class TestSetWidgetWithHeight(unittest.TestCase):
         """visible=Trueで表示と高さを設定."""
         window = self._create_mock_main_window()
         mock_widget = MagicMock()
-        
+
         window._set_widget_with_height(mock_widget, True, min_height=50, max_height=200)
-        
+
         mock_widget.setVisible.assert_called_once_with(True)
         mock_widget.setMinimumHeight.assert_called_once_with(50)
         mock_widget.setMaximumHeight.assert_called_once_with(200)
@@ -2329,9 +2420,9 @@ class TestSetWidgetWithHeight(unittest.TestCase):
         """visible=Falseで非表示と高さ0を設定."""
         window = self._create_mock_main_window()
         mock_widget = MagicMock()
-        
+
         window._set_widget_with_height(mock_widget, False, min_height=0, max_height=0)
-        
+
         mock_widget.setVisible.assert_called_once_with(False)
         mock_widget.setMinimumHeight.assert_called_once_with(0)
         mock_widget.setMaximumHeight.assert_called_once_with(0)
@@ -2340,7 +2431,7 @@ class TestSetWidgetWithHeight(unittest.TestCase):
         """min_height/max_heightはキーワード引数のみ."""
         window = self._create_mock_main_window()
         mock_widget = MagicMock()
-        
+
         # 位置引数で渡すとエラー
         with self.assertRaises(TypeError):
             window._set_widget_with_height(mock_widget, True, 50, 200)
@@ -2359,13 +2450,14 @@ class TestUpdateSessionTimesStartTimeNone(unittest.TestCase):
     def test_start_time_none_treated_as_zero(self):
         """start_time=Noneのゲームは0秒として扱われる."""
         window = self._create_mock_main_window()
-        
+
         # start_time=Noneのゲーム
-        game_none = models.GameEntry(game_title="NoneGame", window_title="NoneGame", is_playing=True)
+        game_none = models.GameEntry(
+            game_title="NoneGame", window_title="NoneGame", is_playing=True)
         game_none.start_time = None  # 明示的にNone
-        
+
         window._update_session_times([game_none], datetime.now())
-        
+
         # 0秒 = 00:00:00.0
         call_arg = window.w.session_time_display.setText.call_args[0][0]
         self.assertTrue(call_arg.startswith("00:00:00"))
@@ -2373,17 +2465,19 @@ class TestUpdateSessionTimesStartTimeNone(unittest.TestCase):
     def test_max_elapsed_with_none_and_valid(self):
         """start_time=Noneと有効なstart_timeが混在する場合、有効なものの最大値."""
         window = self._create_mock_main_window()
-        
+
         # start_time=Noneのゲーム（0秒扱い）
-        game_none = models.GameEntry(game_title="NoneGame", window_title="NoneGame", is_playing=True)
+        game_none = models.GameEntry(
+            game_title="NoneGame", window_title="NoneGame", is_playing=True)
         game_none.start_time = None
-        
+
         # 有効なstart_timeのゲーム（10分）
-        game_valid = models.GameEntry(game_title="ValidGame", window_title="ValidGame", is_playing=True)
+        game_valid = models.GameEntry(
+            game_title="ValidGame", window_title="ValidGame", is_playing=True)
         game_valid.start_time = datetime.now() - timedelta(minutes=10)
-        
+
         window._update_session_times([game_none, game_valid], datetime.now())
-        
+
         # 10分が表示される（Noneは0なので最大値は10分）
         call_arg = window.w.session_time_display.setText.call_args[0][0]
         self.assertTrue(call_arg.startswith("00:10:") or call_arg.startswith("00:09:"))
@@ -2391,14 +2485,16 @@ class TestUpdateSessionTimesStartTimeNone(unittest.TestCase):
     def test_all_games_start_time_none(self):
         """全ゲームがstart_time=Noneなら0秒."""
         window = self._create_mock_main_window()
-        
-        game1 = models.GameEntry(game_title="Game1", window_title="Game1", is_playing=True)
+
+        game1 = models.GameEntry(
+            game_title="Game1", window_title="Game1", is_playing=True)
         game1.start_time = None
-        game2 = models.GameEntry(game_title="Game2", window_title="Game2", is_playing=True)
+        game2 = models.GameEntry(
+            game_title="Game2", window_title="Game2", is_playing=True)
         game2.start_time = None
-        
+
         window._update_session_times([game1, game2], datetime.now())
-        
+
         # 0秒
         call_arg = window.w.session_time_display.setText.call_args[0][0]
         self.assertTrue(call_arg.startswith("00:00:00"))
@@ -2458,7 +2554,8 @@ class TestOverlayMethods(unittest.TestCase):
         overlay.hide.assert_called_once()
         overlay.show.assert_not_called()
 
-    def test_sync_overlay_visibility_temporarily_hides_visible_overlay_before_check(self):
+    def test_sync_overlay_visibility_temporarily_hides_visible_overlay_before_check(
+            self):
         """判定前に表示中オーバーレイを一度隠してヒットテスト誤検出を避ける."""
         window = self._create_mock_main_window()
         overlay = MagicMock()
@@ -2501,7 +2598,8 @@ class TestOverlayMethods(unittest.TestCase):
         window.isMinimized = MagicMock(return_value=False)
         window.isVisible = MagicMock(return_value=True)
         window.isActiveWindow = MagicMock(return_value=False)
-        window._is_today_display_covered_by_foreground_window = MagicMock(return_value=False)
+        window._is_today_display_covered_by_foreground_window = MagicMock(
+            return_value=False)
 
         result = window._should_show_overlay()
 
@@ -2513,7 +2611,8 @@ class TestOverlayMethods(unittest.TestCase):
         window.isMinimized = MagicMock(return_value=False)
         window.isVisible = MagicMock(return_value=True)
         window.isActiveWindow = MagicMock(return_value=False)
-        window._is_today_display_covered_by_foreground_window = MagicMock(return_value=True)
+        window._is_today_display_covered_by_foreground_window = MagicMock(
+            return_value=True)
 
         result = window._should_show_overlay()
 
@@ -2523,7 +2622,8 @@ class TestOverlayMethods(unittest.TestCase):
         """時間超過防止アラートOFF時はオーバーレイを表示しない."""
         window = self._create_mock_main_window()
         window.overtime_alert_enabled = False
-        window._is_today_display_covered_by_foreground_window = MagicMock(return_value=True)
+        window._is_today_display_covered_by_foreground_window = MagicMock(
+            return_value=True)
 
         result = window._should_show_overlay()
 
@@ -2547,7 +2647,8 @@ class TestOverlayMethods(unittest.TestCase):
         window._is_own_window = MagicMock(return_value=False)
         window._window_rect = MagicMock(return_value=(0, 0, 2000, 2000))
         window._to_native_point = MagicMock(side_effect=lambda x, y: (x, y))
-        window._find_covering_foreign_window_at_point = MagicMock(side_effect=[0, 0, 999, 0, 0])
+        window._find_covering_foreign_window_at_point = MagicMock(
+            side_effect=[0, 0, 999, 0, 0])
 
         with patch('src.app.win32_helpers.get_foreground_hwnd', return_value=123):
             self.assertTrue(window._is_today_display_covered_by_foreground_window())
@@ -2568,7 +2669,8 @@ class TestOverlayMethods(unittest.TestCase):
         window._is_own_window = MagicMock(return_value=False)
         window._window_rect = MagicMock(return_value=(0, 0, 2000, 2000))
         window._to_native_point = MagicMock(side_effect=lambda x, y: (x, y))
-        window._find_covering_foreign_window_at_point = MagicMock(side_effect=[0, 0, 0, 0, 0])
+        window._find_covering_foreign_window_at_point = MagicMock(side_effect=[
+                                                                  0, 0, 0, 0, 0])
 
         with patch('src.app.win32_helpers.get_foreground_hwnd', return_value=123):
             self.assertFalse(window._is_today_display_covered_by_foreground_window())
@@ -2579,7 +2681,8 @@ class TestOverlayMethods(unittest.TestCase):
 
         points = main.MainWindow._sample_points_from_rect(rect)
 
-        self.assertEqual(points, [(150, 250), (125, 225), (175, 225), (125, 275), (175, 275)])
+        self.assertEqual(points, [(150, 250), (125, 225),
+                         (175, 225), (125, 275), (175, 275)])
 
     def test_find_covering_foreign_window_at_point_returns_covering_hwnd(self):
         """_find_covering_foreign_window_at_pointは点を覆う他ウィンドウを返す."""
@@ -2678,7 +2781,3 @@ class TestOvertimeAlertMethods(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-
-

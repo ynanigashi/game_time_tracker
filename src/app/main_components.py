@@ -1,13 +1,31 @@
-﻿"""MainWindow の補助コンポーネント群。"""
+"""MainWindow の補助コンポーネント群。"""
 
 import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence, Tuple, TypeVar, cast
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    Sequence,
+    Tuple,
+    TypeVar,
+    cast,
+)
 
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTableWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QLabel,
+    QPushButton,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from src.core.models import GameEntry
 from src.core.services import (
@@ -20,7 +38,11 @@ from src.core.services import (
     SessionRecorder,
     WindowScanner,
 )
-from src.core.time_utils import SECONDS_PER_MINUTE, calc_today_elapsed_seconds, format_hms
+from src.core.time_utils import (
+    SECONDS_PER_MINUTE,
+    calc_today_elapsed_seconds,
+    format_hms,
+)
 from src.core.window_state import DISPLAY_MODES, MODE_DEFAULT_SIZES, WindowState
 from src.infra.config_loader import ConfigLoader
 from src.infra.log_handler import LogHandler
@@ -48,6 +70,7 @@ def clamp_mode_size(display_mode: str, width: int, height: int) -> Tuple[int, in
     if display_mode == "min":
         return max(width, MIN_MODE_SAFE_WIDTH), max(height, MIN_MODE_SAFE_HEIGHT)
     return width, height
+
 
 class TodayTimeOverlayWindow(QWidget):
     """フルスクリーンゲーム中に表示する、今日の時間専用オーバーレイ."""
@@ -195,7 +218,8 @@ class MainWindowUiController:
         now: datetime,
     ) -> float:
         """今日のプレイ時間（完了+進行中）を更新."""
-        total_seconds = self.calculate_today_total_seconds(active_games, inactive_games, now)
+        total_seconds = self.calculate_today_total_seconds(
+            active_games, inactive_games, now)
         self.w.today_time_display.setText(format_hms(total_seconds))
         return total_seconds
 
@@ -227,17 +251,20 @@ class MainWindowUiController:
                 if game.start_time else 0.0
             )
             if current_minutes >= MIN_PLAY_MINUTES:
-                game_minutes[game.game_title] = game_minutes.get(game.game_title, 0) + current_minutes
+                game_minutes[game.game_title] = game_minutes.get(
+                    game.game_title, 0) + current_minutes
 
         sorted_games = sorted(game_minutes.items(), key=lambda x: x[1], reverse=True)
-        content = '\n'.join(f'{game_title}: {int(minutes)}分' for game_title, minutes in sorted_games)
+        content = '\n'.join(
+            f'{game_title}: {int(minutes)}分' for game_title, minutes in sorted_games)
 
         if content != self.daily_stats.last_today_games_content:
             self.daily_stats.last_today_games_content = content
             self.w.today_games_table.setRowCount(len(sorted_games))
             for row, (game_title, minutes) in enumerate(sorted_games):
                 self.w.today_games_table.setItem(row, 0, QTableWidgetItem(game_title))
-                self.w.today_games_table.setItem(row, 1, QTableWidgetItem(f'{int(minutes)}分'))
+                self.w.today_games_table.setItem(
+                    row, 1, QTableWidgetItem(f'{int(minutes)}分'))
 
 
 class MainWindowDisplayController:
@@ -618,7 +645,9 @@ class MainWindowBootstrapper:
                 browsers=list(browsers),
                 inactive_timeout_minutes=self.inactive_timeout_minutes,
             )
-            today_game_minutes, today_completed_seconds = recorder.log_handler.get_today_stats()
+            today_game_minutes, today_completed_seconds = (
+                recorder.log_handler.get_today_stats()
+            )
 
             return MainWindowBootstrapResult(
                 games=games,

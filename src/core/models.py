@@ -19,7 +19,8 @@ class GameEntry:
     is_playing: bool = field(default=False, compare=False)
     start_time: Optional[datetime] = field(default=None, compare=False)
     inactive_since: Optional[datetime] = field(default=None, compare=False)
-    _normalized_window_title: Optional[str] = field(default=None, init=False, repr=False, compare=False)
+    _normalized_window_title: Optional[str] = field(
+        default=None, init=False, repr=False, compare=False)
 
     def __setattr__(self, name: str, value: object) -> None:
         """Invalidate title cache when `window_title` changes."""
@@ -60,7 +61,10 @@ class GameEntry:
         self.start_time = now or datetime.now()
         self.inactive_since = None
 
-    def end_session(self, *, now: Optional[datetime] = None) -> Tuple[Optional[datetime], Optional[datetime]]:
+    def end_session(self,
+                    *,
+                    now: Optional[datetime] = None) -> Tuple[Optional[datetime],
+                                                             Optional[datetime]]:
         """ゲームセッションを終了し、開始・終了時刻を返す."""
         start_time = self.start_time
         end_time = (now or datetime.now()) if start_time else None

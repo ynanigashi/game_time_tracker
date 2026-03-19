@@ -1,6 +1,8 @@
 # pyright: reportAttributeAccessIssue=false, reportArgumentType=false
 """window_state.py 縺ｮ繝ｦ繝九ャ繝医ユ繧ｹ繝・"""
 
+from src.core.window_state import WindowState
+from src.core import window_state
 import os
 import tempfile
 import unittest
@@ -9,9 +11,6 @@ from pathlib import Path
 # 蜈ｱ騾壹せ繧ｿ繝悶ｒ繧､繝ｳ繧ｹ繝医・繝ｫ
 from tests.test_stubs import install_stubs
 install_stubs()
-
-from src.core import window_state
-from src.core.window_state import WindowState
 
 
 class TestWindowState(unittest.TestCase):
@@ -40,7 +39,7 @@ class TestWindowState(unittest.TestCase):
         """菫晏ｭ倥→隱ｭ縺ｿ霎ｼ縺ｿ縺ｮ蠕蠕ｩ繝・せ繝・"""
         mode_sizes = {"max": (500, 400), "mid": (450, 300), "min": (300, 150)}
         WindowState.save(self.test_path, 100, 200, "mid", mode_sizes)
-        
+
         x, y, mode, loaded_sizes = WindowState.load(self.test_path)
         self.assertEqual(x, 100)
         self.assertEqual(y, 200)
@@ -52,14 +51,14 @@ class TestWindowState(unittest.TestCase):
         import json
         data = {"x": 50, "y": 50, "display_mode": "invalid_mode", "mode_sizes": {}}
         self.test_path.write_text(json.dumps(data), encoding="utf-8")
-        
+
         x, y, mode, mode_sizes = WindowState.load(self.test_path)
         self.assertEqual(mode, "max")
 
     def test_load_corrupted_json_returns_defaults(self):
         """遐ｴ謳阪＠縺櫟SON縺ｯ繝・ヵ繧ｩ繝ｫ繝亥､繧定ｿ斐☆."""
         self.test_path.write_text("{invalid json", encoding="utf-8")
-        
+
         x, y, mode, mode_sizes = WindowState.load(self.test_path)
         self.assertEqual(x, 0)
         self.assertEqual(y, 0)
@@ -98,7 +97,8 @@ class TestWindowState(unittest.TestCase):
             overtime_alert_enabled=False,
         )
 
-        x, y, mode, loaded_sizes, overtime_alert_enabled = WindowState.load_all(self.test_path)
+        x, y, mode, loaded_sizes, overtime_alert_enabled = WindowState.load_all(
+            self.test_path)
 
         self.assertEqual((x, y, mode), (100, 200, "mid"))
         self.assertEqual(loaded_sizes["mid"], (450, 300))
@@ -107,4 +107,3 @@ class TestWindowState(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -130,8 +130,12 @@ def build_main_layout(parent: QWidget) -> LayoutWidgets:
     today_games_table.setColumnCount(2)
     today_games_table.setHorizontalHeaderLabels(['ゲーム名', 'プレイ時間'])
     today_games_table.horizontalHeader().setStretchLastSection(False)
-    today_games_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-    today_games_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+    today_games_table.horizontalHeader().setSectionResizeMode(
+        0,
+        QHeaderView.ResizeMode.Stretch,
+    )
+    today_games_table.horizontalHeader().setSectionResizeMode(
+        1, QHeaderView.ResizeMode.ResizeToContents)
     today_games_table.verticalHeader().setVisible(False)
     today_games_min_height = TODAY_GAMES_TABLE_MIN_HEIGHT
     today_games_table.setMinimumHeight(today_games_min_height)

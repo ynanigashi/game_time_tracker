@@ -1,4 +1,4 @@
-﻿"""ドメインロジック層 - ゲーム状態遷移と日次統計。"""
+"""ドメインロジック層 - ゲーム状態遷移と日次統計。"""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,7 +15,7 @@ MIN_PLAY_MINUTES = 5
 @dataclass
 class ScanResult:
     """ゲームスキャン結果を保持するデータクラス."""
-    
+
     active_games: List[GameEntry]
     inactive_games: List[GameEntry]
     recorded_seconds: float  # この周期で記録された秒数
@@ -34,12 +34,12 @@ LoadTodayMinutes = Callable[[], Dict[str, float]]
 
 class GameStateTracker:
     """ゲーム状態の追跡と遷移を管理するクラス.
-    
+
     UIから独立した状態遷移ロジックを提供。
     scan()を呼び出すことで、ウィンドウ状態に基づいてゲーム状態を更新し、
     アクティブ/非アクティブなゲームと記録された秒数を返す。
     """
-    
+
     def __init__(
         self,
         recorder: 'SessionRecorder',
@@ -48,7 +48,7 @@ class GameStateTracker:
         inactive_timeout_minutes: int,
     ) -> None:
         """初期化.
-        
+
         Args:
             recorder: セッション記録用
             daily_stats: 日次統計追跡用
@@ -75,7 +75,7 @@ class GameStateTracker:
             for normalized in (normalize_title(browser) for browser in self._browsers)
             if normalized
         ]
-    
+
     def scan(
         self,
         games: List[GameEntry],
@@ -84,22 +84,22 @@ class GameStateTracker:
         load_today_game_minutes_callback: LoadTodayMinutes,
     ) -> ScanResult:
         """ゲーム状態をスキャンして更新.
-        
+
         Args:
             games: 追跡するゲームのリスト
             window_titles: 現在のウィンドウタイトルリスト
             foreground_title: フォアグラウンドのウィンドウタイトル
             load_today_game_minutes_callback: 今日のゲーム時間を取得するコールバック
-        
+
         Returns:
             ScanResult: アクティブ/非アクティブなゲームと記録秒数
         """
         active_games: List[GameEntry] = []
         inactive_games: List[GameEntry] = []
         total_recorded_seconds = 0.0
-        
-        normalized_window_titles, normalized_foreground_title = self._normalize_scan_inputs(
-            window_titles, foreground_title
+
+        normalized_window_titles, normalized_foreground_title = (
+            self._normalize_scan_inputs(window_titles, foreground_title)
         )
 
         for game in games:
@@ -108,7 +108,7 @@ class GameStateTracker:
                 normalized_window_titles,
                 normalized_foreground_title,
             )
-            
+
             if not game.is_playing:
                 self._handle_not_playing(game, match_state.is_foreground, active_games)
             else:
@@ -119,7 +119,7 @@ class GameStateTracker:
                     load_today_game_minutes_callback
                 )
                 total_recorded_seconds += recorded_seconds
-        
+
         return ScanResult(
             active_games=active_games,
             inactive_games=inactive_games,
@@ -137,7 +137,7 @@ class GameStateTracker:
             normalize_title(foreground_title) if foreground_title else None
         )
         return normalized_window_titles, normalized_foreground_title
-    
+
     def _check_window_exists(
         self,
         game: GameEntry,
@@ -182,7 +182,7 @@ class GameStateTracker:
         if is_foreground:
             game.start_session()
             active_games.append(game)
-    
+
     def _handle_playing(
         self,
         game: GameEntry,
@@ -192,7 +192,7 @@ class GameStateTracker:
         load_today_game_minutes_callback: LoadTodayMinutes,
     ) -> float:
         """プレイ中ゲームの状態遷移を処理.
-        
+
         Returns:
             この処理で記録された秒数
         """
@@ -201,13 +201,14 @@ class GameStateTracker:
             inactive_seconds = game.get_inactive_seconds()
             if inactive_seconds >= self.inactive_timeout_minutes * SECONDS_PER_MINUTE:
                 # タイムアウト：記録して状態をリセット
-                recorded_seconds = self._handle_inactive_timeout(game, load_today_game_minutes_callback)
+                recorded_seconds = self._handle_inactive_timeout(
+                    game, load_today_game_minutes_callback)
                 # タイムアウト後、フォアグラウンドに戻っている場合は新しいセッションを開始
                 if match_state.is_foreground and match_state.exists:
                     game.start_session()
                     active_games.append(game)
                 return recorded_seconds
-        
+
         # ウィンドウが消失した場合
         if not match_state.exists:
             return self._handle_window_closed(game, load_today_game_minutes_callback)
@@ -218,14 +219,14 @@ class GameStateTracker:
         # バックグラウンドの場合
         else:
             return self._handle_background(game, inactive_games)
-    
+
     def _handle_window_closed(
         self,
         game: GameEntry,
         load_today_game_minutes_callback: LoadTodayMinutes,
     ) -> float:
         """ウィンドウが閉じられた場合の処理.
-        
+
         Returns:
             記録された秒数
         """
@@ -233,36 +234,39 @@ class GameStateTracker:
             self.recorder.record(game),
             load_today_game_minutes_callback,
         )
-    
-    def _handle_foreground(self, game: GameEntry, active_games: List[GameEntry]) -> None:
+
+    def _handle_foreground(
+            self,
+            game: GameEntry,
+            active_games: List[GameEntry]) -> None:
         """フォアグラウンドになった場合の処理."""
         game.set_active()
         active_games.append(game)
-    
+
     def _handle_background(
         self,
         game: GameEntry,
         inactive_games: List[GameEntry],
     ) -> float:
         """バックグラウンドに移行した場合の処理.
-        
+
         Returns:
             この処理で記録された秒数
         """
         if not game.is_inactive():
             game.set_inactive()
-        
+
         # 非アクティブリストに追加（タイムアウトチェックは_handle_playingで行われる）
         inactive_games.append(game)
         return 0.0
-    
+
     def _handle_inactive_timeout(
         self,
         game: GameEntry,
         load_today_game_minutes_callback: LoadTodayMinutes,
     ) -> float:
         """非アクティブタイムアウト時の処理.
-        
+
         Returns:
             記録された秒数
         """
@@ -292,8 +296,6 @@ class GameStateTracker:
         self.daily_stats.add_completed_seconds(recorded_seconds)
         self.daily_stats.update_game_minutes_cache(load_today_game_minutes_callback())
         return recorded_seconds
-
-
 
 
 class DailyStatsTracker:

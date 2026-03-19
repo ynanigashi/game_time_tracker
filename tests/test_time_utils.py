@@ -1,19 +1,18 @@
 # pyright: reportAttributeAccessIssue=false, reportArgumentType=false
 """time_utils.py のユニットテスト."""
 
+from tests.test_stubs import FakeLogHandler
+from src.core import services
+from src.core import models
+from src.core.time_utils import (
+    GSS_DATETIME_FORMAT,
+    calc_today_elapsed_seconds,
+    format_hms,
+    split_by_day,
+)
+from src.core import time_utils
 import unittest
 from datetime import datetime, time, timedelta
-
-# 共通スタブをインストール
-from tests.test_stubs import install_stubs
-install_stubs()
-
-from src.core import time_utils
-from src.core.time_utils import format_hms, split_by_day, calc_today_elapsed_seconds, GSS_DATETIME_FORMAT
-
-from src.core import models
-from src.core import services
-from tests.test_stubs import FakeLogHandler
 
 
 class TestSplitByDay(unittest.TestCase):
@@ -21,7 +20,8 @@ class TestSplitByDay(unittest.TestCase):
 
     def setUp(self):
         handler = FakeLogHandler()
-        self.recorder = services.SessionRecorder(log_handler=handler, min_play_minutes=5)
+        self.recorder = services.SessionRecorder(
+            log_handler=handler, min_play_minutes=5)
 
     def test_same_day_no_split(self):
         """同日内のセッションは分割されない."""
@@ -71,6 +71,7 @@ class TestSplitByDay(unittest.TestCase):
         game.start_time = datetime(2026, 1, 10, 23, 30, 0)
         # end_session をモック
         original_end_session = game.end_session
+
         def mock_end_session():
             game.is_playing = False
             start = game.start_time
@@ -138,14 +139,15 @@ class TestSplitByDayBoundaryConditions(unittest.TestCase):
 
     def setUp(self):
         handler = FakeLogHandler()
-        self.recorder = services.SessionRecorder(log_handler=handler, min_play_minutes=5)
+        self.recorder = services.SessionRecorder(
+            log_handler=handler, min_play_minutes=5)
 
     def test_end_at_exactly_midnight(self):
         """0:00ちょうどに終了した場合の境界テスト."""
         start = datetime(2026, 1, 10, 23, 30, 0)
         end = datetime(2026, 1, 11, 0, 0, 0)
         segments = time_utils.split_by_day(start, end)
-        
+
         # 半開区間により2セグメントに分割されるが、2つ目は空区間
         self.assertEqual(len(segments), 2)
         self.assertEqual(segments[0][0], start)
@@ -158,7 +160,7 @@ class TestSplitByDayBoundaryConditions(unittest.TestCase):
         start = datetime(2026, 1, 11, 0, 0, 0)
         end = datetime(2026, 1, 11, 1, 0, 0)
         segments = time_utils.split_by_day(start, end)
-        
+
         # 分割なし
         self.assertEqual(len(segments), 1)
         self.assertEqual(segments[0], (start, end))
@@ -174,6 +176,7 @@ class TestSplitByDayBoundaryConditions(unittest.TestCase):
         )
         # 23:58 - 翌00:02 (各セグメント2分と4分)
         game.start_time = datetime(2026, 1, 10, 23, 58, 0)
+
         def mock_end_session():
             game.is_playing = False
             start = game.start_time
@@ -194,52 +197,51 @@ class TestTimeUtilsCalcTodayElapsedSeconds(unittest.TestCase):
     def test_same_day_full_duration(self):
         """同じ日の場合、全経過時間を返す."""
         from src.core.time_utils import calc_today_elapsed_seconds
-        
+
         start = datetime(2025, 1, 15, 10, 0, 0)
         now = datetime(2025, 1, 15, 12, 30, 0)
-        
+
         result = calc_today_elapsed_seconds(start, now)
-        
+
         expected = 2.5 * 3600  # 2.5時間
         self.assertEqual(result, expected)
 
     def test_cross_midnight_only_today(self):
         """日跨ぎの場合、今日の0:00からの経過時間のみを返す."""
         from src.core.time_utils import calc_today_elapsed_seconds
-        
+
         start = datetime(2025, 1, 14, 23, 0, 0)  # 昨日23時
         now = datetime(2025, 1, 15, 2, 0, 0)     # 今日2時
-        
+
         result = calc_today_elapsed_seconds(start, now)
-        
+
         expected = 2 * 3600  # 今日の0:00から2時間
         self.assertEqual(result, expected)
 
     def test_exactly_midnight_start(self):
         """ちょうど0:00開始の場合."""
         from src.core.time_utils import calc_today_elapsed_seconds
-        
+
         start = datetime(2025, 1, 15, 0, 0, 0)
         now = datetime(2025, 1, 15, 1, 30, 0)
-        
+
         result = calc_today_elapsed_seconds(start, now)
-        
+
         expected = 1.5 * 3600
         self.assertEqual(result, expected)
 
     def test_multiple_days_ago(self):
         """複数日前からの場合、今日の経過時間のみ."""
         from src.core.time_utils import calc_today_elapsed_seconds
-        
+
         start = datetime(2025, 1, 13, 10, 0, 0)  # 2日前
         now = datetime(2025, 1, 15, 3, 0, 0)     # 今日3時
-        
+
         result = calc_today_elapsed_seconds(start, now)
-        
+
         expected = 3 * 3600  # 今日の0:00から3時間
         self.assertEqual(result, expected)
 
 
 if __name__ == "__main__":
     unittest.main()
-
