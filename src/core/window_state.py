@@ -48,6 +48,17 @@ class WindowState:
         return default
 
     @staticmethod
+    def _coerce_int(value: object, default: int) -> int:
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float, str)):
+            try:
+                return int(value)
+            except (ValueError, TypeError):
+                return default
+        return default
+
+    @staticmethod
     def load_all(path: Path) -> Tuple[int, int, str, Dict[str, Tuple[int, int]], bool]:
         """保存ファイルから(x, y, display_mode, mode_sizes, overtime_alert_enabled)を読み込む."""
         if not path.exists():
@@ -61,25 +72,30 @@ class WindowState:
 
         try:
             data = WindowState._load_data(path)
-            x = int(data.get("x", 0))
-            y = int(data.get("y", 0))
-            mode = data.get("display_mode", "max")
+            x = WindowState._coerce_int(data.get("x", 0), 0)
+            y = WindowState._coerce_int(data.get("y", 0), 0)
+
+            mode_raw = data.get("display_mode", "max")
+            mode = mode_raw if isinstance(mode_raw, str) else "max"
 
             if mode not in DISPLAY_MODES:
                 mode = "max"
 
             mode_sizes: Dict[str, Tuple[int, int]] = {}
-            mode_sizes_raw = data.get("mode_sizes", {})
+            mode_sizes_raw_obj = data.get("mode_sizes", {})
+            mode_sizes_raw: Dict[str, object] = (
+                mode_sizes_raw_obj if isinstance(mode_sizes_raw_obj, dict) else {}
+            )
             for key in DISPLAY_MODES:
+                size_value = mode_sizes_raw.get(key)
                 if (
-                    key in mode_sizes_raw
-                    and isinstance(mode_sizes_raw[key], list)
-                    and len(mode_sizes_raw[key]) == 2
+                    isinstance(size_value, list)
+                    and len(size_value) == 2
                 ):
                     try:
                         mode_sizes[key] = (
-                            int(mode_sizes_raw[key][0]),
-                            int(mode_sizes_raw[key][1]),
+                            int(size_value[0]),
+                            int(size_value[1]),
                         )
                     except (ValueError, TypeError):
                         mode_sizes[key] = MODE_DEFAULT_SIZES[key]
