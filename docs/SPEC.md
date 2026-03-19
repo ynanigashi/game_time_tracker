@@ -637,7 +637,7 @@ Google Spreadsheet操作を抽象化するサービスクラス。
 ---
 
 ## システム構成
-- **[src/app/main.py](src/app/main.py)** (PySide6 GUI + 自動検出・ログ記録)
+- **[src/app/main.py](../src/app/main.py)** (PySide6 GUI + 自動検出・ログ記録)
   - `MainWindow` がメインループを管理し、ポーリング間隔/最小記録時間を定数で設定可能。
   - `pygetwindow` で全ウィンドウのタイトルを取得。
   - ゲーム情報シートから登録されたゲームを読み込み、部分一致で検出。
@@ -656,21 +656,21 @@ Google Spreadsheet操作を抽象化するサービスクラス。
     - スプレッドシートへのアクセスは起動時とゲーム記録時のみ（キャッシュを活用）
     - UI更新時は差分更新により、ちらつきを防止
 
-- **[src/ui/gui_layout.py](src/ui/gui_layout.py)**
+- **[src/ui/gui_layout.py](../src/ui/gui_layout.py)**
   - GUI ウィジェットとレイアウトの構築。各ウィジェットのデフォルト高さを保持。
   
-- **[src/infra/log_handler.py](src/infra/log_handler.py)**
+- **[src/infra/log_handler.py](../src/infra/log_handler.py)**
   - サービスアカウント経由でスプレッドシートを操作。
   - ログ行を末尾に追記。
   - ログシートの読み込み/追記とインデックス管理を行う。
   - **キャッシュ機構**: 起動時に全レコードを`self.records`（`List[dict]`）にキャッシュし、`get_cached_records()`で取得。`save_record()`はスプレッドシート書き込みと同時にキャッシュも更新。UI更新時のAPI呼び出しを排除。
 
-- **[src/infra/config_loader.py](src/infra/config_loader.py)**
+- **[src/infra/config_loader.py](../src/infra/config_loader.py)**
   - `config.ini` を読み込み。
   - スプレッドシートキー、ゲーム情報シートの gid、サービスアカウント JSON パスを提供。
 
 ## 設定・外部リソース
-- **[config.ini](config.ini)**
+- **[config.ini](../config.ini)**
   ```ini
   [LOGHANDLER]
   json_file_path = service_account.json    ; サービスアカウント JSON のパス
@@ -690,7 +690,7 @@ Google Spreadsheet操作を抽象化するサービスクラス。
   - **ゲーム情報シート**: `game_title, window_title, play_with_friends, is_browser_game`
     - 真偽値は `"TRUE"` / `"FALSE"` 文字列として保存。読込時は `_parse_bool` で判定。
 
-- **[service_account.json](service_account.json)**
+- **[service_account.json](../service_account.json)**
   - Google Cloud サービスアカウント秘密鍵。
   - `.gitignore` で除外管理。
 
@@ -1031,5 +1031,5 @@ game_time_tracker.bat
   - `tests/test_log_handler.py` - log_handler.py/gspread_service.pyのテスト
   - `tests/test_window_state.py` - window_state.pyのテスト
   - `tests/test_gui.py` - DailyStatsTracker/format_hmsのテスト
-- ポーリング間隔・最小記録時間: `main.py` の `POLL_INTERVAL_SECONDS`, `MIN_PLAY_MINUTES` で調整。
+- ポーリング間隔・最小記録時間: `src/app/main.py` の `POLL_INTERVAL_SECONDS` と `src/core/services_domain.py` の `MIN_PLAY_MINUTES` で調整。
 - 対応ブラウザ・除外ウィンドウ: `config.ini` の `[WINDOW_SCAN]` または `config_loader.DEFAULT_BROWSERS/DEFAULT_EXCLUDED_TITLES` で設定。
