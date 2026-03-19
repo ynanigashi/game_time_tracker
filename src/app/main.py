@@ -1,9 +1,7 @@
 ﻿"""Game Time Tracker - PySide6 GUI."""
 
 import atexit
-import ctypes
 import logging
-import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime
@@ -74,6 +72,21 @@ from src.core.window_state import (
 from src.infra.config_loader import DEFAULT_BROWSERS, DEFAULT_EXCLUDED_TITLES, ConfigLoader
 from src.infra.log_handler import LogHandler
 from src.ui.gui_layout import build_main_layout
+from src.app.win32_helpers import (
+    Point,
+    Rect,
+    global_rect_of_widget,
+    rect_contains_point,
+    rects_intersect,
+    sample_points_from_rect,
+    window_rect,
+    window_at_point,
+    window_below,
+    root_window,
+    window_handle_of,
+    get_foreground_hwnd,
+    is_own_process_window,
+)
 
 
 # =============================================================================
@@ -97,10 +110,6 @@ OVERLAY_SAMPLE_RATIOS: Tuple[Tuple[float, float], ...] = (
 )
 OVERTIME_ALERT_THRESHOLDS_MINUTES: Tuple[int, ...] = (45, 50, 55, 58, 60)
 TDependency = TypeVar("TDependency")
-Point = Tuple[int, int]
-Rect = Tuple[int, int, int, int]
-
-_USER32 = ctypes.windll.user32 if sys.platform == "win32" else None
 
 
 @dataclass
@@ -144,31 +153,6 @@ class OvertimeAlertTracker:
                 self.alerted_threshold_minutes.add(minute)
                 triggered.append(minute)
         return triggered
-
-
-class _WinPoint(ctypes.Structure):
-    _fields_ = [
-        ("x", ctypes.c_long),
-        ("y", ctypes.c_long),
-    ]
-
-
-class _WinRect(ctypes.Structure):
-    _fields_ = [
-        ("left", ctypes.c_long),
-        ("top", ctypes.c_long),
-        ("right", ctypes.c_long),
-        ("bottom", ctypes.c_long),
-    ]
-
-
-if _USER32 is not None:
-    _USER32.GetForegroundWindow.restype = ctypes.c_void_p
-    _USER32.GetWindow.restype = ctypes.c_void_p
-    _USER32.GetAncestor.restype = ctypes.c_void_p
-    _USER32.WindowFromPoint.restype = ctypes.c_void_p
-    _USER32.GetWindowRect.restype = ctypes.c_int
-    _USER32.GetWindowThreadProcessId.restype = ctypes.c_uint
 
 
 class MainWindow(QWidget):
@@ -219,8 +203,8 @@ class MainWindow(QWidget):
         self._window_title_copy_connected = False
 
     def _get_window_list_widget(self) -> Optional[QWidget]:
-        """window_list ウィジェットを安全に取得する。"""
-        return cast(Optional[QWidget], getattr(getattr(self, "w", None), "window_list", None))
+        """ウィンドウタイトル一覧ウィジェットを取得する。"""
+        return getattr(self.w, "window_list", None)
 
     def _initialize_window_title_copy(self) -> None:
         """現在のウィンドウタイトル一覧のクリックコピーを初期化する。"""
@@ -235,6 +219,7 @@ class MainWindow(QWidget):
         try:
             item_clicked_signal.connect(self._on_window_title_item_clicked)
         except Exception:
+            logger.debug("ウィンドウタイトルクリックシグナルの接続に失敗", exc_info=True)
             return
 
         self._window_title_copy_connected = True
@@ -255,6 +240,7 @@ class MainWindow(QWidget):
         try:
             text = str(text_getter())
         except Exception:
+            logger.debug("ウィンドウタイトルテキストの取得に失敗", exc_info=True)
             return
 
         self._copy_text_to_clipboard(text)
@@ -271,6 +257,7 @@ class MainWindow(QWidget):
         try:
             clipboard = clipboard_getter()
         except Exception:
+            logger.debug("クリップボードの取得に失敗", exc_info=True)
             return
         if clipboard is None:
             return
@@ -282,6 +269,7 @@ class MainWindow(QWidget):
         try:
             set_text(text)
         except Exception:
+            logger.debug("クリップボードへのコピーに失敗", exc_info=True)
             return
         self._set_status("ウィンドウタイトルをコピーしました")
 
@@ -358,13 +346,6 @@ class MainWindow(QWidget):
     def _get_bootstrapper(self) -> MainWindowBootstrapper:
         """初期化ブートストラッパーを返す."""
         daily_stats = self._ensure_daily_stats()
-        # 既存テストが `main.*` を patch するため、依存参照を同期する。
-        components.ConfigLoader = ConfigLoader
-        components.GameInfoLoader = GameInfoLoader
-        components.WindowScanner = WindowScanner
-        components.LogHandler = LogHandler
-        components.SessionRecorder = SessionRecorder
-        components.GameStateTracker = GameStateTracker
         return self._resolve_dependency(
             "_bootstrapper",
             factory=lambda: MainWindowBootstrapper(
@@ -372,6 +353,12 @@ class MainWindow(QWidget):
                 min_play_minutes=MIN_PLAY_MINUTES,
                 inactive_timeout_minutes=INACTIVE_TIMEOUT_MINUTES,
                 daily_stats=daily_stats,
+                config_loader_cls=ConfigLoader,
+                game_info_loader_cls=GameInfoLoader,
+                window_scanner_cls=WindowScanner,
+                log_handler_cls=LogHandler,
+                session_recorder_cls=SessionRecorder,
+                game_state_tracker_cls=GameStateTracker,
             ),
             validator=lambda bootstrapper: bootstrapper.daily_stats is daily_stats,
         )
@@ -407,7 +394,6 @@ class MainWindow(QWidget):
 
     def _get_state_controller(self) -> MainWindowStateController:
         """状態保存コントローラーを返す."""
-        components.WindowState = WindowState
         return self._resolve_dependency(
             "_state_controller",
             factory=lambda: MainWindowStateController(STATE_FILE),
@@ -522,7 +508,7 @@ class MainWindow(QWidget):
             game_minutes, _ = self.recorder.log_handler.get_today_stats()
             return game_minutes
         except Exception as e:
-            logger.error(f'今日のゲーム時間の集計中にエラーが発生しました: {e}')
+            logger.error('今日のゲーム時間の集計中にエラーが発生しました: %s', e)
             return {}
 
     def _update_today_games_list(self, now: datetime) -> None:
@@ -539,7 +525,7 @@ class MainWindow(QWidget):
             _, completed_seconds = self.recorder.log_handler.get_today_stats()
             return completed_seconds
         except Exception as e:
-            logger.error(f'今日の完了プレイ時間のロード中にエラーが発生しました: {e}')
+            logger.error('今日の完了プレイ時間のロード中にエラーが発生しました: %s', e)
             return 0.0
 
     def _save_window_state(self) -> None:
@@ -572,18 +558,11 @@ class MainWindow(QWidget):
 
     def _get_overtime_alert_tracker(self) -> OvertimeAlertTracker:
         """時間超過防止アラート進捗トラッカーを返す。"""
-        tracker = getattr(self, "_overtime_alert_tracker", None)
-        if tracker is None:
-            tracker = OvertimeAlertTracker(
-                thresholds_minutes=OVERTIME_ALERT_THRESHOLDS_MINUTES,
-                alerted_threshold_minutes=set(),
-            )
-            self._overtime_alert_tracker = tracker
-        return cast(OvertimeAlertTracker, tracker)
+        return self._overtime_alert_tracker
 
     def _get_overtime_alert_toggle(self) -> Optional[QPushButton]:
         """時間超過防止アラートのトグルを取得する。"""
-        return cast(Optional[QPushButton], getattr(getattr(self, "w", None), "overtime_alert_toggle", None))
+        return self.w.overtime_alert_toggle
 
     def _initialize_overtime_alert_toggle(self) -> None:
         """時間超過防止アラートトグルを初期化する。"""
@@ -595,7 +574,7 @@ class MainWindow(QWidget):
         toggle.setChecked(self._is_overtime_alert_enabled())
         toggle.blockSignals(False)
 
-        if getattr(self, "_overtime_alert_toggle_connected", False):
+        if self._overtime_alert_toggle_connected:
             try:
                 toggle.toggled.disconnect(self._on_overtime_alert_toggled)
             except (TypeError, RuntimeError):
@@ -625,7 +604,7 @@ class MainWindow(QWidget):
         try:
             QApplication.beep()
         except Exception:
-            pass
+            logger.debug("ビープ音の再生に失敗", exc_info=True)
         logger.info("プレイ時間アラート: %s分に到達しました", threshold_minutes)
 
     def _update_overtime_alert(self, total_seconds: float) -> None:
@@ -640,11 +619,11 @@ class MainWindow(QWidget):
 
     def _get_overlay_window(self) -> Optional[TodayTimeOverlayWindow]:
         """現在のオーバーレイウィンドウを返す。"""
-        return cast(Optional[TodayTimeOverlayWindow], getattr(self, "overlay_window", None))
+        return self.overlay_window
 
     def _get_today_time_display(self) -> Optional[QLabel]:
-        """today_time_display ウィジェットを安全に取得する。"""
-        return cast(Optional[QLabel], getattr(getattr(self, "w", None), "today_time_display", None))
+        """today_time_display ウィジェットを取得する。"""
+        return self.w.today_time_display
 
     def _refresh_overlay_time(self) -> None:
         """オーバーレイの時刻表示を更新する."""
@@ -654,137 +633,61 @@ class MainWindow(QWidget):
         """オーバーレイを today_time_display の位置とサイズに追従させる."""
         self._get_overlay_controller().sync_overlay_geometry()
 
+    # ----- Win32 ヘルパーへのデリゲーション -----
+
     @staticmethod
     def _global_rect_of_widget(widget: QWidget) -> Optional[Rect]:
-        """ウィジェットのグローバル矩形を返す."""
-        try:
-            top_left = widget.mapToGlobal(widget.rect().topLeft())
-            return (
-                int(top_left.x()),
-                int(top_left.y()),
-                int(top_left.x() + widget.width()),
-                int(top_left.y() + widget.height()),
-            )
-        except Exception:
-            return None
+        return global_rect_of_widget(widget)
 
     @staticmethod
     def _window_rect(hwnd: int) -> Optional[Rect]:
-        """指定HWNDのスクリーン矩形を返す."""
-        if _USER32 is None or hwnd == 0:
-            return None
-
-        rect = _WinRect()
-        if _USER32.GetWindowRect(int(hwnd), ctypes.byref(rect)) == 0:
-            return None
-        return (int(rect.left), int(rect.top), int(rect.right), int(rect.bottom))
+        return window_rect(hwnd)
 
     @staticmethod
     def _rect_contains_point(rect: Rect, x: int, y: int) -> bool:
-        """矩形が点を含むか判定する."""
-        return rect[0] <= x < rect[2] and rect[1] <= y < rect[3]
+        return rect_contains_point(rect, x, y)
 
     @staticmethod
-    def _rects_intersect(
-        first_rect: Rect,
-        second_rect: Rect,
-    ) -> bool:
-        """2つの矩形が交差しているか判定する."""
-        left = max(first_rect[0], second_rect[0])
-        top = max(first_rect[1], second_rect[1])
-        right = min(first_rect[2], second_rect[2])
-        bottom = min(first_rect[3], second_rect[3])
-        return right > left and bottom > top
+    def _rects_intersect(first_rect: Rect, second_rect: Rect) -> bool:
+        return rects_intersect(first_rect, second_rect)
 
     @staticmethod
     def _sample_points_from_rect(rect: Rect) -> List[Point]:
-        """矩形内の5サンプル点（中心 + 四隅寄り）を返す."""
-        left, top, right, bottom = rect
-        width = max(1, right - left)
-        height = max(1, bottom - top)
-        points: List[Point] = []
-
-        for x_ratio, y_ratio in OVERLAY_SAMPLE_RATIOS:
-            x = left + int(width * x_ratio)
-            y = top + int(height * y_ratio)
-            x = min(max(x, left), right - 1)
-            y = min(max(y, top), bottom - 1)
-            points.append((x, y))
-        return points
+        return sample_points_from_rect(rect, OVERLAY_SAMPLE_RATIOS)
 
     @staticmethod
     def _window_at_point(x: int, y: int) -> int:
-        """スクリーン座標の最前面ウィンドウHWNDを返す."""
-        if _USER32 is None:
-            return 0
-        try:
-            return int(_USER32.WindowFromPoint(_WinPoint(int(x), int(y))) or 0)
-        except Exception:
-            return 0
+        return window_at_point(x, y)
 
     @staticmethod
     def _window_below(hwnd: int) -> int:
-        """指定HWNDの背面にある次ウィンドウHWNDを返す."""
-        if _USER32 is None or hwnd == 0:
-            return 0
-        # GW_HWNDNEXT = 2
-        try:
-            return int(_USER32.GetWindow(int(hwnd), 2) or 0)
-        except Exception:
-            return 0
+        return window_below(hwnd)
 
     @staticmethod
     def _root_window(hwnd: int) -> int:
-        """指定HWNDのルートウィンドウHWNDを返す."""
-        if _USER32 is None or hwnd == 0:
-            return 0
-        # GA_ROOT = 2
-        try:
-            return int(_USER32.GetAncestor(int(hwnd), 2) or 0)
-        except Exception:
-            return 0
+        return root_window(hwnd)
 
     @staticmethod
     def _window_handle_of(widget: Optional[QWidget]) -> int:
-        """QWidgetからHWNDを安全に取得する."""
-        if widget is None:
-            return 0
-        win_id_callable = getattr(widget, "winId", None)
-        if not callable(win_id_callable):
-            return 0
-        try:
-            return int(cast(Any, win_id_callable()))
-        except Exception:
-            return 0
+        return window_handle_of(widget)
 
     def _is_own_window(self, hwnd: int) -> bool:
         """指定HWNDがMainWindowまたはオーバーレイ自身か判定する."""
         if hwnd == 0:
             return False
-        if _USER32 is None:
-            return False
-
-        # 同一プロセスのウィンドウはすべて「自ウィンドウ」とみなす。
-        # (Qtの子HWND/ネイティブハンドル差異での誤判定を避けるため)
-        process_id = ctypes.c_uint(0)
-        _USER32.GetWindowThreadProcessId(int(hwnd), ctypes.byref(process_id))
-        if int(process_id.value) == os.getpid():
+        if is_own_process_window(hwnd):
             return True
-
-        root_hwnd = self._root_window(hwnd)
-        main_hwnd = self._root_window(self._window_handle_of(self))
-        overlay_hwnd = self._root_window(self._window_handle_of(getattr(self, "overlay_window", None)))
-        return root_hwnd in {main_hwnd, overlay_hwnd}
+        hwnd_root = root_window(hwnd)
+        main_hwnd = root_window(window_handle_of(self))
+        overlay_hwnd = root_window(window_handle_of(self.overlay_window))
+        return hwnd_root in {main_hwnd, overlay_hwnd}
 
     def _native_scale_factor(self) -> float:
         """Qt論理座標 -> Win32物理解像度座標へのスケールを推定する."""
-        if _USER32 is None:
-            return 1.0
-
-        hwnd = self._window_handle_of(self)
-        rect = self._window_rect(hwnd)
-        logical_w = int(getattr(self, "width", lambda: 0)())
-        logical_h = int(getattr(self, "height", lambda: 0)())
+        hwnd = window_handle_of(self)
+        rect = window_rect(hwnd)
+        logical_w = self.width()
+        logical_h = self.height()
         if rect is None or logical_w <= 0 or logical_h <= 0:
             return 1.0
 
@@ -815,10 +718,7 @@ class MainWindow(QWidget):
 
     def _foreground_rect_if_foreign(self) -> Optional[Rect]:
         """前面ウィンドウが他ウィンドウの場合のみ、その矩形を返す."""
-        if _USER32 is None:
-            return None
-
-        foreground_hwnd = int(_USER32.GetForegroundWindow() or 0)
+        foreground_hwnd = get_foreground_hwnd()
         if foreground_hwnd == 0 or self._is_own_window(foreground_hwnd):
             return None
         return self._window_rect(foreground_hwnd)

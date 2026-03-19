@@ -136,6 +136,6 @@ class WindowState:
             }
             path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except OSError as e:
-            logger.warning(f"ウィンドウ状態の保存に失敗しました: {e}")
+            logger.warning("ウィンドウ状態の保存に失敗しました: %s", e)
         except (ValueError, KeyError) as e:
-            logger.error(f"ウィンドウ状態データの変換に失敗しました: {e}")
+            logger.error("ウィンドウ状態データの変換に失敗しました: %s", e)

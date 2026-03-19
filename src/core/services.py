@@ -41,14 +41,14 @@ class GameInfoLoader:
             )
             records = gspread_service.get_all_records()
         except FileNotFoundError as e:
-            logger.error(f'認証情報ファイルが見つかりません: {e}')
+            logger.error('認証情報ファイルが見つかりません: %s', e)
             return []
         except (
             gspread.exceptions.SpreadsheetNotFound,
             gspread.exceptions.WorksheetNotFound,
             gspread.exceptions.APIError,
         ) as e:
-            logger.error(f'ゲーム情報の読み込みに失敗しました: {e}')
+            logger.error('ゲーム情報の読み込みに失敗しました: %s', e)
             return []
         except Exception:
             logger.exception('ゲーム情報の読み込みで予期しない例外が発生しました')
@@ -170,7 +170,7 @@ class SessionRecorder:
                         today_seconds += (seg_end - seg_start).total_seconds()
                     logger.info(Messages.GAME_RECORDED.format(game_title=game.game_title))
                 else:
-                    logger.warning(f'{game.game_title}の記録保存に失敗しました')
+                    logger.warning('%sの記録保存に失敗しました', game.game_title)
             else:
                 logger.debug(Messages.GAME_TOO_SHORT.format(
                     game_title=game.game_title,

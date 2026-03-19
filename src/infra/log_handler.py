@@ -86,7 +86,7 @@ class LogHandler:
                 minutes = seconds / SECONDS_PER_MINUTE
                 game_minutes[parsed.game_title] = game_minutes.get(parsed.game_title, 0) + minutes
         except Exception as e:
-            logger.error(f'今日の統計情報の取得中にエラーが発生しました: {e}')
+            logger.error('今日の統計情報の取得中にエラーが発生しました: %s', e)
         if parse_failed_count:
             logger.debug(
                 "get_today_stats: parseに失敗したレコードをスキップしました (count=%s)",

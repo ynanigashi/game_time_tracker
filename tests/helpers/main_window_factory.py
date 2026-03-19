@@ -73,6 +73,13 @@ def create_mock_main_window(
         window.mode_sizes = dict(DEFAULT_MODE_SIZES)
 
     window.daily_stats = services.DailyStatsTracker()
+    window.overlay_window = None
+    window._overtime_alert_tracker = main.OvertimeAlertTracker(
+        thresholds_minutes=main.OVERTIME_ALERT_THRESHOLDS_MINUTES,
+        alerted_threshold_minutes=set(),
+    )
+    window._overtime_alert_toggle_connected = False
+    window.overtime_alert_enabled = True
     window.recorder = services.SessionRecorder(
         log_handler=FakeLogHandler(),
         min_play_minutes=5,

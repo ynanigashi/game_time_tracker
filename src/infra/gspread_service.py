@@ -81,8 +81,8 @@ class GspreadService:
             self.sheet.append_row(values, value_input_option='USER_ENTERED')
             return True
         except gspread.exceptions.APIError as e:
-            logger.error(f'APIエラーが発生しました: {e}')
+            logger.error('APIエラーが発生しました: %s', e)
             return False
         except Exception as e:
-            logger.error(f'行の追加中に例外が発生しました: {e}')
+            logger.error('行の追加中に例外が発生しました: %s', e)
             return False

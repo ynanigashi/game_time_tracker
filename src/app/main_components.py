@@ -459,7 +459,7 @@ class MainWindowOverlayController:
             self.owner.overlay_window.hide()
             self.sync_overlay()
         except Exception as e:
-            logger.warning(f"オーバーレイ初期化に失敗したため無効化します: {e}")
+            logger.warning("オーバーレイ初期化に失敗したため無効化します: %s", e)
             self.owner.overlay_window = None
 
     def refresh_overlay_time(self) -> None:
@@ -483,6 +483,7 @@ class MainWindowOverlayController:
             height = max(1, int(target.height()))
             overlay_window.setGeometry(top_left.x(), top_left.y(), width, height)
         except Exception:
+            logger.debug("オーバーレイジオメトリの同期に失敗", exc_info=True)
             return
 
     def should_show_overlay(self) -> bool:
@@ -572,34 +573,46 @@ class MainWindowBootstrapper:
         min_play_minutes: int,
         inactive_timeout_minutes: int,
         daily_stats: DailyStatsTracker,
+        config_loader_cls: type = ConfigLoader,
+        game_info_loader_cls: type = GameInfoLoader,
+        window_scanner_cls: type = WindowScanner,
+        log_handler_cls: type = LogHandler,
+        session_recorder_cls: type = SessionRecorder,
+        game_state_tracker_cls: type = GameStateTracker,
     ) -> None:
         self.base_title = base_title
         self.min_play_minutes = min_play_minutes
         self.inactive_timeout_minutes = inactive_timeout_minutes
         self.daily_stats = daily_stats
+        self._config_loader_cls = config_loader_cls
+        self._game_info_loader_cls = game_info_loader_cls
+        self._window_scanner_cls = window_scanner_cls
+        self._log_handler_cls = log_handler_cls
+        self._session_recorder_cls = session_recorder_cls
+        self._game_state_tracker_cls = game_state_tracker_cls
 
     def bootstrap(self, *, window_title: str) -> MainWindowBootstrapResult:
         """設定・サービス・初期統計をまとめて構築する."""
         try:
-            config = ConfigLoader().load()
-            games = GameInfoLoader(config).load()
+            config = self._config_loader_cls().load()
+            games = self._game_info_loader_cls(config).load()
             if not games:
                 raise NoGamesConfiguredError
 
             browsers = config.window_scan.browsers
-            scanner = WindowScanner(
+            scanner = self._window_scanner_cls(
                 excluded_titles=(
                     list(config.window_scan.excluded_titles)
                     + [self.base_title, window_title]
                 )
             )
 
-            log_handler = LogHandler(config.log_handler)
-            recorder = SessionRecorder(
+            log_handler = self._log_handler_cls(config.log_handler)
+            recorder = self._session_recorder_cls(
                 log_handler=log_handler,
                 min_play_minutes=self.min_play_minutes,
             )
-            state_tracker = GameStateTracker(
+            state_tracker = self._game_state_tracker_cls(
                 recorder=recorder,
                 daily_stats=self.daily_stats,
                 browsers=list(browsers),

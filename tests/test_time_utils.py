@@ -37,11 +37,9 @@ class TestSplitByDay(unittest.TestCase):
         end = datetime(2026, 1, 11, 1, 30, 0)
         segments = time_utils.split_by_day(start, end)
         self.assertEqual(len(segments), 2)
-        # 1日目: 23:30 - 23:59:59.999999
+        # 1日目: 23:30 - 翌日00:00 (半開区間)
         self.assertEqual(segments[0][0], start)
-        self.assertEqual(segments[0][1].date(), datetime(2026, 1, 10).date())
-        self.assertEqual(segments[0][1].hour, 23)
-        self.assertEqual(segments[0][1].minute, 59)
+        self.assertEqual(segments[0][1], datetime(2026, 1, 11, 0, 0, 0))
         # 2日目: 00:00 - 01:30
         self.assertEqual(segments[1][0], datetime(2026, 1, 11, 0, 0, 0))
         self.assertEqual(segments[1][1], end)
@@ -148,9 +146,10 @@ class TestSplitByDayBoundaryConditions(unittest.TestCase):
         end = datetime(2026, 1, 11, 0, 0, 0)
         segments = time_utils.split_by_day(start, end)
         
-        # 2つに分割される（前日分と0:00ちょうどの空セグメント）
+        # 半開区間により2セグメントに分割されるが、2つ目は空区間
         self.assertEqual(len(segments), 2)
-        self.assertEqual(segments[0][0].date(), datetime(2026, 1, 10).date())
+        self.assertEqual(segments[0][0], start)
+        self.assertEqual(segments[0][1], datetime(2026, 1, 11, 0, 0, 0))
         self.assertEqual(segments[1][0], datetime(2026, 1, 11, 0, 0, 0))
         self.assertEqual(segments[1][1], end)
 

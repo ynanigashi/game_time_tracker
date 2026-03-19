@@ -1922,6 +1922,7 @@ class TestCloseEventRealMethod(unittest.TestCase):
             window = main.MainWindow()
         
         window.games = []
+        window.overlay_window = None
         window._save_window_state = MagicMock()
         
         mock_event = MagicMock(spec=main.QCloseEvent)
@@ -1937,6 +1938,7 @@ class TestCloseEventRealMethod(unittest.TestCase):
             window = main.MainWindow()
         
         window.games = []
+        window.overlay_window = None
         window._save_window_state = MagicMock()
         
         mock_event = MagicMock(spec=main.QCloseEvent)
@@ -1953,6 +1955,7 @@ class TestCloseEventRealMethod(unittest.TestCase):
         game = models.GameEntry(game_title="TestGame", window_title="TestGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=10)
         window.games = [game]
+        window.overlay_window = None
         window.recorder = MagicMock()
         window._save_window_state = MagicMock()
         
@@ -2546,8 +2549,7 @@ class TestOverlayMethods(unittest.TestCase):
         window._to_native_point = MagicMock(side_effect=lambda x, y: (x, y))
         window._find_covering_foreign_window_at_point = MagicMock(side_effect=[0, 0, 999, 0, 0])
 
-        with patch.object(main, "_USER32") as mock_user32:
-            mock_user32.GetForegroundWindow.return_value = 123
+        with patch('src.app.win32_helpers.get_foreground_hwnd', return_value=123):
             self.assertTrue(window._is_today_display_covered_by_foreground_window())
 
     def test_uncovered_when_top_window_is_own_returns_false(self):
@@ -2568,8 +2570,7 @@ class TestOverlayMethods(unittest.TestCase):
         window._to_native_point = MagicMock(side_effect=lambda x, y: (x, y))
         window._find_covering_foreign_window_at_point = MagicMock(side_effect=[0, 0, 0, 0, 0])
 
-        with patch.object(main, "_USER32") as mock_user32:
-            mock_user32.GetForegroundWindow.return_value = 123
+        with patch('src.app.win32_helpers.get_foreground_hwnd', return_value=123):
             self.assertFalse(window._is_today_display_covered_by_foreground_window())
 
     def test_sample_points_from_rect_uses_25_75_offsets(self):

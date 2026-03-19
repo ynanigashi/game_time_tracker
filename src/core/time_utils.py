@@ -59,17 +59,13 @@ def split_by_day(start: datetime, end: datetime) -> List[Tuple[datetime, datetim
     current_start = start
 
     while current_start.date() < end.date():
-        # 当日の終わり（23:59:59.999999）
-        day_end = datetime.combine(
-            current_start.date(),
-            time(23, 59, 59, 999999),
-        )
-        segments.append((current_start, day_end))
-        # 翌日の開始（00:00:00）
-        current_start = datetime.combine(
+        # 翌日 00:00:00（半開区間 [start, next_day_start) ）
+        next_day_start = datetime.combine(
             current_start.date() + timedelta(days=1),
             time(0, 0, 0),
         )
+        segments.append((current_start, next_day_start))
+        current_start = next_day_start
 
     segments.append((current_start, end))
     return segments

@@ -54,25 +54,25 @@ class GameEntry:
         # Non-browser games are ignored when the title is a browser window.
         return not is_browser
 
-    def start_session(self) -> None:
+    def start_session(self, *, now: Optional[datetime] = None) -> None:
         """ゲームセッションを開始."""
         self.is_playing = True
-        self.start_time = datetime.now()
+        self.start_time = now or datetime.now()
         self.inactive_since = None
 
-    def end_session(self) -> Tuple[Optional[datetime], Optional[datetime]]:
+    def end_session(self, *, now: Optional[datetime] = None) -> Tuple[Optional[datetime], Optional[datetime]]:
         """ゲームセッションを終了し、開始・終了時刻を返す."""
         start_time = self.start_time
-        end_time = datetime.now() if start_time else None
+        end_time = (now or datetime.now()) if start_time else None
         self.is_playing = False
         self.start_time = None
         self.inactive_since = None
         return start_time, end_time
 
-    def set_inactive(self) -> None:
+    def set_inactive(self, *, now: Optional[datetime] = None) -> None:
         """非アクティブ状態に設定."""
         if self.inactive_since is None:
-            self.inactive_since = datetime.now()
+            self.inactive_since = now or datetime.now()
 
     def set_active(self) -> None:
         """アクティブ状態に戻す（非アクティブ時間をクリア）."""
@@ -82,11 +82,11 @@ class GameEntry:
         """非アクティブ状態かどうか."""
         return self.inactive_since is not None
 
-    def get_inactive_seconds(self) -> float:
+    def get_inactive_seconds(self, *, now: Optional[datetime] = None) -> float:
         """非アクティブ経過秒数を取得."""
         if self.inactive_since is None:
             return 0.0
-        return (datetime.now() - self.inactive_since).total_seconds()
+        return ((now or datetime.now()) - self.inactive_since).total_seconds()
 
 
 @dataclass
