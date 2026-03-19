@@ -17,6 +17,10 @@ import main
 import models
 import services
 import time_utils
+from tests.helpers.main_window_factory import (
+    attach_window_title_stubs,
+    create_mock_main_window,
+)
 from text_utils import normalize_title
 import window_state
 
@@ -283,43 +287,13 @@ class TestMainWindowDirectMethods(unittest.TestCase):
 
     def _create_mock_main_window(self):
         """モックされたMainWindowを作成."""
-        with patch.object(main.MainWindow, '__init__', lambda self: None):
-            window = main.MainWindow()
-        
-        # 必要な属性をセットアップ
-        window.games = []
-        window.browsers = ['Chrome', 'Firefox']
-        window.active_games_cache = []
-        window.inactive_games_cache = []
-        window.latest_window_titles = []
-        window.display_mode = 'mid'
-        window.mode_sizes = {'min': (300, 80), 'mid': (300, 200), 'max': (300, 400)}
-        window.daily_stats = services.DailyStatsTracker()
-        window.recorder = services.SessionRecorder(log_handler=FakeLogHandler(), min_play_minutes=5)
-        
-        # GameStateTrackerを初期化
-        window.state_tracker = services.GameStateTracker(
-            recorder=window.recorder,
-            daily_stats=window.daily_stats,
-            browsers=list(window.browsers),
-            inactive_timeout_minutes=5,
+        window = create_mock_main_window(
+            browsers=['Chrome', 'Firefox'],
+            include_scanner=True,
+            include_latest_window_titles=True,
+            display_mode='mid',
         )
-        
-        # モックUI
-        window.w = MagicMock()
-        window.w.active_display = MagicMock()
-        window.w.session_time_display = MagicMock()
-        window.w.today_time_display = MagicMock()
-        window.w.window_list = MagicMock()
-        window.w.today_games_table = MagicMock()
-        
-        # モックスキャナー
-        window.scanner = MagicMock()
-        window.scanner.excluded_titles = set()
-        
-        # _load_today_game_minutesをモック
         window._load_today_game_minutes = MagicMock(return_value={})
-        
         return window
 
     def test_update_game_states_returns_active_when_foreground(self):
@@ -456,34 +430,10 @@ class TestMainWindowUIHelpers(unittest.TestCase):
 
     def _create_mock_main_window(self):
         """モックされたMainWindowを作成."""
-        with patch.object(main.MainWindow, '__init__', lambda self: None):
-            window = main.MainWindow()
-        
-        window.games = []
-        window.browsers = ['Chrome']
-        window.active_games_cache = []
-        window.inactive_games_cache = []
-        window.daily_stats = services.DailyStatsTracker()
-        window.recorder = services.SessionRecorder(log_handler=FakeLogHandler(), min_play_minutes=5)
-        
-        # GameStateTrackerを初期化
-        window.state_tracker = services.GameStateTracker(
-            recorder=window.recorder,
-            daily_stats=window.daily_stats,
-            browsers=list(window.browsers),
-            inactive_timeout_minutes=5,
+        return create_mock_main_window(
+            browsers=['Chrome'],
+            today_games_rowcount_zero=True,
         )
-        
-        # モックUI
-        window.w = MagicMock()
-        window.w.active_display = MagicMock()
-        window.w.session_time_display = MagicMock()
-        window.w.today_time_display = MagicMock()
-        window.w.window_list = MagicMock()
-        window.w.today_games_table = MagicMock()
-        window.w.today_games_table.rowCount.return_value = 0
-        
-        return window
 
     def test_update_active_list_shows_games(self):
         """_update_active_listはプレイ中ゲームを表示."""
@@ -629,38 +579,20 @@ class TestMainWindowDisplayModeAndState(unittest.TestCase):
 
     def _create_mock_main_window(self):
         """モックされたMainWindowを作成."""
-        with patch.object(main.MainWindow, '__init__', lambda self: None):
-            window = main.MainWindow()
-        
-        window.display_mode = 'mid'
-        window.mode_sizes = {'min': (300, 80), 'mid': (300, 200), 'max': (300, 400)}
-        window.scanner = MagicMock()
-        window.scanner.excluded_titles = set()
-        
-        # setWindowTitle用
-        window._window_title = ""
-        window.setWindowTitle = lambda t: setattr(window, '_window_title', t)
-        window.windowTitle = lambda: window._window_title
-        
-        # モックUI
-        window.w = MagicMock()
-        
-        # geometry用
-        window._geom = MagicMock()
-        window._geom.x.return_value = 100
-        window._geom.y.return_value = 200
-        window._geom.width.return_value = 300
-        window._geom.height.return_value = 200
-        window.geometry = lambda: window._geom
-        window.width = lambda: 300
-        window.height = lambda: 200
-        
+        window = create_mock_main_window(
+            include_state_tracker=False,
+            include_scanner=True,
+            display_mode='mid',
+            include_title_stubs=True,
+            include_geometry_stubs=True,
+        )
+
         # モックメソッド
         window.setMinimumHeight = MagicMock()
         window.setMaximumHeight = MagicMock()
         window.resize = MagicMock()
         window.setVisible = MagicMock()
-        
+
         return window
 
     def test_set_status_updates_title(self):
@@ -779,16 +711,14 @@ class TestInitComponentsDirect(unittest.TestCase):
 
     def _create_mock_main_window(self):
         """モックされたMainWindowを作成."""
-        with patch.object(main.MainWindow, '__init__', lambda self: None):
-            window = main.MainWindow()
-        
-        window.games = []
-        window.browsers = []
-        window.active_games_cache = []
-        window.inactive_games_cache = []
-        window.display_mode = 'mid'
-        window.mode_sizes = {}
-        window.daily_stats = services.DailyStatsTracker()
+        window = create_mock_main_window(
+            browsers=[],
+            include_state_tracker=False,
+            include_scanner=False,
+            include_ui=True,
+            display_mode='mid',
+            mode_sizes={},
+        )
         
         window._disabled = False
         window._status = ""
@@ -948,36 +878,14 @@ class TestMainWindowEvents(unittest.TestCase):
 
     def _create_mock_main_window(self):
         """モックされたMainWindowを作成."""
-        with patch.object(main.MainWindow, '__init__', lambda self: None):
-            window = main.MainWindow()
-        
-        window.games = []
-        window.browsers = ['Chrome']
-        window.active_games_cache = []
-        window.inactive_games_cache = []
-        window.display_mode = 'mid'
-        window.mode_sizes = {'min': (300, 80), 'mid': (300, 200), 'max': (300, 400)}
-        window.daily_stats = services.DailyStatsTracker()
-        window.recorder = services.SessionRecorder(log_handler=FakeLogHandler(), min_play_minutes=5)
-        
-        window.w = MagicMock()
-        window.scanner = MagicMock()
-        window.scanner.excluded_titles = set()
-        
-        window._window_title = ""
-        window.setWindowTitle = lambda t: setattr(window, '_window_title', t)
-        window.windowTitle = lambda: window._window_title
+        window = create_mock_main_window(
+            include_scanner=True,
+            include_state_tracker=False,
+            display_mode='mid',
+            include_title_stubs=True,
+            include_geometry_stubs=True,
+        )
         window.setDisabled = MagicMock()
-        
-        window._geom = MagicMock()
-        window._geom.x.return_value = 100
-        window._geom.y.return_value = 200
-        window._geom.width.return_value = 300
-        window._geom.height.return_value = 200
-        window.geometry = lambda: window._geom
-        window.width = lambda: 300
-        window.height = lambda: 200
-        
         return window
 
     def test_close_event_records_playing_games(self):
@@ -1080,20 +988,10 @@ class TestUpdateTodayGamesList(unittest.TestCase):
 
     def _create_mock_main_window(self):
         """モックされたMainWindowを作成."""
-        with patch.object(main.MainWindow, '__init__', lambda self: None):
-            window = main.MainWindow()
-        
-        window.games = []
-        window.browsers = ['Chrome']
-        window.active_games_cache = []
-        window.inactive_games_cache = []
-        window.daily_stats = services.DailyStatsTracker()
-        window.recorder = services.SessionRecorder(log_handler=FakeLogHandler(), min_play_minutes=5)
-        
-        window.w = MagicMock()
-        window.w.today_games_table = MagicMock()
-        window.w.today_games_table.rowCount.return_value = 0
-        
+        window = create_mock_main_window(
+            include_state_tracker=False,
+            today_games_rowcount_zero=True,
+        )
         return window
 
     def test_non_empty_cache_updates_table(self):
@@ -1219,16 +1117,10 @@ class TestLoadTodayDataExceptionHandling(unittest.TestCase):
 
     def _create_mock_main_window(self):
         """モックされたMainWindowを作成."""
-        with patch.object(main.MainWindow, '__init__', lambda self: None):
-            window = main.MainWindow()
-        
-        window.games = []
-        window.browsers = ['Chrome']
-        window.active_games_cache = []
-        window.inactive_games_cache = []
-        window.daily_stats = services.DailyStatsTracker()
-        
-        return window
+        return create_mock_main_window(
+            include_state_tracker=False,
+            include_ui=False,
+        )
 
     def test_load_today_game_minutes_returns_empty_on_exception(self):
         """_load_today_game_minutesは例外時に空辞書を返す."""
@@ -1311,41 +1203,17 @@ class TestScanTickStatusSwitch(unittest.TestCase):
 
     def _create_mock_main_window(self):
         """モックされたMainWindowを作成."""
-        with patch.object(main.MainWindow, '__init__', lambda self: None):
-            window = main.MainWindow()
-        
-        window.games = []
-        window.browsers = ['Chrome']
-        window.active_games_cache = []
-        window.inactive_games_cache = []
-        window.latest_window_titles = []
-        window.daily_stats = services.DailyStatsTracker()
-        window.recorder = services.SessionRecorder(log_handler=FakeLogHandler(), min_play_minutes=5)
-        
-        # GameStateTrackerを初期化
-        window.state_tracker = services.GameStateTracker(
-            recorder=window.recorder,
-            daily_stats=window.daily_stats,
-            browsers=list(window.browsers),
-            inactive_timeout_minutes=5,
+        window = create_mock_main_window(
+            include_scanner=True,
+            include_latest_window_titles=True,
         )
-        
-        window.w = MagicMock()
         window.w.active_display = MagicMock()
         window.w.window_list = MagicMock()
         window.w.today_games_table = MagicMock()
-        
-        window.scanner = MagicMock()
-        window.scanner.excluded_titles = set()
-        
+
         window._status = ""
-        window._window_title = ""
-        window.setWindowTitle = lambda t: setattr(window, '_window_title', t)
-        window.windowTitle = lambda: window._window_title
-        
-        # _load_today_game_minutesをモック
+        attach_window_title_stubs(window)
         window._load_today_game_minutes = MagicMock(return_value={})
-        
         return window
 
     def _mock_set_status(self, window):
@@ -1847,19 +1715,8 @@ class TestUpdateTodayGamesListWithInactive(unittest.TestCase):
 
     def _create_mock_main_window(self):
         """モックされたMainWindowを作成."""
-        with patch.object(main.MainWindow, '__init__', lambda self: None):
-            window = main.MainWindow()
-        
-        window.games = []
-        window.browsers = ['Chrome']
-        window.active_games_cache = []
-        window.inactive_games_cache = []
-        window.daily_stats = services.DailyStatsTracker()
-        window.recorder = services.SessionRecorder(log_handler=FakeLogHandler(), min_play_minutes=5)
-        
-        window.w = MagicMock()
+        window = create_mock_main_window(include_scanner=False)
         window.w.today_games_table = MagicMock()
-        
         return window
 
     def test_includes_inactive_game_in_list(self):
@@ -1867,15 +1724,16 @@ class TestUpdateTodayGamesListWithInactive(unittest.TestCase):
         window = self._create_mock_main_window()
         window.daily_stats.today_game_minutes_cache = {}
         window.daily_stats.last_today_games_content = ""
+        now = datetime.now()
         
         # 非アクティブゲーム: 15分
         inactive_game = models.GameEntry(game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
-        inactive_game.start_time = datetime.now() - timedelta(minutes=15)
+        inactive_game.start_time = now - timedelta(minutes=15)
         inactive_game.set_inactive()
         window.inactive_games_cache = [inactive_game]
         window.active_games_cache = []
         
-        window._update_today_games_list(datetime.now())
+        window._update_today_games_list(now)
         
         # テーブル更新される
         window.w.today_games_table.setRowCount.assert_called_with(1)
@@ -1886,19 +1744,20 @@ class TestUpdateTodayGamesListWithInactive(unittest.TestCase):
         window = self._create_mock_main_window()
         window.daily_stats.today_game_minutes_cache = {}
         window.daily_stats.last_today_games_content = ""
+        now = datetime.now()
         
         # アクティブゲーム: 10分
         active_game = models.GameEntry(game_title="ActiveGame", window_title="ActiveGame", is_playing=True)
-        active_game.start_time = datetime.now() - timedelta(minutes=10)
+        active_game.start_time = now - timedelta(minutes=10)
         window.active_games_cache = [active_game]
         
         # 非アクティブゲーム: 20分
         inactive_game = models.GameEntry(game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
-        inactive_game.start_time = datetime.now() - timedelta(minutes=20)
+        inactive_game.start_time = now - timedelta(minutes=20)
         inactive_game.set_inactive()
         window.inactive_games_cache = [inactive_game]
         
-        window._update_today_games_list(datetime.now())
+        window._update_today_games_list(now)
         
         # 2ゲーム表示
         window.w.today_games_table.setRowCount.assert_called_with(2)
@@ -1913,15 +1772,16 @@ class TestUpdateTodayGamesListWithInactive(unittest.TestCase):
             'GameA': 30.0,  # キャッシュに30分
         }
         window.daily_stats.last_today_games_content = ""
+        now = datetime.now()
         
         # 同じゲームが非アクティブで15分
         inactive_game = models.GameEntry(game_title="GameA", window_title="GameA", is_playing=True)
-        inactive_game.start_time = datetime.now() - timedelta(minutes=15)
+        inactive_game.start_time = now - timedelta(minutes=15)
         inactive_game.set_inactive()
         window.inactive_games_cache = [inactive_game]
         window.active_games_cache = []
         
-        window._update_today_games_list(datetime.now())
+        window._update_today_games_list(now)
         
         # 30 + 15 = 45分
         self.assertIn("GameA: 45分", window.daily_stats.last_today_games_content)
@@ -1932,16 +1792,10 @@ class TestLoadTodayGameMinutesParseNone(unittest.TestCase):
 
     def _create_mock_main_window(self):
         """モックされたMainWindowを作成."""
-        with patch.object(main.MainWindow, '__init__', lambda self: None):
-            window = main.MainWindow()
-        
-        window.games = []
-        window.browsers = ['Chrome']
-        window.active_games_cache = []
-        window.inactive_games_cache = []
-        window.daily_stats = services.DailyStatsTracker()
-        
-        return window
+        return create_mock_main_window(
+            include_state_tracker=False,
+            include_ui=False,
+        )
 
     def test_skips_record_with_missing_start_time(self):
         """start_timeが欠落したレコードはスキップ."""
@@ -2429,9 +2283,7 @@ class TestSetWidgetVisibility(unittest.TestCase):
 
     def _create_mock_main_window(self):
         """モックされたMainWindowを作成."""
-        with patch.object(main.MainWindow, '__init__', lambda self: None):
-            window = main.MainWindow()
-        return window
+        return create_mock_main_window(include_state_tracker=False, include_ui=False)
 
     def test_set_visible_true(self):
         """visible=Trueでウィジェットを表示."""
@@ -2457,9 +2309,7 @@ class TestSetWidgetWithHeight(unittest.TestCase):
 
     def _create_mock_main_window(self):
         """モックされたMainWindowを作成."""
-        with patch.object(main.MainWindow, '__init__', lambda self: None):
-            window = main.MainWindow()
-        return window
+        return create_mock_main_window(include_state_tracker=False, include_ui=False)
 
     def test_set_visible_true_with_height(self):
         """visible=Trueで表示と高さを設定."""
@@ -2498,13 +2348,9 @@ class TestUpdateSessionTimesStartTimeNone(unittest.TestCase):
 
     def _create_mock_main_window(self):
         """モックされたMainWindowを作成."""
-        with patch.object(main.MainWindow, '__init__', lambda self: None):
-            window = main.MainWindow()
-        
+        window = create_mock_main_window(include_state_tracker=False)
         window.inactive_games_cache = []
-        window.w = MagicMock()
         window.w.session_time_display = MagicMock()
-        
         return window
 
     def test_start_time_none_treated_as_zero(self):
@@ -2559,9 +2405,7 @@ class TestOverlayMethods(unittest.TestCase):
     """オーバーレイ更新/終了メソッドのテスト."""
 
     def _create_mock_main_window(self):
-        with patch.object(main.MainWindow, '__init__', lambda self: None):
-            window = main.MainWindow()
-        return window
+        return create_mock_main_window(include_state_tracker=False, include_ui=False)
 
     def test_refresh_overlay_time_updates_text(self):
         """_refresh_overlay_timeはtoday_time_displayの値をオーバーレイへ反映."""
@@ -2791,9 +2635,7 @@ class TestOvertimeAlertMethods(unittest.TestCase):
     """時間超過防止アラートのテスト."""
 
     def _create_mock_main_window(self):
-        with patch.object(main.MainWindow, '__init__', lambda self: None):
-            window = main.MainWindow()
-        return window
+        return create_mock_main_window(include_state_tracker=False, include_ui=False)
 
     def test_update_overtime_alert_beeps_once_on_threshold_cross(self):
         """閾値を跨いだときのみ1回通知する."""

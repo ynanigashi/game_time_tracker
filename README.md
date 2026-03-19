@@ -185,16 +185,17 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
 
 ## 開発向け
 - テスト実行: `python -m unittest`
-- 監視間隔は `main.py` 冒頭の定数で変更できます：
+- 監視間隔は `src/app/main.py` 冒頭の定数で変更できます：
   - `POLL_INTERVAL_SECONDS = 1`（デフォルト: 1秒）
-- 最小記録時間は `services.py` の定数で変更できます：
+- 最小記録時間は `src/core/services_domain.py` の定数で変更できます：
   - `MIN_PLAY_MINUTES = 5`（デフォルト: 5分）
 - 監視対象ブラウザ・除外ウィンドウは `config.ini` の `[WINDOW_SCAN]` で変更できます（未設定時は `config_loader.py` のデフォルト値）。
 - モジュール構成:
-  - `models.py`: データモデル（`GameEntry`, `ParsedRecord`）
-  - `services.py`: ビジネスロジック（`GameInfoLoader`, `WindowScanner`, `SessionRecorder`, `DailyStatsTracker`）
-  - `window_state.py`: ウィンドウ状態の永続化
-  - `main.py`: UIのみ（イベント → サービス呼び出し → UI更新）
+  - `src/core`: ドメイン層（`models.py`, `services.py`, `services_domain.py`, `time_utils.py`, `window_state.py`）
+  - `src/infra`: 外部連携層（`config_loader.py`, `gspread_service.py`, `log_handler.py`）
+  - `src/ui`: UIレイアウト（`gui_layout.py`）
+  - `src/app`: エントリーポイント/UI制御（`main.py`, `main_components.py`）
+  - ルート直下の同名 `*.py` は後方互換用ラッパーです。
 
 ## 開発ガイド
 - 仮想環境: `python -m venv .venv && .\.venv\Scripts\activate && pip install -r requirements.txt`
@@ -202,12 +203,12 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
 - 設定: `config.ini` にログシート・ゲーム情報シートのキーと gid、サービスアカウント JSON のパスを指定
 - テスト: 依存をスタブ化した単体テストを `python -m unittest` で実行（`tests/` 配下, 308件のテスト）
 - 拡張例:
-  - ポーリング間隔の変更は `main.py` の `POLL_INTERVAL_SECONDS`
-  - 最小記録時間の変更は `services.py` の `MIN_PLAY_MINUTES`
+  - ポーリング間隔の変更は `src/app/main.py` の `POLL_INTERVAL_SECONDS`
+  - 最小記録時間の変更は `src/core/services_domain.py` の `MIN_PLAY_MINUTES`
   - 対応ブラウザや除外ウィンドウの追加は `config.ini` の `[WINDOW_SCAN]`（未設定時は `config_loader.py` のデフォルト値）
-  - 新しいデータモデルは `models.py` に追加
-  - 新しいビジネスロジックは `services.py` に追加
-  - UIの拡張は `main.py` の `MainWindow` を拡張
+  - 新しいデータモデルは `src/core/models.py` に追加
+  - 新しいビジネスロジックは `src/core/services.py` / `src/core/services_domain.py` に追加
+  - UIの拡張は `src/app/main.py` の `MainWindow` を拡張
 
 ### クラス/メソッドの関係図（Mermaid）
 ```mermaid

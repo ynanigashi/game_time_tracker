@@ -2,6 +2,6 @@
 
 import sys as _sys
 
-from src.infra import gspread_service as _impl
+from src.core import services_domain as _impl
 
 _sys.modules[__name__] = _impl

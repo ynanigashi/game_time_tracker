@@ -4,6 +4,8 @@
 # 特定のファイルを無視から除外
 !*.gitignore
 !tests/
+!src/
+!docs/
 !*.py
 !*.md
 !*.txt
