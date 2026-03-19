@@ -10,18 +10,33 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
 
-# ロギング設定
-_file_handler = logging.FileHandler('game_time_tracker.log', encoding='utf-8')
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        _file_handler,
-    ]
-)
-atexit.register(logging.shutdown)
 logger = logging.getLogger(__name__)
+
+_LOGGING_CONFIGURED = False
+
+
+def configure_logging() -> None:
+    """アプリ起動時にロギングを初期化する（import時は実行しない）。"""
+    global _LOGGING_CONFIGURED
+    if _LOGGING_CONFIGURED:
+        return
+
+    root_logger = logging.getLogger()
+    if root_logger.handlers:
+        _LOGGING_CONFIGURED = True
+        return
+
+    file_handler = logging.FileHandler('game_time_tracker.log', encoding='utf-8')
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            file_handler,
+        ],
+    )
+    atexit.register(logging.shutdown)
+    _LOGGING_CONFIGURED = True
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QCloseEvent, QMouseEvent, QResizeEvent
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QWidget
@@ -945,6 +960,7 @@ class MainWindow(QWidget):
 # エントリーポイント
 # =============================================================================
 def main() -> None:
+    configure_logging()
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()

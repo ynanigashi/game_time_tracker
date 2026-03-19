@@ -637,7 +637,7 @@ Google Spreadsheet操作を抽象化するサービスクラス。
 ---
 
 ## システム構成
-- **[main.py](main.py)** (PySide6 GUI + 自動検出・ログ記録)
+- **[src/app/main.py](src/app/main.py)** (PySide6 GUI + 自動検出・ログ記録)
   - `MainWindow` がメインループを管理し、ポーリング間隔/最小記録時間を定数で設定可能。
   - `pygetwindow` で全ウィンドウのタイトルを取得。
   - ゲーム情報シートから登録されたゲームを読み込み、部分一致で検出。
@@ -656,16 +656,16 @@ Google Spreadsheet操作を抽象化するサービスクラス。
     - スプレッドシートへのアクセスは起動時とゲーム記録時のみ（キャッシュを活用）
     - UI更新時は差分更新により、ちらつきを防止
 
-- **[gui_layout.py](gui_layout.py)**
+- **[src/ui/gui_layout.py](src/ui/gui_layout.py)**
   - GUI ウィジェットとレイアウトの構築。各ウィジェットのデフォルト高さを保持。
   
-- **[log_handler.py](log_handler.py)**
+- **[src/infra/log_handler.py](src/infra/log_handler.py)**
   - サービスアカウント経由でスプレッドシートを操作。
   - ログ行を末尾に追記。
   - ログシートの読み込み/追記とインデックス管理を行う。
   - **キャッシュ機構**: 起動時に全レコードを`self.records`（`List[dict]`）にキャッシュし、`get_cached_records()`で取得。`save_record()`はスプレッドシート書き込みと同時にキャッシュも更新。UI更新時のAPI呼び出しを排除。
 
-- **[config_loader.py](config_loader.py)**
+- **[src/infra/config_loader.py](src/infra/config_loader.py)**
   - `config.ini` を読み込み。
   - スプレッドシートキー、ゲーム情報シートの gid、サービスアカウント JSON パスを提供。
 

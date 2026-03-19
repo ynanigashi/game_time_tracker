@@ -64,7 +64,7 @@ class LogHandler:
                 - game_minutes: ゲームタイトルごとの分数の辞書
                 - total_seconds: 今日の完了プレイ時間の合計（秒）
         """
-        from models import parse_record
+        from src.core.models import parse_record
         
         game_minutes: Dict[str, float] = {}
         total_seconds = 0.0

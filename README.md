@@ -134,13 +134,13 @@ Windows タスクスケジューラで定期実行したい場合は、このバ
 ## ファイル構成
 
 ### アプリケーションコード
-- [main.py](main.py) : PySide6 GUI（`MainWindow` クラス）。イベント処理とUI更新のみを担当。
-- [models.py](models.py) : データモデル（`GameEntry`, `ParsedRecord`）とパース関数。
-- [services.py](services.py) : ビジネスロジック（`GameInfoLoader`, `WindowScanner`, `SessionRecorder`, `DailyStatsTracker`）。
-- [window_state.py](window_state.py) : ウィンドウ状態の保存/読み込み（`WindowState`）。
-- [gui_layout.py](gui_layout.py) : UIレイアウト構築。
-- [log_handler.py](log_handler.py) : スプレッドシート操作（読み込み・追記・インデックス管理）。起動時に全レコードをキャッシュし、記録時に更新することでAPI呼び出しを最小化。
-- [config_loader.py](config_loader.py) : `config.ini` の読み込みと設定値管理。ブラウザ判定/除外タイトルはここで定義。
+- [src/app/main.py](src/app/main.py) : PySide6 GUI（`MainWindow` クラス）。イベント処理とUI更新のみを担当。
+- [src/core/models.py](src/core/models.py) : データモデル（`GameEntry`, `ParsedRecord`）とパース関数。
+- [src/core/services.py](src/core/services.py) : ビジネスロジック（`GameInfoLoader`, `WindowScanner`, `SessionRecorder`, `DailyStatsTracker`）。
+- [src/core/window_state.py](src/core/window_state.py) : ウィンドウ状態の保存/読み込み（`WindowState`）。
+- [src/ui/gui_layout.py](src/ui/gui_layout.py) : UIレイアウト構築。
+- [src/infra/log_handler.py](src/infra/log_handler.py) : スプレッドシート操作（読み込み・追記・インデックス管理）。起動時に全レコードをキャッシュし、記録時に更新することでAPI呼び出しを最小化。
+- [src/infra/config_loader.py](src/infra/config_loader.py) : `config.ini` の読み込みと設定値管理。ブラウザ判定/除外タイトルはここで定義。
 
 ### 設定・その他
 - [game_time_tracker.bat](game_time_tracker.bat) : Windows バッチファイル。仮想環境を有効化して main.py を実行（日々の起動はこちらから）。
@@ -195,7 +195,7 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
   - `src/infra`: 外部連携層（`config_loader.py`, `gspread_service.py`, `log_handler.py`）
   - `src/ui`: UIレイアウト（`gui_layout.py`）
   - `src/app`: エントリーポイント/UI制御（`main.py`, `main_components.py`）
-  - ルート直下の同名 `*.py` は後方互換用ラッパーです。
+  - ルートの `main.py` は実行エントリです。実装は `src/` 配下にあります。
 
 ## 開発ガイド
 - 仮想環境: `python -m venv .venv && .\.venv\Scripts\activate && pip install -r requirements.txt`

@@ -1,16 +1,21 @@
-# 全てのファイルを無視
-*
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
 
-# 特定のファイルを無視から除外
-!*.gitignore
-!tests/
-!src/
-!docs/
-!*.py
-!*.md
-!*.txt
-!*.template
-!*.example
+# Virtual environment / caches
+.venv/
+.pytest_cache/
 
-# 実行時に更新されるローカル状態ファイル
+# Runtime artifacts
 window_state.txt
+game_time_tracker.log
+
+# Local secrets / local config
+config.ini
+service_account.json
+
+# OS artifacts
+Thumbs.db
+.DS_Store
