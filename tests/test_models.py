@@ -1,4 +1,4 @@
-﻿# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false, reportOptionalMemberAccess=false
+# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false, reportOptionalMemberAccess=false
 """models.py のユニットテスト."""
 
 import unittest
@@ -9,8 +9,8 @@ from unittest.mock import MagicMock
 from tests.test_stubs import install_stubs
 install_stubs()
 
-import models
-from text_utils import normalize_title
+from src.core import models
+from src.core.text_utils import normalize_title
 
 
 class TestGameEntry(unittest.TestCase):

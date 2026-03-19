@@ -1,4 +1,4 @@
-﻿# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
+# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
 """time_utils.py のユニットテスト."""
 
 import unittest
@@ -8,11 +8,11 @@ from datetime import datetime, time, timedelta
 from tests.test_stubs import install_stubs
 install_stubs()
 
-import time_utils
-from time_utils import format_hms, split_by_day, calc_today_elapsed_seconds, GSS_DATETIME_FORMAT
+from src.core import time_utils
+from src.core.time_utils import format_hms, split_by_day, calc_today_elapsed_seconds, GSS_DATETIME_FORMAT
 
-import models
-import services
+from src.core import models
+from src.core import services
 from tests.test_stubs import FakeLogHandler
 
 
@@ -194,7 +194,7 @@ class TestTimeUtilsCalcTodayElapsedSeconds(unittest.TestCase):
 
     def test_same_day_full_duration(self):
         """同じ日の場合、全経過時間を返す."""
-        from time_utils import calc_today_elapsed_seconds
+        from src.core.time_utils import calc_today_elapsed_seconds
         
         start = datetime(2025, 1, 15, 10, 0, 0)
         now = datetime(2025, 1, 15, 12, 30, 0)
@@ -206,7 +206,7 @@ class TestTimeUtilsCalcTodayElapsedSeconds(unittest.TestCase):
 
     def test_cross_midnight_only_today(self):
         """日跨ぎの場合、今日の0:00からの経過時間のみを返す."""
-        from time_utils import calc_today_elapsed_seconds
+        from src.core.time_utils import calc_today_elapsed_seconds
         
         start = datetime(2025, 1, 14, 23, 0, 0)  # 昨日23時
         now = datetime(2025, 1, 15, 2, 0, 0)     # 今日2時
@@ -218,7 +218,7 @@ class TestTimeUtilsCalcTodayElapsedSeconds(unittest.TestCase):
 
     def test_exactly_midnight_start(self):
         """ちょうど0:00開始の場合."""
-        from time_utils import calc_today_elapsed_seconds
+        from src.core.time_utils import calc_today_elapsed_seconds
         
         start = datetime(2025, 1, 15, 0, 0, 0)
         now = datetime(2025, 1, 15, 1, 30, 0)
@@ -230,7 +230,7 @@ class TestTimeUtilsCalcTodayElapsedSeconds(unittest.TestCase):
 
     def test_multiple_days_ago(self):
         """複数日前からの場合、今日の経過時間のみ."""
-        from time_utils import calc_today_elapsed_seconds
+        from src.core.time_utils import calc_today_elapsed_seconds
         
         start = datetime(2025, 1, 13, 10, 0, 0)  # 2日前
         now = datetime(2025, 1, 15, 3, 0, 0)     # 今日3時

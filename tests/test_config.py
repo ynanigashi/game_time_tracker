@@ -1,4 +1,4 @@
-﻿# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
+# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
 """config_loader.py のユニットテスト."""
 
 import configparser
@@ -12,9 +12,9 @@ from unittest.mock import patch
 from tests.test_stubs import install_stubs
 install_stubs()
 
-import main
-from config_loader import ConfigLoader
-import services
+from src.app import main
+from src.infra.config_loader import ConfigLoader
+from src.core import services
 
 
 class TestConfigLoaderValidation(unittest.TestCase):
@@ -36,7 +36,7 @@ class TestConfigLoaderValidation(unittest.TestCase):
             f.write("[OTHER]\nkey=value\n")
         
         # config_loaderをインポート（mainからではなく直接）
-        import config_loader
+        from src.infra import config_loader
         with self.assertRaises(KeyError) as ctx:
             config_loader.ConfigLoader(config_path)
         
@@ -49,7 +49,7 @@ class TestConfigLoaderValidation(unittest.TestCase):
             f.write("[LOGHANDLER]\njson_file_path=test.json\n")
             f.write("[GAMEINFO]\nsheet_key=abc\nsheet_gid=123\n")
         
-        import config_loader
+        from src.infra import config_loader
         with self.assertRaises(KeyError) as ctx:
             config_loader.ConfigLoader(config_path)
         
@@ -62,7 +62,7 @@ class TestConfigLoaderValidation(unittest.TestCase):
             f.write("[LOGHANDLER]\njson_file_path=test.json\nsheet_key=abc\n")
             f.write("[GAMEINFO]\nsheet_key=abc\nsheet_gid=not_an_int\n")
         
-        import config_loader
+        from src.infra import config_loader
         with self.assertRaises(ValueError) as ctx:
             config_loader.ConfigLoader(config_path).load()
         
@@ -75,7 +75,7 @@ class TestConfigLoaderValidation(unittest.TestCase):
             f.write("[LOGHANDLER]\njson_file_path=test.json\nsheet_key=log_key\n")
             f.write("[GAMEINFO]\nsheet_key=game_key\nsheet_gid=12345\n")
         
-        import config_loader
+        from src.infra import config_loader
         cfg = config_loader.ConfigLoader(config_path).load()
         
         self.assertEqual(cfg.log_handler.cert_file_path, 'test.json')
@@ -103,7 +103,7 @@ class TestConfigLoaderGetList(unittest.TestCase):
             f.write("[LOGHANDLER]\njson_file_path=test.json\nsheet_key=log_key\n")
             f.write("[GAMEINFO]\nsheet_key=game_key\nsheet_gid=12345\n")
         
-        import config_loader
+        from src.infra import config_loader
         cfg = config_loader.ConfigLoader(config_path).load()
         
         # WINDOW_SCANセクションがないのでデフォルト
@@ -117,7 +117,7 @@ class TestConfigLoaderGetList(unittest.TestCase):
             f.write("[GAMEINFO]\nsheet_key=game_key\nsheet_gid=12345\n")
             f.write("[WINDOW_SCAN]\n")  # セクションはあるがキーがない
         
-        import config_loader
+        from src.infra import config_loader
         cfg = config_loader.ConfigLoader(config_path).load()
         
         self.assertEqual(cfg.window_scan.browsers, config_loader.DEFAULT_BROWSERS)
@@ -130,7 +130,7 @@ class TestConfigLoaderGetList(unittest.TestCase):
             f.write("[GAMEINFO]\nsheet_key=game_key\nsheet_gid=12345\n")
             f.write("[WINDOW_SCAN]\nbrowsers=\n")  # 空の値
         
-        import config_loader
+        from src.infra import config_loader
         cfg = config_loader.ConfigLoader(config_path).load()
         
         self.assertEqual(cfg.window_scan.browsers, config_loader.DEFAULT_BROWSERS)
@@ -143,7 +143,7 @@ class TestConfigLoaderGetList(unittest.TestCase):
             f.write("[GAMEINFO]\nsheet_key=game_key\nsheet_gid=12345\n")
             f.write("[WINDOW_SCAN]\nbrowsers=  ,  ,  \n")  # 空白とカンマのみ
         
-        import config_loader
+        from src.infra import config_loader
         cfg = config_loader.ConfigLoader(config_path).load()
         
         self.assertEqual(cfg.window_scan.browsers, config_loader.DEFAULT_BROWSERS)
@@ -156,7 +156,7 @@ class TestConfigLoaderGetList(unittest.TestCase):
             f.write("[GAMEINFO]\nsheet_key=game_key\nsheet_gid=12345\n")
             f.write("[WINDOW_SCAN]\nbrowsers=Chrome, Firefox, Edge\n")
         
-        import config_loader
+        from src.infra import config_loader
         cfg = config_loader.ConfigLoader(config_path).load()
         
         self.assertEqual(cfg.window_scan.browsers, ['Chrome', 'Firefox', 'Edge'])

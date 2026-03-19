@@ -1,4 +1,4 @@
-﻿# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
+# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
 """window_state.py 縺ｮ繝ｦ繝九ャ繝医ユ繧ｹ繝・"""
 
 import os
@@ -10,8 +10,8 @@ from pathlib import Path
 from tests.test_stubs import install_stubs
 install_stubs()
 
-import window_state
-from window_state import WindowState
+from src.core import window_state
+from src.core.window_state import WindowState
 
 
 class TestWindowState(unittest.TestCase):

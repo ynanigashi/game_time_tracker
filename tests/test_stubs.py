@@ -1,4 +1,4 @@
-﻿# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
+# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
 """テスト用共通スタブ・フェイク定義.
 
 PySide6, gspread, pygetwindow の外部依存をスタブで置き換え、
@@ -190,7 +190,7 @@ class FakeLogHandler:
 
     def get_today_stats(self) -> Tuple[Dict[str, float], float]:
         """今日のゲーム時間統計を取得（1回のパースで取得）."""
-        from models import parse_record
+        from src.core.models import parse_record
 
         game_minutes: Dict[str, float] = {}
         total_seconds = 0.0

@@ -1,4 +1,4 @@
-﻿# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false, reportOptionalMemberAccess=false
+# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false, reportOptionalMemberAccess=false
 """services.py のユニットテスト."""
 
 import sys
@@ -10,10 +10,10 @@ from unittest.mock import MagicMock, patch
 from tests.test_stubs import install_stubs, fake_gspread, FakeLogHandler
 install_stubs()
 
-import main
-import models
-import services
-from services import (
+from src.app import main
+from src.core import models
+from src.core import services
+from src.core.services import (
     DailyStatsTracker,
     GameInfoLoader,
     GameStateTracker,
@@ -24,7 +24,7 @@ from services import (
     MIN_PLAY_MINUTES,
     SECONDS_PER_MINUTE,
 )
-from text_utils import normalize_title
+from src.core.text_utils import normalize_title
 
 # servicesモジュールにpygetwindowのスタブを設定
 import pygetwindow
@@ -274,7 +274,7 @@ class TestGameInfoLoaderExceptions(unittest.TestCase):
         config.game_info.sheet_gid = 123
         return config
 
-    @patch('gspread_service.gspread.service_account')
+    @patch('src.infra.gspread_service.gspread.service_account')
     def test_load_file_not_found_returns_empty(self, mock_sa):
         """認証ファイルが見つからない場合は空リストを返す."""
         mock_sa.side_effect = FileNotFoundError("fake.json not found")
@@ -285,7 +285,7 @@ class TestGameInfoLoaderExceptions(unittest.TestCase):
         
         self.assertEqual(result, [])
 
-    @patch('gspread_service.gspread.service_account')
+    @patch('src.infra.gspread_service.gspread.service_account')
     def test_load_spreadsheet_not_found_returns_empty(self, mock_sa):
         """スプレッドシートが見つからない場合は空リストを返す."""
         mock_sa.side_effect = fake_gspread.exceptions.SpreadsheetNotFound("Not found")
@@ -296,7 +296,7 @@ class TestGameInfoLoaderExceptions(unittest.TestCase):
         
         self.assertEqual(result, [])
 
-    @patch('gspread_service.gspread.service_account')
+    @patch('src.infra.gspread_service.gspread.service_account')
     def test_load_worksheet_not_found_returns_empty(self, mock_sa):
         """ワークシートが見つからない場合は空リストを返す."""
         mock_gc = MagicMock()
@@ -310,7 +310,7 @@ class TestGameInfoLoaderExceptions(unittest.TestCase):
         
         self.assertEqual(result, [])
 
-    @patch('gspread_service.gspread.service_account')
+    @patch('src.infra.gspread_service.gspread.service_account')
     def test_load_api_error_returns_empty(self, mock_sa):
         """APIエラーの場合は空リストを返す."""
         mock_sa.side_effect = fake_gspread.exceptions.APIError("API quota exceeded")
@@ -321,7 +321,7 @@ class TestGameInfoLoaderExceptions(unittest.TestCase):
         
         self.assertEqual(result, [])
 
-    @patch('gspread_service.gspread.service_account')
+    @patch('src.infra.gspread_service.gspread.service_account')
     def test_load_generic_exception_is_reraised(self, mock_sa):
         """想定外の例外は握りつぶさず再送出する."""
         mock_sa.side_effect = RuntimeError("Unexpected error")
@@ -331,7 +331,7 @@ class TestGameInfoLoaderExceptions(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             loader.load()
 
-    @patch('gspread_service.gspread.service_account')
+    @patch('src.infra.gspread_service.gspread.service_account')
     def test_load_success_returns_entries(self, mock_sa):
         """正常に読み込めた場合はGameEntryリストを返す."""
         mock_sheet = MagicMock()
@@ -935,7 +935,7 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
 
     def test_initialization_with_dependencies(self):
         """依存関係を持って初期化できる."""
-        from services import GameStateTracker, SessionRecorder, DailyStatsTracker
+        from src.core.services import GameStateTracker, SessionRecorder, DailyStatsTracker
         
         mock_recorder = MagicMock(spec=SessionRecorder)
         mock_daily_stats = MagicMock(spec=DailyStatsTracker)
@@ -956,7 +956,7 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
 
     def test_normalize_scan_inputs(self):
         """scan入力の正規化が1箇所で行われる."""
-        from services import GameStateTracker, SessionRecorder, DailyStatsTracker
+        from src.core.services import GameStateTracker, SessionRecorder, DailyStatsTracker
 
         mock_recorder = MagicMock(spec=SessionRecorder)
         mock_daily_stats = MagicMock(spec=DailyStatsTracker)
@@ -978,7 +978,7 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
 
     def test_set_browsers_updates_normalized_cache(self):
         """set_browsers()で正規化キャッシュが同期更新される."""
-        from services import GameStateTracker, SessionRecorder, DailyStatsTracker
+        from src.core.services import GameStateTracker, SessionRecorder, DailyStatsTracker
 
         mock_recorder = MagicMock(spec=SessionRecorder)
         mock_daily_stats = MagicMock(spec=DailyStatsTracker)
@@ -996,7 +996,7 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
 
     def test_set_browsers_skips_empty_normalized_values(self):
         """set_browsers()は正規化後に空になる値をキャッシュから除外する."""
-        from services import GameStateTracker, SessionRecorder, DailyStatsTracker
+        from src.core.services import GameStateTracker, SessionRecorder, DailyStatsTracker
 
         mock_recorder = MagicMock(spec=SessionRecorder)
         mock_daily_stats = MagicMock(spec=DailyStatsTracker)
@@ -1014,7 +1014,7 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
 
     def test_browsers_property_returns_copy(self):
         """browsersプロパティの外部変更は内部状態に影響しない."""
-        from services import GameStateTracker, SessionRecorder, DailyStatsTracker
+        from src.core.services import GameStateTracker, SessionRecorder, DailyStatsTracker
 
         mock_recorder = MagicMock(spec=SessionRecorder)
         mock_daily_stats = MagicMock(spec=DailyStatsTracker)
@@ -1033,7 +1033,7 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
 
     def test_scan_result_dataclass(self):
         """ScanResultデータクラスが正しく動作する."""
-        from services import ScanResult
+        from src.core.services import ScanResult
         
         game1 = models.GameEntry(game_title="Test1", window_title="Test1")
         game2 = models.GameEntry(game_title="Test2", window_title="Test2")
@@ -1052,7 +1052,7 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
 
     def test_scan_with_no_games(self):
         """ゲームがない場合は空の結果を返す."""
-        from services import GameStateTracker, SessionRecorder, DailyStatsTracker
+        from src.core.services import GameStateTracker, SessionRecorder, DailyStatsTracker
         
         mock_recorder = MagicMock(spec=SessionRecorder)
         mock_daily_stats = MagicMock(spec=DailyStatsTracker)
@@ -1080,4 +1080,6 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
 

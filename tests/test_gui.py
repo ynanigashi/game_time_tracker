@@ -1,4 +1,4 @@
-﻿"""GUIモジュールのテスト（PySide6を必要としないユニットテスト）."""
+"""GUIモジュールのテスト（PySide6を必要としないユニットテスト）."""
 
 import unittest
 from datetime import date
@@ -8,8 +8,8 @@ from tests.test_stubs import install_stubs
 install_stubs()
 
 # Now import the gui module
-from main import DailyStatsTracker
-from time_utils import format_hms
+from src.core.services import DailyStatsTracker
+from src.core.time_utils import format_hms
 
 
 class TestDailyStatsTracker(unittest.TestCase):

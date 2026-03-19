@@ -1,4 +1,4 @@
-﻿# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false
+# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false
 """log_handler.py / gspread_service.py のユニットテスト."""
 
 import unittest
@@ -10,10 +10,10 @@ from unittest.mock import MagicMock, patch
 from tests.test_stubs import install_stubs, fake_gspread, FakeLogHandler
 install_stubs()
 
-from log_handler import LogHandler
-from gspread_service import GspreadService
-import models
-import services
+from src.infra.log_handler import LogHandler
+from src.infra.gspread_service import GspreadService
+from src.core import models
+from src.core import services
 
 
 class TestLogHandlerCache(unittest.TestCase):
@@ -270,10 +270,10 @@ class TestLogHandlerGetAndIncrementIndex(unittest.TestCase):
 class TestGspreadService(unittest.TestCase):
     """GspreadServiceのテスト."""
 
-    @patch('gspread_service.gspread.service_account')
+    @patch('src.infra.gspread_service.gspread.service_account')
     def test_init_stores_credentials(self, mock_sa):
         """初期化時に認証情報とシートキーを保存."""
-        from gspread_service import GspreadService
+        from src.infra.gspread_service import GspreadService
         
         mock_gc = MagicMock()
         mock_sheet = MagicMock()
@@ -285,10 +285,10 @@ class TestGspreadService(unittest.TestCase):
         self.assertEqual(service.cert_file_path, 'test.json')
         self.assertEqual(service.sheet_key, 'test_key')
 
-    @patch('gspread_service.gspread.service_account')
+    @patch('src.infra.gspread_service.gspread.service_account')
     def test_connect_success(self, mock_sa):
         """_connect()が正常に接続する."""
-        from gspread_service import GspreadService
+        from src.infra.gspread_service import GspreadService
         
         mock_gc = MagicMock()
         mock_sheet = MagicMock()
@@ -302,10 +302,10 @@ class TestGspreadService(unittest.TestCase):
         mock_gc.open_by_key.assert_called_with('test_key')
         self.assertIsNotNone(service.sheet)
 
-    @patch('gspread_service.gspread.service_account')
+    @patch('src.infra.gspread_service.gspread.service_account')
     def test_get_all_records_calls_connect(self, mock_sa):
         """get_all_records()が_connect()を呼び出す."""
-        from gspread_service import GspreadService
+        from src.infra.gspread_service import GspreadService
         
         mock_gc = MagicMock()
         mock_sheet = MagicMock()
@@ -319,10 +319,10 @@ class TestGspreadService(unittest.TestCase):
         self.assertEqual(result, [{'game': 'Test'}])
         mock_sheet.get_all_records.assert_called_once()
 
-    @patch('gspread_service.gspread.service_account')
+    @patch('src.infra.gspread_service.gspread.service_account')
     def test_append_row_success_returns_true(self, mock_sa):
         """append_row()が成功時にTrueを返す."""
-        from gspread_service import GspreadService
+        from src.infra.gspread_service import GspreadService
         
         mock_gc = MagicMock()
         mock_sheet = MagicMock()
@@ -335,10 +335,10 @@ class TestGspreadService(unittest.TestCase):
         self.assertTrue(result)
         mock_sheet.append_row.assert_called_once_with(['value1', 'value2'], value_input_option='USER_ENTERED')
 
-    @patch('gspread_service.gspread.service_account')
+    @patch('src.infra.gspread_service.gspread.service_account')
     def test_append_row_api_error_returns_false(self, mock_sa):
         """append_row()がAPIErrorで失敗時にFalseを返す."""
-        from gspread_service import GspreadService
+        from src.infra.gspread_service import GspreadService
         
         mock_gc = MagicMock()
         mock_sheet = MagicMock()
@@ -351,10 +351,10 @@ class TestGspreadService(unittest.TestCase):
         
         self.assertFalse(result)
 
-    @patch('gspread_service.gspread.service_account')
+    @patch('src.infra.gspread_service.gspread.service_account')
     def test_append_row_generic_exception_returns_false(self, mock_sa):
         """append_row()が一般例外で失敗時にFalseを返す."""
-        from gspread_service import GspreadService
+        from src.infra.gspread_service import GspreadService
         
         mock_gc = MagicMock()
         mock_sheet = MagicMock()
@@ -373,7 +373,7 @@ class TestLogHandlerGetTodayStats(unittest.TestCase):
 
     def test_get_today_stats_normal_records(self):
         """正常なレコードから統計を正しく集計."""
-        from log_handler import LogHandler
+        from src.infra.log_handler import LogHandler
         from datetime import datetime
         
         today = datetime.now().date()
@@ -491,10 +491,10 @@ class TestLogHandlerGetTodayStats(unittest.TestCase):
 class TestGspreadServiceSheetProperty(unittest.TestCase):
     """GspreadService.sheetプロパティのテスト."""
 
-    @patch('gspread_service.gspread.service_account')
+    @patch('src.infra.gspread_service.gspread.service_account')
     def test_sheet_property_returns_worksheet(self, mock_sa):
         """sheetプロパティがワークシートを返す."""
-        from gspread_service import GspreadService
+        from src.infra.gspread_service import GspreadService
         
         mock_gc = MagicMock()
         mock_sheet = MagicMock()
@@ -508,7 +508,7 @@ class TestGspreadServiceSheetProperty(unittest.TestCase):
 
     def test_sheet_property_raises_when_not_connected(self):
         """sheetプロパティが未接続時にRuntimeErrorを発生."""
-        from gspread_service import GspreadService
+        from src.infra.gspread_service import GspreadService
         
         service = GspreadService.__new__(GspreadService)
         service._sheet = None

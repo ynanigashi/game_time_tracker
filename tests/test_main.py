@@ -1,4 +1,4 @@
-﻿# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false, reportOptionalMemberAccess=false
+# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportCallIssue=false, reportOptionalMemberAccess=false
 
 import configparser
 import sys
@@ -13,16 +13,16 @@ import os
 from tests.test_stubs import install_stubs, fake_gspread, FakeLogHandler
 install_stubs()
 
-import main
-import models
-import services
-import time_utils
+from src.app import main
+from src.core import models
+from src.core import services
+from src.core import time_utils
 from tests.helpers.main_window_factory import (
     attach_window_title_stubs,
     create_mock_main_window,
 )
-from text_utils import normalize_title
-import window_state
+from src.core.text_utils import normalize_title
+from src.core import window_state
 
 # servicesモジュールにpygetwindowのスタブを設定
 import pygetwindow
@@ -753,11 +753,11 @@ class TestInitComponentsDirect(unittest.TestCase):
         
         mock_games = [models.GameEntry(game_title="Test", window_title="Test")]
         
-        with patch('main.ConfigLoader') as MockConfigLoader:
+        with patch('src.app.main.ConfigLoader') as MockConfigLoader:
             MockConfigLoader.return_value.load.return_value = mock_config
-            with patch('main.GameInfoLoader') as MockGameInfoLoader:
+            with patch('src.app.main.GameInfoLoader') as MockGameInfoLoader:
                 MockGameInfoLoader.return_value.load.return_value = mock_games
-                with patch('main.LogHandler') as MockLogHandler:
+                with patch('src.app.main.LogHandler') as MockLogHandler:
                     MockLogHandler.return_value = FakeLogHandler()
                     window._init_components()
         
@@ -771,9 +771,9 @@ class TestInitComponentsDirect(unittest.TestCase):
         
         mock_config = MagicMock()
         
-        with patch('main.ConfigLoader') as MockConfigLoader:
+        with patch('src.app.main.ConfigLoader') as MockConfigLoader:
             MockConfigLoader.return_value.load.return_value = mock_config
-            with patch('main.GameInfoLoader') as MockGameInfoLoader:
+            with patch('src.app.main.GameInfoLoader') as MockGameInfoLoader:
                 MockGameInfoLoader.return_value.load.return_value = []
                 window._init_components()
         
@@ -790,11 +790,11 @@ class TestInitComponentsDirect(unittest.TestCase):
         mock_config.window_scan.excluded_titles = []
         mock_games = [models.GameEntry(game_title="Test", window_title="Test")]
         
-        with patch('main.ConfigLoader') as MockConfigLoader:
+        with patch('src.app.main.ConfigLoader') as MockConfigLoader:
             MockConfigLoader.return_value.load.return_value = mock_config
-            with patch('main.GameInfoLoader') as MockGameInfoLoader:
+            with patch('src.app.main.GameInfoLoader') as MockGameInfoLoader:
                 MockGameInfoLoader.return_value.load.return_value = mock_games
-                with patch('main.LogHandler', side_effect=FileNotFoundError("service_account.json")):
+                with patch('src.app.main.LogHandler', side_effect=FileNotFoundError("service_account.json")):
                     window._init_components()
         
         self.assertTrue(window._disabled)
@@ -810,11 +810,11 @@ class TestInitComponentsDirect(unittest.TestCase):
         mock_config.window_scan.excluded_titles = []
         mock_games = [models.GameEntry(game_title="Test", window_title="Test")]
         
-        with patch('main.ConfigLoader') as MockConfigLoader:
+        with patch('src.app.main.ConfigLoader') as MockConfigLoader:
             MockConfigLoader.return_value.load.return_value = mock_config
-            with patch('main.GameInfoLoader') as MockGameInfoLoader:
+            with patch('src.app.main.GameInfoLoader') as MockGameInfoLoader:
                 MockGameInfoLoader.return_value.load.return_value = mock_games
-                with patch('main.LogHandler', side_effect=fake_gspread.exceptions.SpreadsheetNotFound()):
+                with patch('src.app.main.LogHandler', side_effect=fake_gspread.exceptions.SpreadsheetNotFound()):
                     window._init_components()
         
         self.assertTrue(window._disabled)
@@ -830,11 +830,11 @@ class TestInitComponentsDirect(unittest.TestCase):
         mock_config.window_scan.excluded_titles = []
         mock_games = [models.GameEntry(game_title="Test", window_title="Test")]
         
-        with patch('main.ConfigLoader') as MockConfigLoader:
+        with patch('src.app.main.ConfigLoader') as MockConfigLoader:
             MockConfigLoader.return_value.load.return_value = mock_config
-            with patch('main.GameInfoLoader') as MockGameInfoLoader:
+            with patch('src.app.main.GameInfoLoader') as MockGameInfoLoader:
                 MockGameInfoLoader.return_value.load.return_value = mock_games
-                with patch('main.LogHandler', side_effect=fake_gspread.exceptions.APIError("Quota")):
+                with patch('src.app.main.LogHandler', side_effect=fake_gspread.exceptions.APIError("Quota")):
                     window._init_components()
         
         self.assertTrue(window._disabled)
@@ -859,11 +859,11 @@ class TestInitComponentsDirect(unittest.TestCase):
         fake_gspread.exceptions.APIError = type('APIError', (ValueError,), {})  # 狭い継承
         
         try:
-            with patch('main.ConfigLoader') as MockConfigLoader:
+            with patch('src.app.main.ConfigLoader') as MockConfigLoader:
                 MockConfigLoader.return_value.load.return_value = mock_config
-                with patch('main.GameInfoLoader') as MockGameInfoLoader:
+                with patch('src.app.main.GameInfoLoader') as MockGameInfoLoader:
                     MockGameInfoLoader.return_value.load.return_value = mock_games
-                    with patch('main.LogHandler', side_effect=CustomNonGspreadError("Custom error")):
+                    with patch('src.app.main.LogHandler', side_effect=CustomNonGspreadError("Custom error")):
                         window._init_components()
             
             self.assertTrue(window._disabled)
@@ -971,7 +971,7 @@ class TestMainWindowEvents(unittest.TestCase):
         mock_timer = MagicMock()
         callback = MagicMock()
         
-        with patch('main.QTimer', return_value=mock_timer):
+        with patch('src.app.main.QTimer', return_value=mock_timer):
             # _start_timerのロジックを再現
             timer = mock_timer
             timer.setInterval(int(1.0 * 1000))
@@ -1386,7 +1386,7 @@ class TestBuildMainLayout(unittest.TestCase):
     def test_build_main_layout_returns_layout_widgets(self):
         """build_main_layoutはLayoutWidgetsを返す."""
         # PySide6のQWidgetをモックで置き換え
-        from gui_layout import build_main_layout, LayoutWidgets
+        from src.ui.gui_layout import build_main_layout, LayoutWidgets
         from PySide6.QtWidgets import QWidget, QApplication
         
         # QApplicationが必要なのでスキップ可能にする
@@ -1415,7 +1415,7 @@ class TestBuildMainLayout(unittest.TestCase):
 
     def test_layout_widgets_has_height_constants(self):
         """LayoutWidgetsは高さ定数を持つ."""
-        from gui_layout import LayoutWidgets
+        from src.ui.gui_layout import LayoutWidgets
         from PySide6.QtWidgets import QWidget, QApplication, QLabel, QListWidget, QTableWidget
         
         try:
@@ -1537,7 +1537,7 @@ class TestMainWindowEventsDirect(unittest.TestCase):
         callback = MagicMock()
         
         mock_timer = MagicMock()
-        with patch('main.QTimer', return_value=mock_timer):
+        with patch('src.app.main.QTimer', return_value=mock_timer):
             # _start_timerの実装を再現
             timer = main.QTimer(window)
             timer.setInterval(int(1.0 * 1000))
@@ -2060,7 +2060,7 @@ class TestStartTimerRealMethod(unittest.TestCase):
         
         callback = MagicMock()
         
-        with patch('main.QTimer') as MockQTimer:
+        with patch('src.app.main.QTimer') as MockQTimer:
             mock_timer = MagicMock()
             MockQTimer.return_value = mock_timer
             
@@ -2209,8 +2209,8 @@ class TestMainEntryPoint(unittest.TestCase):
 
     def test_main_creates_qapplication(self):
         """main()がQApplicationを作成する."""
-        with patch('main.QApplication') as MockQApp:
-            with patch('main.MainWindow') as MockWindow:
+        with patch('src.app.main.QApplication') as MockQApp:
+            with patch('src.app.main.MainWindow') as MockWindow:
                 mock_app = MagicMock()
                 mock_app.exec.return_value = 0
                 MockQApp.return_value = mock_app
@@ -2226,8 +2226,8 @@ class TestMainEntryPoint(unittest.TestCase):
 
     def test_main_creates_and_shows_window(self):
         """main()がMainWindowを作成してshow()する."""
-        with patch('main.QApplication') as MockQApp:
-            with patch('main.MainWindow') as MockWindow:
+        with patch('src.app.main.QApplication') as MockQApp:
+            with patch('src.app.main.MainWindow') as MockWindow:
                 mock_app = MagicMock()
                 mock_app.exec.return_value = 0
                 MockQApp.return_value = mock_app
@@ -2245,8 +2245,8 @@ class TestMainEntryPoint(unittest.TestCase):
 
     def test_main_calls_app_exec(self):
         """main()がapp.exec()を呼び出す."""
-        with patch('main.QApplication') as MockQApp:
-            with patch('main.MainWindow') as MockWindow:
+        with patch('src.app.main.QApplication') as MockQApp:
+            with patch('src.app.main.MainWindow') as MockWindow:
                 mock_app = MagicMock()
                 mock_app.exec.return_value = 0
                 MockQApp.return_value = mock_app
@@ -2262,8 +2262,8 @@ class TestMainEntryPoint(unittest.TestCase):
 
     def test_main_exits_with_exec_return_value(self):
         """main()がapp.exec()の戻り値でsys.exit()する."""
-        with patch('main.QApplication') as MockQApp:
-            with patch('main.MainWindow') as MockWindow:
+        with patch('src.app.main.QApplication') as MockQApp:
+            with patch('src.app.main.MainWindow') as MockWindow:
                 mock_app = MagicMock()
                 mock_app.exec.return_value = 42  # 任意の終了コード
                 MockQApp.return_value = mock_app
@@ -2677,4 +2677,7 @@ class TestOvertimeAlertMethods(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
 
