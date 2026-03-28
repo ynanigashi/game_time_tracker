@@ -115,6 +115,7 @@ OVERLAY_SAMPLE_RATIOS: Tuple[Tuple[float, float], ...] = (
     (0.25, 0.75),
     (0.75, 0.75),
 )
+OVERLAY_COVERED_POINTS_THRESHOLD = 2
 OVERTIME_ALERT_THRESHOLDS_MINUTES: Tuple[int, ...] = (45, 50, 55, 58, 60)
 TDependency = TypeVar("TDependency")
 
@@ -754,7 +755,13 @@ class MainWindow(QWidget):
             return None
         return self._window_rect(foreground_hwnd)
 
-    def _find_covering_foreign_window_at_point(self, x: int, y: int) -> int:
+    def _find_covering_foreign_window_at_point(
+        self,
+        x: int,
+        y: int,
+        *,
+        expected_root_hwnd: Optional[int] = None,
+    ) -> int:
         """点を覆う「自ウィンドウ以外」のHWNDを探索して返す。"""
         hwnd = self._window_at_point(x, y)
         if hwnd == 0:
@@ -770,6 +777,12 @@ class MainWindow(QWidget):
             if not self._is_own_window(hwnd):
                 hwnd_rect = self._window_rect(hwnd)
                 if hwnd_rect is not None and self._rect_contains_point(hwnd_rect, x, y):
+                    if expected_root_hwnd is not None:
+                        candidate_root = self._root_window(hwnd)
+                        if candidate_root != expected_root_hwnd:
+                            hwnd = self._window_below(hwnd)
+                            walk_count += 1
+                            continue
                     return hwnd
             hwnd = self._window_below(hwnd)
             walk_count += 1
@@ -778,31 +791,53 @@ class MainWindow(QWidget):
             logger.debug("overlay z-order walk reached MAX_Z_WALK=%s", MAX_Z_WALK)
         return 0
 
-    def _is_today_display_covered_by_foreground_window(self) -> bool:
-        """today_time_displayのサンプル点が他ウィンドウに覆われているか判定する."""
+    def _get_today_display_cover_state(self) -> Tuple[bool, str]:
+        """today_time_displayの被覆判定結果と理由を返す."""
         target = self._get_today_time_display()
         if target is None:
-            return False
+            return False, "target_missing"
 
         target_rect = self._global_rect_of_widget(target)
         if target_rect is None:
-            return False
+            return False, "target_rect_missing"
 
         # 前面ウィンドウの外接矩形が対象領域と交差しない場合は未被覆扱いにする。
         foreground_rect = self._foreground_rect_if_foreign()
         if foreground_rect is None:
-            return False
-
-        target_rect_native = self._to_native_rect(target_rect)
-        if not self._rects_intersect(target_rect_native, foreground_rect):
-            return False
+            return False, "foreground_not_foreign"
+        foreground_hwnd = get_foreground_hwnd()
+        if foreground_hwnd == 0:
+            return False, "foreground_not_foreign"
+        foreground_root_hwnd = self._root_window(foreground_hwnd)
+        if foreground_root_hwnd == 0:
+            return False, "foreground_root_missing"
 
         sample_points = self._sample_points_from_rect(target_rect)
-        return any(
-            self._find_covering_foreign_window_at_point(
-                *self._to_native_point(x, y)) != 0
-            for x, y in sample_points
-        )
+
+        def count_covering_foreign_points(*, use_native_points: bool) -> int:
+            return sum(
+                1
+                for x, y in sample_points
+                if self._find_covering_foreign_window_at_point(
+                    *(self._to_native_point(x, y) if use_native_points else (x, y)),
+                    expected_root_hwnd=foreground_root_hwnd,
+                ) != 0
+            )
+
+        target_rect_native = self._to_native_rect(target_rect)
+        if self._rects_intersect(target_rect_native, foreground_rect):
+            covered_points = count_covering_foreign_points(use_native_points=True)
+            if covered_points >= OVERLAY_COVERED_POINTS_THRESHOLD:
+                return True, "covered_native_points"
+            if covered_points > 0:
+                return False, "covered_native_points_below_threshold"
+
+        return False, "no_cover_detected"
+
+    def _is_today_display_covered_by_foreground_window(self) -> bool:
+        """today_time_displayのサンプル点が他ウィンドウに覆われているか判定する."""
+        covered, _ = self._get_today_display_cover_state()
+        return covered
 
     def _should_show_overlay(self) -> bool:
         """メインウィンドウ背面かつtoday表示部が重なっている時のみオーバーレイ表示."""

@@ -1,6 +1,7 @@
 """MainWindow の補助コンポーネント群。"""
 
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -83,11 +84,11 @@ class TodayTimeOverlayWindow(QWidget):
         self.resize(OVERLAY_FALLBACK_WIDTH, OVERLAY_FALLBACK_HEIGHT)
 
     @staticmethod
-    def _window_flag(flag_name: str) -> int:
+    def _window_flag(flag_name: str) -> Any:
         window_type = getattr(Qt, "WindowType", None)
         if window_type is not None and hasattr(window_type, flag_name):
-            return int(cast(Any, getattr(window_type, flag_name)))
-        return int(cast(Any, getattr(Qt, flag_name, 0)))
+            return getattr(window_type, flag_name)
+        return getattr(Qt, flag_name, 0)
 
     @staticmethod
     def _widget_attribute(attribute_name: str) -> Optional[object]:
@@ -108,7 +109,7 @@ class TodayTimeOverlayWindow(QWidget):
             | self._window_flag("WindowStaysOnTopHint")
             | self._window_flag("WindowTransparentForInput")
         )
-        self.setWindowFlags(cast(Any, flags))
+        self.setWindowFlags(flags)
         self.setWindowOpacity(0.88)
 
         self._set_widget_attribute("WA_TranslucentBackground")
@@ -475,6 +476,9 @@ class MainWindowOverlayController:
 
     def __init__(self, owner: "MainWindow") -> None:
         self.owner = owner
+        self._last_overlay_should_show: Optional[bool] = None
+        self._last_overlay_reason: Optional[str] = None
+        self._last_overlay_log_monotonic: float = 0.0
 
     def initialize_overlay(self) -> None:
         """今日のプレイ時間オーバーレイを初期化する."""
@@ -513,19 +517,56 @@ class MainWindowOverlayController:
             logger.debug("オーバーレイジオメトリの同期に失敗", exc_info=True)
             return
 
-    def should_show_overlay(self) -> bool:
-        """メインウィンドウ背面かつtoday表示部が重なっている時のみ表示."""
+    def _evaluate_overlay_visibility(self) -> Tuple[bool, str]:
+        """オーバーレイ表示可否と理由を返す."""
         if not self.owner._is_overtime_alert_enabled():
-            return False
+            return False, "overtime_alert_disabled"
 
         is_minimized = getattr(self.owner, "isMinimized", lambda: False)()
         is_visible = getattr(self.owner, "isVisible", lambda: True)()
-        is_active = getattr(self.owner, "isActiveWindow", lambda: False)()
         if is_minimized or not is_visible:
-            return False
-        if is_active:
-            return False
-        return self.owner._is_today_display_covered_by_foreground_window()
+            return False, "window_hidden_or_minimized"
+
+        # QtのisActiveWindowは環境差で不安定なケースがあるため、
+        # Win32の前面ウィンドウ判定を優先する。
+        if self.owner._foreground_rect_if_foreign() is None:
+            return False, "window_foreground_or_no_foreign"
+
+        cover_state_getter = getattr(self.owner, "_get_today_display_cover_state", None)
+        if callable(cover_state_getter):
+            covered, cover_reason = cast(Tuple[bool, str], cover_state_getter())
+        else:
+            covered = bool(self.owner._is_today_display_covered_by_foreground_window())
+            cover_reason = "covered_legacy" if covered else "not_covered_legacy"
+
+        if covered:
+            return True, cover_reason
+        return False, cover_reason
+
+    def should_show_overlay(self) -> bool:
+        """メインウィンドウ背面かつtoday表示部が重なっている時のみ表示."""
+        should_show, _ = self._evaluate_overlay_visibility()
+        return should_show
+
+    def _log_overlay_visibility(self, should_show: bool, reason: str) -> None:
+        """判定理由を状態変化時または定期的にINFO出力する。"""
+        now = time.monotonic()
+        state_changed = (
+            self._last_overlay_should_show != should_show
+            or self._last_overlay_reason != reason
+        )
+        should_log = state_changed or (now - self._last_overlay_log_monotonic >= 5.0)
+        if not should_log:
+            return
+
+        logger.info(
+            "overlay visibility: %s (%s)",
+            "show" if should_show else "hide",
+            reason,
+        )
+        self._last_overlay_should_show = should_show
+        self._last_overlay_reason = reason
+        self._last_overlay_log_monotonic = now
 
     def sync_overlay_visibility(self) -> None:
         """表示条件に応じてオーバーレイを表示/非表示する."""
@@ -538,7 +579,10 @@ class MainWindowOverlayController:
         if was_visible:
             overlay_window.hide()
 
-        if self.owner._should_show_overlay():
+        should_show, reason = self._evaluate_overlay_visibility()
+        self._log_overlay_visibility(should_show, reason)
+
+        if should_show:
             overlay_window.show()
         else:
             overlay_window.hide()
