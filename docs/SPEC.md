@@ -3,6 +3,12 @@
 ## 目的
 Windows PC で実行中のゲームをウィンドウタイトルから自動検出し、プレイ時間を Google スプレッドシートに記録するツール。
 
+## 運用前提（配布形態）
+- 通常利用は GitHub Releases で配布する Windows EXE を前提とする。
+- `config.ini` / `service_account.json` は EXE に同梱せず、実行時に外部ファイルとして参照する。
+- 既定では EXE と同じディレクトリの `config.ini` を読み込む。
+- ソースコード実行（`python main.py`）は開発・検証用途とする。
+
 ## クラス構成図
 
 ### ファイル別クラス一覧

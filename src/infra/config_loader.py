@@ -1,8 +1,21 @@
 import configparser
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List
 
-DEFAULT_CONFIG_FILE = 'config.ini'
+
+def _resolve_default_config_file() -> str:
+    """デフォルトのconfig.iniパスを解決する。"""
+    if getattr(sys, 'frozen', False):
+        # PyInstaller実行時はEXEと同じディレクトリを基準にする。
+        return str(Path(sys.executable).resolve().parent / 'config.ini')
+
+    # ソース実行時はリポジトリルートを基準にする。
+    return str(Path(__file__).resolve().parents[2] / 'config.ini')
+
+
+DEFAULT_CONFIG_FILE = _resolve_default_config_file()
 
 DEFAULT_BROWSERS = [
     'Google Chrome',

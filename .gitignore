@@ -11,6 +11,9 @@ __pycache__/
 # Runtime artifacts
 window_state.txt
 game_time_tracker.log
+build/
+dist/
+*.spec
 
 # Local secrets / local config
 config.ini

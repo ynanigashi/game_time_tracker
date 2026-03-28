@@ -17,17 +17,15 @@ Windows PC で起動しているアプリケーションのウィンドウタイ
 
 ## 動作環境
 - **OS**: Windows 11
-- **Python**: 3.10 以上
+- **利用者**: Python 不要（配布 EXE を使用）
+- **開発者**: Python 3.10 以上
 
-## セットアップ
+## 利用者向けセットアップ（EXE）
 
-### 1. Python 環境の構築
-```powershell
-python -m venv .venv
-.\.venv\Scripts\activate
-pip install -r requirements.txt
-```
-- `pygetwindow` を Windows で利用するには `pywin32` が必要です（requirements に含めています）。
+### 1. EXE の入手
+- GitHub Releases から `game_time_tracker-windows.zip` をダウンロードして展開します。
+- ZIP には `game_time_tracker.exe` / `config.ini.example` / `README.md` が含まれます。
+- セキュリティのため、`config.ini` と `service_account.json` は同梱しません。
 
 ### 2. Google スプレッドシートの準備
 1) **Google Cloud でサービスアカウントを作成**
@@ -60,14 +58,8 @@ pip install -r requirements.txt
      ```
 
 5) **接続確認（任意）**
-   ```powershell
-   python - <<'PY'
-   import gspread
-   gc = gspread.service_account(filename="service_account.json")
-   sh = gc.open_by_key("<sheet_key>")
-   print([ws.title for ws in sh.worksheets()])
-   PY
-   ```
+  - 初回起動時にエラーが出ないことをもって接続確認とするのが簡単です。
+  - 開発者がPythonで検証したい場合は、後述の「開発向け」を参照してください。
 
 ### 3. ゲーム情報の登録
 ゲーム情報シートに、プレイするゲームの情報を登録します：
@@ -87,10 +79,8 @@ pip install -r requirements.txt
 
 ### GUI での起動（メイン機能）
 
-#### PowerShell での起動
-```powershell
-python main.py
-```
+#### EXE で起動（推奨）
+- `game_time_tracker.exe` を起動します。
 - プレイ中のゲームと経過時間、現在のウィンドウタイトルを一覧表示します。
 - maxモードの「現在のウィンドウタイトル」一覧は、行をクリックするとそのタイトル文字列をクリップボードにコピーできます。
 - スプレッドシートへの記録タイミングや検出ロジックは自動です。
@@ -115,11 +105,9 @@ python main.py
   - ゲーム記録時のみスプレッドシートへ書き込み、同時にキャッシュも更新
   - 冗長な読み込みを排除し、API呼び出しを大幅に削減
 
-#### Windows バッチファイルでの起動（推奨）
-```powershell
-.\game_time_tracker.bat
-```
-Windows タスクスケジューラで定期実行したい場合は、このバッチファイルを登録してください。
+#### 設定ファイルの配置（EXE）
+- `config.ini` は EXE と同じフォルダから読み込まれます。
+- `service_account.json` も同じフォルダに置く運用を推奨します（`config.ini` 側で相対パス指定可能）。
 
 #### 実行時の動作
 起動すると、1秒間隔（`POLL_INTERVAL_SECONDS = 1`）で起動中のウィンドウをスキャンします：
@@ -143,9 +131,10 @@ Windows タスクスケジューラで定期実行したい場合は、このバ
 - [src/infra/config_loader.py](src/infra/config_loader.py) : `config.ini` の読み込みと設定値管理。ブラウザ判定/除外タイトルはここで定義。
 
 ### 設定・その他
-- [game_time_tracker.bat](game_time_tracker.bat) : Windows バッチファイル。仮想環境を有効化して main.py を実行（日々の起動はこちらから）。
+- [game_time_tracker.bat](game_time_tracker.bat) : 開発者向けのWindowsバッチファイル。仮想環境を有効化して main.py を実行。
 - [config.ini](config.ini) : スプレッドシートのキーや認証情報を指定。
 - [service_account.json](service_account.json) : Google Cloud サービスアカウント秘密鍵（.gitignore で除外）。
+- [.github/workflows/release-exe.yml](.github/workflows/release-exe.yml) : GitHub Releases 公開時に Windows EXE を自動ビルドして添付。
 
 ## 設定ファイル（config.ini）
 ```ini
