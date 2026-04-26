@@ -16,6 +16,7 @@ class GameEntry:
     window_title: str
     play_with_friends: bool = False
     is_browser_game: bool = False
+    game_id: str = field(default="", compare=False)
     is_playing: bool = field(default=False, compare=False)
     start_time: Optional[datetime] = field(default=None, compare=False)
     inactive_since: Optional[datetime] = field(default=None, compare=False)

@@ -130,6 +130,9 @@ class FakeWidget:
     def isVisible(self) -> bool:
         return bool(getattr(self, "visible", False))
 
+    def setEnabled(self, value: bool) -> None:
+        self.enabled = value
+
     def accept(self) -> None:
         self.accepted = True
 
@@ -159,6 +162,68 @@ class FakeTextEdit(FakeWidget):
 
     def toPlainText(self) -> str:
         return self._text
+
+
+class FakeComboBox(FakeWidget):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.items: List[Tuple[str, Any]] = []
+        self.current_index = -1
+        self.currentIndexChanged = FakeSignal()
+
+    def addItem(self, text: str, user_data: Any = None) -> None:
+        self.items.append((text, user_data))
+        if self.current_index < 0:
+            self.current_index = 0
+
+    def findData(self, data: Any) -> int:
+        for index, item in enumerate(self.items):
+            if item[1] == data:
+                return index
+        return -1
+
+    def setCurrentIndex(self, index: int) -> None:
+        self.current_index = index
+
+    def currentData(self) -> Any:
+        if 0 <= self.current_index < len(self.items):
+            return self.items[self.current_index][1]
+        return None
+
+
+class FakeTableWidget(FakeWidget):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.itemSelectionChanged = FakeSignal()
+        self.row_count = 0
+        self.column_count = 0
+        self.items: Dict[Tuple[int, int], Any] = {}
+        self.current_row = -1
+
+    def setColumnCount(self, count: int) -> None:
+        self.column_count = count
+
+    def setHorizontalHeaderLabels(self, labels: List[str]) -> None:
+        self.header_labels = labels
+
+    def setColumnHidden(self, column: int, hidden: bool) -> None:
+        self.hidden_column = (column, hidden)
+
+    def setRowCount(self, count: int) -> None:
+        self.row_count = count
+        if count == 0:
+            self.current_row = -1
+
+    def setItem(self, row: int, column: int, item: Any) -> None:
+        self.items[(row, column)] = item
+        if self.current_row < 0:
+            self.current_row = row
+
+    def item(self, row: int, column: int) -> Any:
+        return self.items.get((row, column))
+
+    def currentRow(self) -> int:
+        return self.current_row
 
 
 class FakeLabel(FakeWidget):
@@ -257,7 +322,7 @@ fake_pyside6_widgets: Any = types.SimpleNamespace(
     QApplication=FakeQApplication,
     QWidget=FakeQWidget,
     QTableWidgetItem=FakeQTableWidgetItem,
-    QCheckBox=type("QCheckBox", (), {}),
+    QCheckBox=FakeButton,
     QPushButton=FakeButton,
     QLabel=FakeLabel,
     QFileDialog=FakeFileDialog,
@@ -268,7 +333,7 @@ fake_pyside6_widgets: Any = types.SimpleNamespace(
     QLineEdit=FakeLineEdit,
     QMessageBox=FakeMessageBox,
     QTextEdit=FakeTextEdit,
-    QComboBox=FakeWidget,
+    QComboBox=FakeComboBox,
     QTabWidget=FakeWidget,
     QAbstractItemView=type(
         "QAbstractItemView",
@@ -280,7 +345,7 @@ fake_pyside6_widgets: Any = types.SimpleNamespace(
     ),
     QVBoxLayout=FakeLayout,
     QHBoxLayout=FakeLayout,
-    QTableWidget=type("QTableWidget", (), {}),
+    QTableWidget=FakeTableWidget,
     QHeaderView=type("QHeaderView", (), {}),
     QMenu=FakeMenu,
 )

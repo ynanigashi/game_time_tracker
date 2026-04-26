@@ -73,6 +73,7 @@ class TestConfigLoaderValidation(unittest.TestCase):
         config_path = os.path.join(self.temp_dir, 'test_config.ini')
         with open(config_path, 'w', encoding='utf-8') as f:
             f.write("[LOGHANDLER]\njson_file_path=test.json\nsheet_key=log_key\n")
+            f.write("sheet_gid=456\n")
             f.write("[GAMEINFO]\nsheet_key=game_key\nsheet_gid=12345\n")
 
         from src.infra import config_loader
@@ -80,8 +81,48 @@ class TestConfigLoaderValidation(unittest.TestCase):
 
         self.assertEqual(cfg.log_handler.cert_file_path, 'test.json')
         self.assertEqual(cfg.log_handler.sheet_key, 'log_key')
+        self.assertEqual(cfg.log_handler.backup_mode, 'spreadsheet')
+        self.assertEqual(cfg.log_handler.sheet_gid, 456)
         self.assertEqual(cfg.game_info.sheet_key, 'game_key')
         self.assertEqual(cfg.game_info.sheet_gid, 12345)
+
+    def test_local_only_mode_does_not_require_log_sheet_key(self):
+        """ローカルのみ運用ではログシート key を省略できる."""
+        config_path = os.path.join(self.temp_dir, 'test_config.ini')
+        with open(config_path, 'w', encoding='utf-8') as f:
+            f.write("[LOGHANDLER]\njson_file_path=test.json\n")
+            f.write("backup_mode=local_only\n")
+            f.write("[GAMEINFO]\nsheet_key=game_key\nsheet_gid=12345\n")
+
+        from src.infra import config_loader
+        cfg = config_loader.ConfigLoader(config_path).load()
+
+        self.assertEqual(cfg.log_handler.sheet_key, '')
+        self.assertEqual(cfg.log_handler.backup_mode, 'local_only')
+
+    def test_invalid_backup_mode_raises_value_error(self):
+        """backup_mode が不正な場合はValueErrorを送出."""
+        config_path = os.path.join(self.temp_dir, 'test_config.ini')
+        with open(config_path, 'w', encoding='utf-8') as f:
+            f.write("[LOGHANDLER]\njson_file_path=test.json\nsheet_key=log_key\n")
+            f.write("backup_mode=unknown\n")
+            f.write("[GAMEINFO]\nsheet_key=game_key\nsheet_gid=12345\n")
+
+        from src.infra import config_loader
+        with self.assertRaises(ValueError):
+            config_loader.ConfigLoader(config_path)
+
+    def test_invalid_sync_conflict_policy_raises_value_error(self):
+        """sync_conflict_policy が不正な場合はValueErrorを送出."""
+        config_path = os.path.join(self.temp_dir, 'test_config.ini')
+        with open(config_path, 'w', encoding='utf-8') as f:
+            f.write("[LOGHANDLER]\njson_file_path=test.json\nsheet_key=log_key\n")
+            f.write("sync_conflict_policy=unknown\n")
+            f.write("[GAMEINFO]\nsheet_key=game_key\nsheet_gid=12345\n")
+
+        from src.infra import config_loader
+        with self.assertRaises(ValueError):
+            config_loader.ConfigLoader(config_path)
 
 
 class TestConfigLoaderGetList(unittest.TestCase):

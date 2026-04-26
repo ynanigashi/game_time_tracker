@@ -35,6 +35,14 @@ def default_settings_db_file() -> Path:
     return runtime_path("data", "settings.sqlite3")
 
 
+def default_play_log_db_file() -> Path:
+    return runtime_path("data", "play_logs.sqlite3")
+
+
+def default_game_catalog_db_file() -> Path:
+    return runtime_path("data", "game_catalog.sqlite3")
+
+
 def legacy_config_file() -> Path:
     return runtime_path("config.ini")
 

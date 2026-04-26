@@ -4,6 +4,7 @@ import logging
 from typing import Callable, Optional
 
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -18,7 +19,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.infra.config_loader import DEFAULT_BROWSERS, DEFAULT_EXCLUDED_TITLES
+from src.infra.config_loader import (
+    DEFAULT_BROWSERS,
+    DEFAULT_EXCLUDED_TITLES,
+    PLAY_LOG_BACKUP_MODE_LOCAL_ONLY,
+    PLAY_LOG_BACKUP_MODE_SPREADSHEET,
+    PLAY_LOG_SYNC_CONFLICT_NEW_ID,
+    PLAY_LOG_SYNC_CONFLICT_OVERWRITE,
+)
 from src.infra.runtime_paths import resolve_config_file
 from src.infra.settings_config import (
     EditableAppConfig,
@@ -51,6 +59,28 @@ class SettingsDialog(QDialog):
         self.json_file_browse_button = QPushButton("参照...", self)
         self.json_file_browse_button.clicked.connect(self._select_json_file)
         self.log_sheet_key_edit = QLineEdit(self)
+        self.log_sheet_gid_edit = QLineEdit(self)
+        self.play_log_backup_mode_combo = QComboBox(self)
+        self.play_log_backup_mode_combo.addItem(
+            "ローカルのみで運用",
+            PLAY_LOG_BACKUP_MODE_LOCAL_ONLY,
+        )
+        self.play_log_backup_mode_combo.addItem(
+            "スプレッドシートにバックアップ",
+            PLAY_LOG_BACKUP_MODE_SPREADSHEET,
+        )
+        self.play_log_backup_mode_combo.currentIndexChanged.connect(
+            self._sync_backup_mode_fields
+        )
+        self.sync_conflict_policy_combo = QComboBox(self)
+        self.sync_conflict_policy_combo.addItem(
+            "スプシを上書き",
+            PLAY_LOG_SYNC_CONFLICT_OVERWRITE,
+        )
+        self.sync_conflict_policy_combo.addItem(
+            "別IDで追加",
+            PLAY_LOG_SYNC_CONFLICT_NEW_ID,
+        )
         self.game_info_sheet_key_edit = QLineEdit(self)
         self.game_info_sheet_gid_edit = QLineEdit(self)
         self.browsers_edit = QTextEdit(self)
@@ -74,7 +104,10 @@ class SettingsDialog(QDialog):
         json_file_layout.addWidget(self.json_file_browse_button)
 
         form.addRow("認証JSON", json_file_row)
+        form.addRow("プレイログ保存", self.play_log_backup_mode_combo)
         form.addRow("ログシート key", self.log_sheet_key_edit)
+        form.addRow("ログシート sheet_gid", self.log_sheet_gid_edit)
+        form.addRow("ID重複時", self.sync_conflict_policy_combo)
         form.addRow("ゲーム情報シート key", self.game_info_sheet_key_edit)
         form.addRow("ゲーム情報 sheet_gid", self.game_info_sheet_gid_edit)
         form.addRow("対象ブラウザ", self.browsers_edit)
@@ -101,7 +134,23 @@ class SettingsDialog(QDialog):
 
     def _apply_config(self, config: EditableAppConfig) -> None:
         self.json_file_path_edit.setText(config.json_file_path)
+        backup_mode_index = self.play_log_backup_mode_combo.findData(
+            config.play_log_backup_mode
+        )
+        self.play_log_backup_mode_combo.setCurrentIndex(
+            backup_mode_index if backup_mode_index >= 0 else 1
+        )
         self.log_sheet_key_edit.setText(config.log_sheet_key)
+        self.log_sheet_gid_edit.setText(
+            "" if config.log_sheet_gid is None else str(config.log_sheet_gid)
+        )
+        conflict_policy_index = self.sync_conflict_policy_combo.findData(
+            config.sync_conflict_policy
+        )
+        self.sync_conflict_policy_combo.setCurrentIndex(
+            conflict_policy_index if conflict_policy_index >= 0 else 0
+        )
+        self._sync_backup_mode_fields()
         self.game_info_sheet_key_edit.setText(config.game_info_sheet_key)
         self.game_info_sheet_gid_edit.setText(str(config.game_info_sheet_gid))
         self.browsers_edit.setPlainText(list_to_text(config.browsers))
@@ -149,6 +198,9 @@ class SettingsDialog(QDialog):
                 game_info_sheet_gid=0,
                 browsers=list(DEFAULT_BROWSERS),
                 excluded_titles=list(DEFAULT_EXCLUDED_TITLES),
+                play_log_backup_mode=PLAY_LOG_BACKUP_MODE_SPREADSHEET,
+                log_sheet_gid=None,
+                sync_conflict_policy=PLAY_LOG_SYNC_CONFLICT_OVERWRITE,
             )
 
         self._apply_config(config)
@@ -158,9 +210,17 @@ class SettingsDialog(QDialog):
             sheet_gid = int(self.game_info_sheet_gid_edit.text().strip())
         except ValueError as exc:
             raise ValueError("ゲーム情報 sheet_gid は整数で指定してください") from exc
+        log_sheet_gid_text = self.log_sheet_gid_edit.text().strip()
+        try:
+            log_sheet_gid = int(log_sheet_gid_text) if log_sheet_gid_text else None
+        except ValueError as exc:
+            raise ValueError("ログシート sheet_gid は整数で指定してください") from exc
 
         return EditableAppConfig(
             json_file_path=self.json_file_path_edit.text().strip(),
+            play_log_backup_mode=str(self.play_log_backup_mode_combo.currentData()),
+            log_sheet_gid=log_sheet_gid,
+            sync_conflict_policy=str(self.sync_conflict_policy_combo.currentData()),
             log_sheet_key=self.log_sheet_key_edit.text().strip(),
             game_info_sheet_key=self.game_info_sheet_key_edit.text().strip(),
             game_info_sheet_gid=sheet_gid,
@@ -173,6 +233,15 @@ class SettingsDialog(QDialog):
                 list(DEFAULT_EXCLUDED_TITLES),
             ),
         )
+
+    def _sync_backup_mode_fields(self, *_args) -> None:
+        backup_enabled = (
+            self.play_log_backup_mode_combo.currentData()
+            == PLAY_LOG_BACKUP_MODE_SPREADSHEET
+        )
+        self.log_sheet_key_edit.setEnabled(backup_enabled)
+        self.log_sheet_gid_edit.setEnabled(backup_enabled)
+        self.sync_conflict_policy_combo.setEnabled(backup_enabled)
 
     def _save(self) -> None:
         try:

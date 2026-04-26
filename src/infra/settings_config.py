@@ -9,6 +9,10 @@ from src.infra.config_loader import (
     ConfigLoader,
     DEFAULT_BROWSERS,
     DEFAULT_EXCLUDED_TITLES,
+    PLAY_LOG_BACKUP_MODES,
+    PLAY_LOG_BACKUP_MODE_SPREADSHEET,
+    PLAY_LOG_SYNC_CONFLICT_OVERWRITE,
+    PLAY_LOG_SYNC_CONFLICT_POLICIES,
 )
 from src.infra.runtime_paths import resolve_config_file
 from src.infra.settings_store import SettingsStore
@@ -24,6 +28,9 @@ class EditableAppConfig:
     game_info_sheet_gid: int
     browsers: list[str]
     excluded_titles: list[str]
+    play_log_backup_mode: str = PLAY_LOG_BACKUP_MODE_SPREADSHEET
+    log_sheet_gid: Optional[int] = None
+    sync_conflict_policy: str = PLAY_LOG_SYNC_CONFLICT_OVERWRITE
 
 
 def _split_lines_or_commas(value: str) -> list[str]:
@@ -52,6 +59,9 @@ def _typed_config_to_editable(loader: ConfigLoader) -> EditableAppConfig:
         game_info_sheet_gid=config.game_info.sheet_gid,
         browsers=list(config.window_scan.browsers),
         excluded_titles=list(config.window_scan.excluded_titles),
+        play_log_backup_mode=config.log_handler.backup_mode,
+        log_sheet_gid=config.log_handler.sheet_gid,
+        sync_conflict_policy=config.log_handler.sync_conflict_policy,
     )
 
 
@@ -69,16 +79,23 @@ def load_editable_config(
 
 
 def validate_editable_config(config: EditableAppConfig) -> None:
+    if config.play_log_backup_mode not in PLAY_LOG_BACKUP_MODES:
+        raise ValueError("プレイログ保存モードが不正です")
+    if config.sync_conflict_policy not in PLAY_LOG_SYNC_CONFLICT_POLICIES:
+        raise ValueError("プレイログ同期の重複ID処理が不正です")
     required = {
         "json_file_path": config.json_file_path,
-        "log_sheet_key": config.log_sheet_key,
         "game_info_sheet_key": config.game_info_sheet_key,
     }
+    if config.play_log_backup_mode == PLAY_LOG_BACKUP_MODE_SPREADSHEET:
+        required["log_sheet_key"] = config.log_sheet_key
     missing = [key for key, value in required.items() if not value.strip()]
     if missing:
         raise ValueError(f"必須項目が未入力です: {', '.join(missing)}")
     if int(config.game_info_sheet_gid) < 0:
         raise ValueError("sheet_gid は0以上の整数で指定してください")
+    if config.log_sheet_gid is not None and int(config.log_sheet_gid) < 0:
+        raise ValueError("ログシート sheet_gid は0以上の整数で指定してください")
 
 
 def editable_config_to_parser(config: EditableAppConfig) -> configparser.ConfigParser:
@@ -87,6 +104,9 @@ def editable_config_to_parser(config: EditableAppConfig) -> configparser.ConfigP
     parser["LOGHANDLER"] = {
         "json_file_path": config.json_file_path.strip(),
         "sheet_key": config.log_sheet_key.strip(),
+        "backup_mode": config.play_log_backup_mode.strip(),
+        "sheet_gid": "" if config.log_sheet_gid is None else str(int(config.log_sheet_gid)),
+        "sync_conflict_policy": config.sync_conflict_policy.strip(),
     }
     parser["GAMEINFO"] = {
         "sheet_key": config.game_info_sheet_key.strip(),

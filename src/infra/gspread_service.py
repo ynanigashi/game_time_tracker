@@ -87,3 +87,41 @@ class GspreadService:
         except Exception as e:
             logger.error('行の追加中に例外が発生しました: %s', e)
             return False
+
+    def update_row_by_record_id(self, record_id: str, values: List[Any]) -> bool:
+        """Update a row whose record_id column matches the given value."""
+        try:
+            rows = self.sheet.get_all_values()
+            if not rows:
+                return False
+            header = [str(value).strip() for value in rows[0]]
+            try:
+                record_id_col = header.index("record_id")
+            except ValueError:
+                return False
+
+            for row_number, row in enumerate(rows[1:], start=2):
+                if record_id_col < len(row) and str(row[record_id_col]) == record_id:
+                    last_column = self._column_name(max(len(header), len(values)))
+                    self.sheet.update(
+                        range_name=f"A{row_number}:{last_column}{row_number}",
+                        values=[values],
+                        value_input_option="USER_ENTERED",
+                    )
+                    return True
+            return False
+        except gspread.exceptions.APIError as e:
+            logger.error('APIエラーが発生しました: %s', e)
+            return False
+        except Exception as e:
+            logger.error('行の更新中に例外が発生しました: %s', e)
+            return False
+
+    @staticmethod
+    def _column_name(index: int) -> str:
+        """Return the 1-based spreadsheet column name."""
+        name = ""
+        while index > 0:
+            index, remainder = divmod(index - 1, 26)
+            name = chr(ord("A") + remainder) + name
+        return name or "A"

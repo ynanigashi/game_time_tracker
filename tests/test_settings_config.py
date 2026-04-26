@@ -13,6 +13,10 @@ from src.infra.settings_config import (
     save_editable_config,
 )
 from src.infra.settings_store import SettingsStore
+from src.infra.config_loader import (
+    PLAY_LOG_BACKUP_MODE_LOCAL_ONLY,
+    PLAY_LOG_BACKUP_MODE_SPREADSHEET,
+)
 
 
 class TestSettingsConfig(unittest.TestCase):
@@ -56,6 +60,12 @@ class TestSettingsConfig(unittest.TestCase):
 
         loaded = self.store.load_config()
         self.assertEqual(loaded["GAMEINFO"]["sheet_gid"], "123")
+        self.assertEqual(
+            loaded["LOGHANDLER"]["backup_mode"],
+            PLAY_LOG_BACKUP_MODE_SPREADSHEET,
+        )
+        self.assertEqual(loaded["LOGHANDLER"]["sheet_gid"], "")
+        self.assertEqual(loaded["LOGHANDLER"]["sync_conflict_policy"], "overwrite")
 
     def test_load_editable_config_reads_saved_values(self):
         config = EditableAppConfig(
@@ -94,6 +104,23 @@ class TestSettingsConfig(unittest.TestCase):
                 settings_store=self.store,
             )
 
+    def test_local_only_mode_allows_empty_log_sheet_key(self):
+        config = EditableAppConfig(
+            json_file_path="service_account.json",
+            log_sheet_key="",
+            game_info_sheet_key="game_key",
+            game_info_sheet_gid=123,
+            browsers=["Chrome"],
+            excluded_titles=["Settings"],
+            play_log_backup_mode=PLAY_LOG_BACKUP_MODE_LOCAL_ONLY,
+        )
+
+        save_editable_config(config, settings_store=self.store)
+
+        loaded = load_editable_config(settings_store=self.store)
+        self.assertEqual(loaded.play_log_backup_mode, PLAY_LOG_BACKUP_MODE_LOCAL_ONLY)
+        self.assertEqual(loaded.log_sheet_key, "")
+
     def test_export_editable_config_writes_ini(self):
         config = EditableAppConfig(
             json_file_path="service_account.json",
@@ -109,7 +136,43 @@ class TestSettingsConfig(unittest.TestCase):
         parser = configparser.ConfigParser()
         parser.read(self.config_path, encoding="utf-8")
         self.assertEqual(parser["LOGHANDLER"]["sheet_key"], "log_key")
+        self.assertEqual(
+            parser["LOGHANDLER"]["backup_mode"],
+            PLAY_LOG_BACKUP_MODE_SPREADSHEET,
+        )
         self.assertEqual(parser["WINDOW_SCAN"]["browsers"], "Chrome, Edge")
+
+    def test_log_sheet_gid_roundtrip(self):
+        config = EditableAppConfig(
+            json_file_path="service_account.json",
+            log_sheet_key="log_key",
+            game_info_sheet_key="game_key",
+            game_info_sheet_gid=123,
+            browsers=["Chrome"],
+            excluded_titles=["Settings"],
+            log_sheet_gid=456,
+        )
+
+        save_editable_config(config, settings_store=self.store)
+        loaded = load_editable_config(settings_store=self.store)
+
+        self.assertEqual(loaded.log_sheet_gid, 456)
+
+    def test_sync_conflict_policy_roundtrip(self):
+        config = EditableAppConfig(
+            json_file_path="service_account.json",
+            log_sheet_key="log_key",
+            game_info_sheet_key="game_key",
+            game_info_sheet_gid=123,
+            browsers=["Chrome"],
+            excluded_titles=["Settings"],
+            sync_conflict_policy="new_id",
+        )
+
+        save_editable_config(config, settings_store=self.store)
+        loaded = load_editable_config(settings_store=self.store)
+
+        self.assertEqual(loaded.sync_conflict_policy, "new_id")
 
     def test_import_editable_config_writes_sqlite(self):
         self.config_path.parent.mkdir(parents=True, exist_ok=True)

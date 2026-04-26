@@ -30,6 +30,19 @@ DEFAULT_EXCLUDED_TITLES = [
     "Nahimic",
 ]
 
+PLAY_LOG_BACKUP_MODE_LOCAL_ONLY = "local_only"
+PLAY_LOG_BACKUP_MODE_SPREADSHEET = "spreadsheet"
+PLAY_LOG_BACKUP_MODES = {
+    PLAY_LOG_BACKUP_MODE_LOCAL_ONLY,
+    PLAY_LOG_BACKUP_MODE_SPREADSHEET,
+}
+PLAY_LOG_SYNC_CONFLICT_OVERWRITE = "overwrite"
+PLAY_LOG_SYNC_CONFLICT_NEW_ID = "new_id"
+PLAY_LOG_SYNC_CONFLICT_POLICIES = {
+    PLAY_LOG_SYNC_CONFLICT_OVERWRITE,
+    PLAY_LOG_SYNC_CONFLICT_NEW_ID,
+}
+
 
 class ConfigNotConfiguredError(KeyError):
     """Raised when required application settings are missing."""
@@ -37,10 +50,13 @@ class ConfigNotConfiguredError(KeyError):
 
 @dataclass
 class LogHandlerConfig:
-    """Spreadsheet log handler settings."""
+    """Play log handler settings."""
 
     cert_file_path: str
     sheet_key: str
+    backup_mode: str = PLAY_LOG_BACKUP_MODE_SPREADSHEET
+    sheet_gid: Optional[int] = None
+    sync_conflict_policy: str = PLAY_LOG_SYNC_CONFLICT_OVERWRITE
 
 
 @dataclass
@@ -72,7 +88,7 @@ class ConfigLoader:
     """Load application settings from SQLite, with config.ini as migration input."""
 
     REQUIRED_KEYS = {
-        "LOGHANDLER": ["json_file_path", "sheet_key"],
+        "LOGHANDLER": ["json_file_path"],
         "GAMEINFO": ["sheet_key", "sheet_gid"],
     }
 
@@ -107,7 +123,20 @@ class ConfigLoader:
             for key in keys:
                 if key not in config[section]:
                     return False
+        backup_mode = cls._get_backup_mode(config)
+        if backup_mode == PLAY_LOG_BACKUP_MODE_SPREADSHEET:
+            return "sheet_key" in config["LOGHANDLER"]
         return True
+
+    @staticmethod
+    def _get_backup_mode(config: configparser.ConfigParser) -> str:
+        if "LOGHANDLER" not in config:
+            return PLAY_LOG_BACKUP_MODE_SPREADSHEET
+        raw = config["LOGHANDLER"].get(
+            "backup_mode",
+            PLAY_LOG_BACKUP_MODE_SPREADSHEET,
+        )
+        return (raw or PLAY_LOG_BACKUP_MODE_SPREADSHEET).strip()
 
     def _validate_required_keys(self) -> None:
         """Validate that all required config keys are present."""
@@ -119,6 +148,28 @@ class ConfigLoader:
                 for key in keys:
                     if key not in self.config[section]:
                         missing.append(f"[{section}] {key}")
+        backup_mode = self._get_backup_mode(self.config)
+        if backup_mode not in PLAY_LOG_BACKUP_MODES:
+            raise ValueError(
+                "[LOGHANDLER] backup_mode は "
+                f"{PLAY_LOG_BACKUP_MODE_LOCAL_ONLY} または "
+                f"{PLAY_LOG_BACKUP_MODE_SPREADSHEET} を指定してください: "
+                f"{backup_mode}"
+            )
+        sync_conflict_policy = self._get_sync_conflict_policy(self.config)
+        if sync_conflict_policy not in PLAY_LOG_SYNC_CONFLICT_POLICIES:
+            raise ValueError(
+                "[LOGHANDLER] sync_conflict_policy は "
+                f"{PLAY_LOG_SYNC_CONFLICT_OVERWRITE} または "
+                f"{PLAY_LOG_SYNC_CONFLICT_NEW_ID} を指定してください: "
+                f"{sync_conflict_policy}"
+            )
+        if (
+            backup_mode == PLAY_LOG_BACKUP_MODE_SPREADSHEET
+            and "LOGHANDLER" in self.config
+            and "sheet_key" not in self.config["LOGHANDLER"]
+        ):
+            missing.append("[LOGHANDLER] sheet_key")
         if missing:
             raise ConfigNotConfiguredError(
                 f"config.ini is missing required settings: {', '.join(missing)}"
@@ -126,9 +177,13 @@ class ConfigLoader:
 
     def load(self) -> Config:
         """Return typed application settings."""
+        log_sheet_gid = self._get_optional_int("LOGHANDLER", "sheet_gid")
         log_handler = LogHandlerConfig(
             cert_file_path=self.config["LOGHANDLER"]["json_file_path"],
-            sheet_key=self.config["LOGHANDLER"]["sheet_key"],
+            sheet_key=self.config["LOGHANDLER"].get("sheet_key", ""),
+            backup_mode=self._get_backup_mode(self.config),
+            sheet_gid=log_sheet_gid,
+            sync_conflict_policy=self._get_sync_conflict_policy(self.config),
         )
 
         try:
@@ -159,6 +214,27 @@ class ConfigLoader:
             game_info=game_info,
             window_scan=window_scan,
         )
+
+    def _get_optional_int(self, section: str, key: str) -> Optional[int]:
+        raw = self.config.get(section, key, fallback="").strip()
+        if not raw:
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            raise ValueError(
+                f"config.ini の [{section}] {key} は整数である必要があります: {raw}"
+            )
+
+    @staticmethod
+    def _get_sync_conflict_policy(config: configparser.ConfigParser) -> str:
+        if "LOGHANDLER" not in config:
+            return PLAY_LOG_SYNC_CONFLICT_OVERWRITE
+        raw = config["LOGHANDLER"].get(
+            "sync_conflict_policy",
+            PLAY_LOG_SYNC_CONFLICT_OVERWRITE,
+        )
+        return (raw or PLAY_LOG_SYNC_CONFLICT_OVERWRITE).strip()
 
     def _get_list(self, section: str, key: str, default: List[str]) -> List[str]:
         if section not in self.config or key not in self.config[section]:

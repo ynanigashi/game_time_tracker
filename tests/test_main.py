@@ -187,11 +187,11 @@ class TestInitComponentsErrorHandling(unittest.TestCase):
         # GameInfoLoaderが空を返した場合の処理を再現
         games = []  # 空のゲームリスト
         if not games:
-            mock_window._set_status('ゲーム情報が取得できませんでした（config.ini を確認）')
+            mock_window._set_status('ゲーム情報が未登録です。ゲーム管理で追加してください。')
             mock_window.setDisabled(True)
 
         self.assertTrue(mock_window.disabled)
-        self.assertIn('ゲーム情報が取得できませんでした', mock_window.status)
+        self.assertIn('ゲーム情報が未登録', mock_window.status)
 
     def test_loghandler_file_not_found_disables_window(self):
         """LogHandler認証ファイルが見つからない場合はウィンドウを無効化."""
@@ -843,10 +843,11 @@ class TestInitComponentsDirect(unittest.TestCase):
         self.assertFalse(window._disabled)
         self.assertEqual(len(window.games), 1)
 
-    def test_init_components_empty_games_disables(self):
-        """_init_componentsはゲームが空の場合無効化."""
+    def test_init_components_empty_games_opens_game_catalog(self):
+        """_init_componentsはゲームが空の場合ゲーム管理を開く."""
         window = self._create_mock_main_window()
         window._set_status = self._mock_set_status(window)
+        window._open_game_catalog_dialog = MagicMock()
 
         mock_config = MagicMock()
 
@@ -856,8 +857,9 @@ class TestInitComponentsDirect(unittest.TestCase):
                 MockGameInfoLoader.return_value.load.return_value = []
                 window._init_components()
 
-        self.assertTrue(window._disabled)
-        self.assertIn('ゲーム情報', window._status)
+        self.assertFalse(window._disabled)
+        self.assertIn('ゲーム情報が未登録', window._status)
+        window._open_game_catalog_dialog.assert_called_once()
 
     def test_init_components_loghandler_file_not_found_opens_settings(self):
         """_init_componentsはLogHandlerのFileNotFoundErrorで設定画面を開く."""
@@ -987,6 +989,24 @@ class TestInitComponentsDirect(unittest.TestCase):
         self.assertFalse(window._disabled)
         self.assertIn("設定が未作成", window._status)
         window._open_settings_dialog.assert_called_once()
+
+    def test_init_components_missing_games_opens_game_catalog_dialog(self):
+        window = self._create_mock_main_window()
+        window._set_status = self._mock_set_status(window)
+        window._open_game_catalog_dialog = MagicMock()
+        window._get_bootstrapper = MagicMock()
+        window._get_bootstrapper.return_value.bootstrap.side_effect = (
+            main.components.MainWindowBootstrapError(
+                "ゲーム情報が未登録です。ゲーム管理で追加してください。",
+                open_game_catalog=True,
+            )
+        )
+
+        window._init_components()
+
+        self.assertFalse(window._disabled)
+        self.assertIn("ゲーム情報が未登録", window._status)
+        window._open_game_catalog_dialog.assert_called_once()
 
 
 class TestMainWindowEvents(unittest.TestCase):
@@ -2202,21 +2222,50 @@ class TestMousePressEventRealMethod(unittest.TestCase):
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
         report_action = object()
+        game_catalog_action = object()
         settings_action = object()
         exit_action = object()
         window._open_report_dialog = MagicMock()
+        window._open_game_catalog_dialog = MagicMock()
         window._open_settings_dialog = MagicMock()
         window.close = MagicMock()
 
         window._handle_context_menu_selection(
             settings_action,
             report_action=report_action,
+            game_catalog_action=game_catalog_action,
             settings_action=settings_action,
             exit_action=exit_action,
         )
 
         window._open_settings_dialog.assert_called_once()
         window._open_report_dialog.assert_not_called()
+        window._open_game_catalog_dialog.assert_not_called()
+        window.close.assert_not_called()
+
+    def test_context_menu_selection_opens_game_catalog(self):
+        with patch.object(main.MainWindow, '__init__', lambda self: None):
+            window = main.MainWindow()
+        report_action = object()
+        game_catalog_action = object()
+        settings_action = object()
+        exit_action = object()
+        window._open_report_dialog = MagicMock()
+        window._open_game_catalog_dialog = MagicMock()
+        window._open_settings_dialog = MagicMock()
+        window.close = MagicMock()
+
+        window._handle_context_menu_selection(
+            game_catalog_action,
+            report_action=report_action,
+            game_catalog_action=game_catalog_action,
+            settings_action=settings_action,
+            exit_action=exit_action,
+        )
+
+        window._open_game_catalog_dialog.assert_called_once()
+        window._open_report_dialog.assert_not_called()
+        window._open_settings_dialog.assert_not_called()
         window.close.assert_not_called()
 
     def test_context_menu_selection_exits(self):

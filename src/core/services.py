@@ -16,6 +16,7 @@ from src.core.services_domain import (
 )
 from src.core.time_utils import SECONDS_PER_MINUTE, split_by_day
 from src.infra.config_loader import Config
+from src.infra.game_catalog_store import GameCatalogStore
 from src.infra.gspread_service import GspreadService
 from src.infra.log_handler import LogHandler
 
@@ -31,13 +32,22 @@ class Messages:
 
 
 class GameInfoLoader:
-    """スプレッドシートからゲーム情報を読み込むクラス."""
+    """ローカルDBからゲーム情報を読み込むクラス."""
 
-    def __init__(self, config: Config) -> None:
+    def __init__(
+        self,
+        config: Config,
+        *,
+        game_store: Optional[GameCatalogStore] = None,
+    ) -> None:
         self.config = config
+        self.game_store = game_store or GameCatalogStore()
 
     def load(self) -> List[GameEntry]:
-        """ゲーム情報をスプレッドシートから読み込む."""
+        """ゲーム情報をローカルDBから読み込む。空の場合のみスプレッドシートから初回取り込みする."""
+        if self.game_store.has_any_games():
+            return self.game_store.load_games()
+
         try:
             gspread_service = GspreadService(
                 cert_file_path=self.config.log_handler.cert_file_path,
@@ -59,7 +69,10 @@ class GameInfoLoader:
             logger.exception('ゲーム情報の読み込みで予期しない例外が発生しました')
             raise
 
-        return [self._record_to_entry(record) for record in records]
+        imported = self.game_store.import_records(records)
+        if imported:
+            logger.info("ゲーム情報をローカルDBへ取り込みました: %s 件", imported)
+        return self.game_store.load_games()
 
     @staticmethod
     def _record_to_entry(record: dict) -> GameEntry:

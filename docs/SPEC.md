@@ -1,7 +1,7 @@
 # Game Time Tracker 仕様書
 
 ## 目的
-Windows PC で実行中のゲームをウィンドウタイトルから自動検出し、プレイ時間を Google スプレッドシートに記録するツール。
+Windows PC で実行中のゲームをウィンドウタイトルから自動検出し、プレイ時間をローカル SQLite に記録するツール。Google スプレッドシートは初回ゲーム情報取り込みとプレイログのバックアップに使用できる。
 
 ## 運用前提（配布形態）
 - 通常利用は GitHub Releases で配布する Windows EXE を前提とする。
@@ -9,7 +9,11 @@ Windows PC で実行中のゲームをウィンドウタイトルから自動検
 - 既定では `data/settings.sqlite3` の設定を読み込む。SQLite に有効な設定がなく `config/config.ini` がある場合のみ、初回移行として INI を SQLite へ取り込む。
 - 旧配置の `config.ini`, `game_time_tracker.log`, `window_state.txt` は初回利用時に `config/`, `logs/`, `data/` へ移行する。
 - 設定値とウィンドウ状態は `data/settings.sqlite3` に保存する。`config/config.ini` は設定画面の Import/Export で手動入出力する。
-- メインウィンドウ右クリックメニューで `レポート` / `設定` / `終了` を選択できる。
+- プレイログは `data/play_logs.sqlite3` に保存し、Google スプレッドシートへベストエフォートでバックアップする。
+- ゲーム情報は `data/game_catalog.sqlite3` に保存し、空の場合のみ Google スプレッドシートから初回取り込みする。
+- レポート画面の `ログ` タブとゲーム管理画面から、スプレッドシートの手動同期を実行できる。
+- プレイログのバックアップは設定画面の `プレイログ保存` で `ローカルのみで運用` / `スプレッドシートにバックアップ` を切り替える。
+- メインウィンドウ右クリックメニューで `レポート` / `ゲーム管理` / `設定` / `終了` を選択できる。
 - SQLite と INI のどちらにも有効な設定がない場合、起動時に設定画面を表示する。
 - 認証JSONファイルが見つからない場合、警告ダイアログを表示して設定画面を開く。
 - ソースコード実行（`python main.py`）は開発・検証用途とする。
@@ -27,6 +31,7 @@ classDiagram
             +window_title: str
             +play_with_friends: bool
             +is_browser_game: bool
+            +game_id: str
             +is_playing: bool
             +start_time: datetime
             +inactive_since: datetime
@@ -181,6 +186,9 @@ classDiagram
             <<dataclass>>
             +cert_file_path: str
             +sheet_key: str
+            +backup_mode: str
+            +sheet_gid: Optional~int~
+            +sync_conflict_policy: str
         }
         class GameInfoConfig {
             <<dataclass>>
@@ -222,6 +230,7 @@ classDiagram
     namespace log_handler_py {
         class LogHandler {
             +gspread_service: GspreadService
+            +play_log_store: PlayLogStore
             +records: List~Dict~
             +index: int
             +__init__(config: LogHandlerConfig)
@@ -234,10 +243,33 @@ classDiagram
         }
     }
 
+    namespace game_catalog_store_py {
+        class GameCatalogStore {
+            +load_games() List~GameEntry~
+            +has_any_games() bool
+            +save_game() GameEntry
+            +delete_game()
+            +import_records() int
+        }
+    }
+
+    namespace play_log_store_py {
+        class PlayLogStore {
+            +load_records() List~Dict~
+            +max_index() int
+            +save_record()
+            +import_records() int
+            +load_pending_backup_records() List~Dict~
+            +mark_backed_up()
+        }
+    }
+
     models_py ..> time_utils_py : uses
     services_py ..> time_utils_py : uses
+    services_py ..> game_catalog_store_py : loads games
     services_py ..> log_handler_py : uses
-    log_handler_py ..> gspread_service_py : uses
+    log_handler_py ..> gspread_service_py : backs up
+    log_handler_py ..> play_log_store_py : primary store
     main_py ..> models_py : uses
     main_py ..> services_py : uses
     main_py ..> time_utils_py : uses
@@ -251,6 +283,8 @@ classDiagram
 flowchart TB
     subgraph External["外部リソース"]
         ConfigFile[("config/config.ini")]
+        GameCatalogDB[("data/game_catalog.sqlite3")]
+        PlayLogDB[("data/play_logs.sqlite3")]
         Spreadsheet[("Google\nSpreadsheet")]
     end
 
@@ -264,6 +298,8 @@ flowchart TB
     end
 
     subgraph DataLayer["データレイヤー"]
+        PlayLogStore
+        GameCatalogStore
         LogHandler
         GameInfoLoader
         GameEntry
@@ -281,8 +317,11 @@ flowchart TB
     end
 
     ConfigFile --> ConfigLoader
+    GameCatalogDB --> GameCatalogStore
+    PlayLogDB --> PlayLogStore
     Spreadsheet --> GspreadService
 
+    PlayLogStore --> LogHandler
     GspreadService --> LogHandler
     GspreadService --> GameInfoLoader
     ConfigLoader --> LogHandler
@@ -290,6 +329,7 @@ flowchart TB
     ConfigLoader --> WindowScanner
 
     Spreadsheet --> GameInfoLoader
+    GameCatalogStore --> GameInfoLoader
     GameInfoLoader --> GameEntry
     LogHandler --> SessionRecorder
     GameEntry --> SessionRecorder
@@ -346,6 +386,14 @@ sequenceDiagram
 #### `GameEntry` (dataclass)
 ゲーム情報を保持するデータクラス。
 
+| フィールド | 説明 |
+|------------|------|
+| `game_id` | ローカルDB上のゲーム定義ID。未設定の場合は保存時に UUID を採番 |
+| `game_title` | 表示・記録に使うゲーム名 |
+| `window_title` | 検出に使うウィンドウタイトルの部分一致文字列 |
+| `play_with_friends` | フレンドとのプレイとして記録するか |
+| `is_browser_game` | ブラウザウィンドウも記録対象にするか |
+
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
 | `matches_window(window_title, browsers)` | ウィンドウタイトルがこのゲームに該当するか判定 | `MainWindow._update_game_states()` |
@@ -386,12 +434,12 @@ sequenceDiagram
 | `recorded_seconds` | この周期で記録された秒数 |
 
 #### `GameInfoLoader`
-スプレッドシートからゲーム情報を読み込む。内部で`GspreadService`を生成し、`sheet_gid`指定で対応ワークシートに接続する。
+ローカルDBからゲーム情報を読み込む。`data/game_catalog.sqlite3` が空の場合のみ、`GspreadService`でゲーム情報シートへ接続し、既存行をローカルDBへ初回取り込みする。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `__init__(config)` | Config（dataclass）を受け取って初期化 | `MainWindow._init_components()` |
-| `load()` | ゲーム情報リストを取得。内部で`GspreadService(cert_file_path, sheet_key, sheet_gid)`を使用 | `MainWindow._init_components()` |
+| `__init__(config, game_store=None)` | Config（dataclass）と任意の`GameCatalogStore`を受け取って初期化 | `MainWindow._init_components()` |
+| `load()` | ローカルDBのゲーム情報リストを取得。DBが空の場合のみ`GspreadService(cert_file_path, sheet_key, sheet_gid)`で初回取り込み | `MainWindow._init_components()` |
 | `_record_to_entry(record)` | スプレッドシートのレコードをGameEntryに変換（`models.parse_bool()`を使用） | `load()` 内部 |
 
 #### `WindowScanner`
@@ -404,7 +452,7 @@ sequenceDiagram
 | `get_foreground_title()` | フォアグラウンド（最前面）ウィンドウのタイトルを取得 | `MainWindow._scan_tick()` |
 
 #### `SessionRecorder`
-ゲームセッションをスプレッドシートに記録する。
+ゲームセッションを `LogHandler` 経由で記録する。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
@@ -412,7 +460,7 @@ sequenceDiagram
 | `record(game)` | セッション終了→日付分割→記録。**当日分のみの記録秒数を返す**。5分未満や書き込み失敗など保存が一件も発生しない場合はNone | `MainWindow._update_game_states()` |
 | `record_with_times(game, start_time, end_time)` | 指定された開始/終了時刻でセッションを記録。セッションは終了せず継続可能。**当日分のみの記録秒数を返す**。5分未満や書き込み失敗など保存が一件も発生しない場合はNone | `MainWindow._update_game_states()` |
 | `_split_by_day(start, end)` | セッションを日付境界で分割 | `record()` / `record_with_times()` 内部 |
-| `_save_to_spreadsheet(game, start_time, end_time)` | スプレッドシートに1件保存。**成功時True、失敗時Falseを返す** | `record()` / `record_with_times()` 内部 |
+| `_save_to_spreadsheet(game, start_time, end_time)` | 互換名の保存メソッド。ローカルDBに1件保存し、スプレッドシートへバックアップする。**ローカル保存成功時True、失敗時Falseを返す** | `record()` / `record_with_times()` 内部 |
 
 #### `DailyStatsTracker`
 日付ごとの統計を追跡し、日付変更時にリセットする。
@@ -584,7 +632,10 @@ GUI版メインウィンドウ。
 ##### `LogHandlerConfig`
 ログハンドラー設定を保持するデータクラス。
 - `cert_file_path: str` - 認証情報ファイルのパス
-- `sheet_key: str` - スプレッドシートのキー
+- `sheet_key: str` - ログバックアップ用スプレッドシートのキー（`backup_mode=spreadsheet` の場合のみ必須）
+- `backup_mode: str` - `spreadsheet` または `local_only`
+- `sheet_gid: Optional[int]` - ログシートの gid。未指定時は sheet1 を使用
+- `sync_conflict_policy: str` - 同一 `record_id` がスプレッドシート側にある場合の処理。`overwrite` または `new_id`
 
 ##### `GameInfoConfig`
 ゲーム情報設定を保持するデータクラス。
@@ -608,7 +659,7 @@ SQLite 設定を読み込んで型付き設定（`Config`）を提供する。SQ
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
 | `__init__(config_file_path=DEFAULT_CONFIG_FILE)` | 未指定時は SQLite を優先して読み込み、SQLite 未設定時のみ `config/config.ini` を取り込む。指定時は指定 INI を読み込み、**必須キーを検証** | `MainWindow._init_components()`, `LogHandler.__init__()` |
-| `_validate_required_keys()` | 必須キー（LOGHANDLER/GAMEINFOセクション）の存在を検証。欠落時はKeyError | `__init__()` 内部 |
+| `_validate_required_keys()` | 必須キー（LOGHANDLER/GAMEINFOセクション）の存在を検証。`backup_mode=local_only` の場合は `[LOGHANDLER] sheet_key` を必須にしない | `__init__()` 内部 |
 | `load() -> Config` | 設定を読み込んで`Config`データクラスを返す。**sheet_gidはintに変換** | `MainWindow._init_components()`, `LogHandler.__init__()` |
 | `_get_list(section, key, default)` | カンマ区切りの設定をリストに変換 | `load()` 内部 |
 
@@ -624,10 +675,44 @@ SQLite 設定を読み込んで型付き設定（`Config`）を提供する。SQ
 | `default_log_file()` | `logs/game_time_tracker.log` を返す |
 | `default_config_file()` | `config/config.ini` を返す |
 | `default_settings_db_file()` | `data/settings.sqlite3` を返す |
+| `default_play_log_db_file()` | `data/play_logs.sqlite3` を返す |
+| `default_game_catalog_db_file()` | `data/game_catalog.sqlite3` を返す |
 | `default_window_state_file()` | `data/window_state.txt` を返す |
 | `resolve_log_file()` | 旧 `game_time_tracker.log` を `logs/` へ移行して返す |
 | `resolve_config_file()` | 旧 `config.ini` を `config/` へ移行して返す |
 | `resolve_window_state_file()` | 旧 `window_state.txt` を `data/` へ移行して返す |
+
+---
+
+### game_catalog_store.py
+
+ゲーム情報の主保存先である SQLite DB を操作する。DB ファイルは `data/game_catalog.sqlite3`。
+
+| クラス/メソッド | 説明 |
+|----------------|------|
+| `GameCatalogStore(db_path=None)` | SQLite DB のパスを受け取り、未指定時は `runtime_paths.default_game_catalog_db_file()` を使う |
+| `has_any_games()` | 削除済みを含め、ローカルDBにゲーム定義が存在するか返す |
+| `load_games(include_disabled=False)` | 有効なゲーム定義を `GameEntry` として取得する |
+| `save_game(game, enabled=True)` | ゲーム定義を追加または更新する。`game_id` が空なら UUID を採番する |
+| `delete_game(game_id)` | ゲーム定義を論理削除する |
+| `import_records(records)` | ゲーム情報シートの既存行をローカルDBへ取り込む。`id` 列があれば引き継ぐ |
+| `sync_records_from_spreadsheet(records)` | 手動同期用。ゲーム情報シートの行を `id` 基準でローカルDBへ反映し、シートにない既存IDを無効化する |
+
+---
+
+### play_log_store.py
+
+プレイログの主保存先である SQLite DB を操作する。DB ファイルは `data/play_logs.sqlite3`。
+
+| クラス/メソッド | 説明 |
+|----------------|------|
+| `PlayLogStore(db_path=None, device_id=None)` | SQLite DB のパスと記録元IDを受け取り、未指定時は `runtime_paths.default_play_log_db_file()` とPC名を使う |
+| `load_records()` | `play_records` テーブルから全プレイログを `record_index` 昇順で取得する |
+| `max_index()` | 現在保存済みの最大 `record_index` を返す |
+| `save_record(values, backed_up=False)` | `[index, start_time, end_time, title, play_with_friends]` をローカルDBへ保存し、`record_id` を採番する |
+| `import_records(records, backed_up)` | スプレッドシート既存行をローカルDBへ取り込む。`record_id` があれば重複を避けて同期する |
+| `load_pending_backup_records()` | まだスプレッドシートへバックアップできていない行を取得する |
+| `mark_backed_up(record_id)` | 指定レコードをバックアップ済みに更新する |
 
 ---
 
@@ -656,7 +741,7 @@ Google Spreadsheet操作を抽象化するサービスクラス。
 | `__init__(cert_file_path, sheet_key, *, sheet_gid=None)` | 認証情報とシートキーを設定し、スプレッドシートに接続。`sheet_gid`指定時は対応ワークシート、省略時はsheet1に接続 | `LogHandler.__init__()`, `GameInfoLoader.load()` |
 | `_connect()` | スプレッドシートに接続。`sheet_gid`がある場合は`get_worksheet_by_id()`で接続 | `__init__()` 内部 |
 | `sheet` | ワークシートプロパティ。未接続時は`RuntimeError`をスロー | 内部 |
-| `get_all_records() -> List[Dict]` | 全レコードを取得 | `LogHandler.get_all_records()`, `GameInfoLoader.load()` |
+| `get_all_records() -> List[Dict]` | 全レコードを取得 | `LogHandler`の初回取り込み, `GameInfoLoader.load()` |
 | `append_row(values) -> bool` | 行を追加。成功時True、失敗時False | `LogHandler.save_record()` |
 
 ---
@@ -664,18 +749,18 @@ Google Spreadsheet操作を抽象化するサービスクラス。
 ### log_handler.py
 
 #### `LogHandler`
-スプレッドシートの読み書きを担当する。起動時に全レコードをメモリにキャッシュし、API呼び出しを最小化。
-`GspreadService`を使用してスプレッドシート操作を実行。
+プレイログの読み書きを担当する。ローカル SQLite を主保存先とし、Google スプレッドシートはバックアップと初回取り込み元として扱う。起動時にローカルDBの全レコードをメモリにキャッシュし、UI更新時のDB/API呼び出しを避ける。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `__init__(config: LogHandlerConfig)` | `LogHandlerConfig`（認証情報パスとシートキー）を受け取り、`GspreadService`を初期化。全レコードをキャッシュ（`self.records`）に保存。**接続失敗時は例外をスロー** | `MainWindowBootstrapper.bootstrap()` |
-| `get_all_records()` | `GspreadService`経由で全レコードを取得（初期化時のみ使用） | `__init__()` 内部 |
+| `__init__(config: LogHandlerConfig, play_log_store=None)` | `PlayLogStore`を初期化し、`backup_mode=spreadsheet` で接続可能ならスプレッドシート全件をローカルDBへ同期し、未バックアップ行を再バックアップする。全レコードをキャッシュ（`self.records`）に保存 | `MainWindowBootstrapper.bootstrap()` |
+| `get_all_records()` | ローカルDBから全レコードを取得 | `__init__()` 内部 |
 | `get_cached_records()` | キャッシュされたレコード（`self.records`）を返す。API呼び出しなし | `get_today_stats()` 内部 |
 | `get_today_stats() -> Tuple[Dict[str, float], float]` | 今日のゲーム別プレイ時間と合計秒数を計算して返す。キャッシュのみ使用、API呼び出しなし | `MainWindow._load_today_game_minutes()`, `MainWindow._load_today_completed_seconds()` |
 | `get_and_increment_index()` | インデックスを取得して+1 | `SessionRecorder._save_to_spreadsheet()` |
 | `format_datetime_to_gss_style(datetime)` | datetimeをスプレッドシート形式に変換 | `SessionRecorder._save_to_spreadsheet()` |
-| `save_record(values)` | `GspreadService`経由で1行をスプレッドシートに追記し、同時に`self.records`にも追加してキャッシュを更新。**成功時True、失敗時Falseを返す** | `SessionRecorder._save_to_spreadsheet()` |
+| `save_record(values)` | 1行をローカルDBへ保存し、保存時にもスプレッドシート全件をローカルDBへ同期したうえで未バックアップ行を送信する。スプレッドシートへのバックアップに失敗してもローカル保存成功ならTrueを返す | `SessionRecorder._save_to_spreadsheet()` |
+| `sync_with_spreadsheet()` | 手動同期用。スプレッドシート側のプレイログを1回取得し、取り込みと未バックアップ送信判定に使ってキャッシュを更新する。取得失敗時は送信せず次回再試行に残す | `ReportDialog._sync_from_spreadsheet()` |
 
 ---
 
@@ -683,10 +768,10 @@ Google Spreadsheet操作を抽象化するサービスクラス。
 - **[src/app/main.py](../src/app/main.py)** (PySide6 GUI + 自動検出・ログ記録)
   - `MainWindow` がメインループを管理し、ポーリング間隔/最小記録時間を定数で設定可能。
   - `pygetwindow` で全ウィンドウのタイトルを取得。
-  - ゲーム情報シートから登録されたゲームを読み込み、部分一致で検出。
+  - ローカルDBから登録されたゲームを読み込み、部分一致で検出。
   - ブラウザタイトルは `is_browser_game=True` のゲームのみ記録対象。
   - 1秒間隔でポーリング。ウィンドウ消失時に終了時刻を確定。
-  - 5分以上のプレイのみスプレッドシートへ追記。
+  - 5分以上のプレイのみローカルDBへ保存し、スプレッドシートへバックアップ。
   - ステータスをタイトルバーに表示し、左クリックで表示モード切替（max/mid/min）。
   - ウィンドウ検出は1秒間隔、UI更新は0.1秒間隔。
   - 位置・サイズ・モードを `data/settings.sqlite3` に保存/復元。
@@ -696,17 +781,26 @@ Google Spreadsheet操作を抽象化するサービスクラス。
   - **今日プレイしたゲーム一覧表示**（mid/maxモード）:
     - その日にプレイしたゲームとプレイ時間（分数）を表示
     - プレイ時間の長い順にソート
-    - スプレッドシートへのアクセスは起動時とゲーム記録時のみ（キャッシュを活用）
+    - UI更新時は `LogHandler.records` のキャッシュを活用し、DB/APIアクセスを行わない
     - UI更新時は差分更新により、ちらつきを防止
 
 - **[src/ui/gui_layout.py](../src/ui/gui_layout.py)**
   - GUI ウィジェットとレイアウトの構築。各ウィジェットのデフォルト高さを保持。
   
 - **[src/infra/log_handler.py](../src/infra/log_handler.py)**
-  - サービスアカウント経由でスプレッドシートを操作。
-  - ログ行を末尾に追記。
-  - ログシートの読み込み/追記とインデックス管理を行う。
-  - **キャッシュ機構**: 起動時に全レコードを`self.records`（`List[dict]`）にキャッシュし、`get_cached_records()`で取得。`save_record()`はスプレッドシート書き込みと同時にキャッシュも更新。UI更新時のAPI呼び出しを排除。
+  - ローカルDBを主保存先としてプレイログの読み込み/追記とインデックス管理を行う。
+  - サービスアカウント経由でスプレッドシートへバックアップする。
+  - ローカルDBが空でスプレッドシートに既存ログがある場合は初回取り込みを行う。
+  - **キャッシュ機構**: 起動時に全レコードを`self.records`（`List[dict]`）にキャッシュし、`get_cached_records()`で取得。`save_record()`はローカルDB保存と同時にキャッシュも更新。UI更新時のDB/API呼び出しを排除。
+
+- **[src/infra/play_log_store.py](../src/infra/play_log_store.py)**
+  - `data/play_logs.sqlite3` の `play_records` テーブルを管理する。
+  - スプレッドシートへバックアップ済みかどうかを `backed_up` で保持し、未バックアップ行の再送に使う。
+
+- **[src/infra/game_catalog_store.py](../src/infra/game_catalog_store.py)**
+  - `data/game_catalog.sqlite3` の `games` テーブルを管理する。
+  - `id` を主キーにゲーム情報の追加・更新・論理削除を行う。
+  - 初回取り込み時はゲーム情報シートの `id` 列を引き継ぎ、ない場合は UUID を採番する。
 
 - **[src/infra/config_loader.py](../src/infra/config_loader.py)**
   - SQLite の設定を優先して読み込む。SQLite が未設定で INI がある場合のみ、初回移行として `config/config.ini` を取り込む。
@@ -719,18 +813,29 @@ Google Spreadsheet操作を抽象化するサービスクラス。
   - 設定画面向けの編集用データ構造を提供する。
   - 保存時に `data/settings.sqlite3` へ反映する。
   - `config/config.ini` への書き出しと取り込みは、設定画面の `設定Export` / `設定Import` から手動実行する。
+  - プレイログ保存モード（`spreadsheet` / `local_only`）を読み書きする。
 
 - **[src/ui/settings_dialog.py](../src/ui/settings_dialog.py)**
-  - 認証JSON、シート key、sheet_gid、対象ブラウザ、除外タイトルを編集する。
+  - 認証JSON、プレイログ保存モード、シート key、sheet_gid、対象ブラウザ、除外タイトルを編集する。
   - 認証JSONはファイル選択ダイアログから指定できる。
+  - `ローカルのみで運用` の場合はログシート key / sheet_gid 入力を不要にする。
+  - `ID重複時` で `overwrite`（スプレッドシート既存行を更新）または `new_id`（別IDで追加）を選択する。
   - 保存成功時はメインウィンドウへ通知し、変更は再起動後に反映する。
+
+- **[src/ui/game_catalog_dialog.py](../src/ui/game_catalog_dialog.py)**
+  - ゲーム名、ウィンドウタイトル、フレンドプレイ、ブラウザゲーム設定を追加・編集・削除する。
+  - 保存先は `data/game_catalog.sqlite3`。
+  - `スプシから取得` でゲーム情報シートを手動取得し、ローカルDBへ反映する。
 
 ## 設定・外部リソース
 - **`config/config.ini`**
   ```ini
   [LOGHANDLER]
   json_file_path = service_account.json    ; サービスアカウント JSON のパス
+  backup_mode = spreadsheet                ; spreadsheet または local_only
   sheet_key = <スプレッドシートキー>        ; ログシートのキー
+  sheet_gid = 0                            ; ログシートの gid（省略時は sheet1）
+  sync_conflict_policy = overwrite         ; overwrite または new_id
 
   [GAMEINFO]
   sheet_key = <スプレッドシートキー>        ; ゲーム情報シートのキー
@@ -742,16 +847,20 @@ Google Spreadsheet操作を抽象化するサービスクラス。
   ```
 
 - **スプレッドシート構造**
-  - **ログシート (sheet1)**: `index, start_time, end_time, title, play_with_friends`
-  - **ゲーム情報シート**: `game_title, window_title, play_with_friends, is_browser_game`
-    - 真偽値は `"TRUE"` / `"FALSE"` 文字列として保存。読込時は `_parse_bool` で判定。
+  - **ログシート**: `record_id, device_id, index, start_time, end_time, title, play_with_friends`
+    - `record_id` は複数PC同期用の一意ID。`device_id` は記録元PC名。
+    - 末尾に集計用の計算列を追加しても、同期処理は必要な列だけを読み取る。
+    - 旧形式の `No` は `index` として、`with_friends` は `play_with_friends` として取り込み可能。
+  - **ゲーム情報シート（初回取り込み用）**: `id, game_title, window_title, play_with_friends, is_browser_game`
+    - `id` 列をローカルDBとの同期キーとして使用する。未指定時はローカルDB取り込み時に UUID を採番する。
+    - 真偽値は `"TRUE"` / `"FALSE"` 文字列として保存。読込時は `parse_bool()` で判定。
 
 - **[service_account.json](../service_account.json)**
   - Google Cloud サービスアカウント秘密鍵。
   - `.gitignore` で除外管理。
 
 ## 自動検出フロー
-1. 起動時にゲーム情報シートを読み込み、`game_title/window_title/play_with_friends/is_browser_game` をメモリに保持。
+1. 起動時に `data/game_catalog.sqlite3` から `game_title/window_title/play_with_friends/is_browser_game` をメモリに保持。ローカルDBが空の場合のみ、ゲーム情報シートから初回取り込みする。
 2. 1秒間隔（`POLL_INTERVAL_SECONDS = 1`）で以下を実行：
    - 全ウィンドウのタイトルを取得（`pygetwindow.getAllWindows()`）。
    - フォアグラウンド（最前面）ウィンドウのタイトルを取得（`pygetwindow.getActiveWindow()`）。
@@ -766,7 +875,7 @@ Google Spreadsheet操作を抽象化するサービスクラス。
 4. 一致がなくなった瞬間：
    - `is_playing=False` とし、`end_time` を記録。
    - プレイ時間計算: `(end_time - start_time).total_seconds() / 60` (分単位)。
-   - **5分以上のプレイのみ** `[index, start, end, game_title, play_with_friends]` をログシートへ追記。
+   - **5分以上のプレイのみ** `[record_id, device_id, index, start, end, game_title, play_with_friends]` をローカルDBへ保存し、ログシートへバックアップ。
    - 5分未満の場合は破棄。
    - 開始・終了時刻は `YYYY/MM/DD HH:MM:SS` 形式に整形。
 5. ステータス表示（GUI）：
@@ -1058,7 +1167,7 @@ def check_day_change(self) -> bool:
 - **スキャン間隔**: 1秒固定（`POLL_INTERVAL_SECONDS = 1`）。
 - **最小記録時間**: 5分以上（`MIN_PLAY_MINUTES = 5`）。
 - **部分一致**: ウィンドウタイトルの部分一致に依存。共通する文字列を登録する必要がある（例: Terraria）。
-- **スプレッドシートアクセス**: GUI版では起動時とゲーム記録時のみアクセス（UI更新時はキャッシュを使用）。キャッシュは`LogHandler.records`（`List[dict]`）に保持され、`get_cached_records()`で取得。記録時は`save_record()`がスプレッドシートとキャッシュを同時更新。
+- **プレイログ保存**: ローカルDB（`data/play_logs.sqlite3`）を主保存先とする。キャッシュは`LogHandler.records`（`List[dict]`）に保持され、`get_cached_records()`で取得。起動時と記録時はスプレッドシート全件をローカルDBへ同期し、`save_record()`がローカルDBとキャッシュを同時更新してスプレッドシートへバックアップする。バックアップ失敗時もローカル保存は継続し、未バックアップ行は次回起動時に再送する。スプレッドシート取得に失敗した回は、重複防止のため未バックアップ行の送信も止める。同一 `record_id` がスプレッドシート側にある場合は、`sync_conflict_policy` に従って既存行を上書きするか、別IDを採番して新規行として追加する。
 - **日跨ぎ処理**: プレイセッションが深夜0時を跨いだ場合、日付ごとに分割して記録。
 
 ## 起動方法
@@ -1074,7 +1183,7 @@ game_time_tracker.bat
 - ✅ ログ取得機能_V1 (手動操作での取得は削除)
 - ✅ ログ取得機能_V3 (自動検出実装)
   - ウィンドウタイトルから自動判別
-  - Google スプレッドシートへ自動保存
+  - ローカルDBへ自動保存し、Google スプレッドシートへバックアップ
 
 ## 開発
 - テスト: `python -m unittest`（`tests/` 配下を検出）

@@ -180,7 +180,7 @@ def build_game_report(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
 ) -> ReportSummary:
-    """Build a game report from cached spreadsheet records.
+    """Build a game report from cached play log records.
 
     Records are already split by day when they are written, so filtering by the
     start date is enough for the current storage model.

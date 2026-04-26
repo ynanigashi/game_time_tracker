@@ -646,6 +646,7 @@ class MainWindowBootstrapError(Exception):
         log_message: Optional[str] = None,
         *,
         open_settings: bool = False,
+        open_game_catalog: bool = False,
         alert_title: Optional[str] = None,
         alert_message: Optional[str] = None,
     ) -> None:
@@ -653,6 +654,7 @@ class MainWindowBootstrapError(Exception):
         self.status_message = status_message
         self.log_message = log_message
         self.open_settings = open_settings
+        self.open_game_catalog = open_game_catalog
         self.alert_title = alert_title
         self.alert_message = alert_message
 
@@ -733,7 +735,8 @@ class MainWindowBootstrapper:
             ) from e
         except NoGamesConfiguredError as e:
             raise MainWindowBootstrapError(
-                'ゲーム情報が取得できませんでした（config.ini を確認）'
+                'ゲーム情報が未登録です。ゲーム管理で追加してください。',
+                open_game_catalog=True,
             ) from e
         except FileNotFoundError as e:
             raise MainWindowBootstrapError(

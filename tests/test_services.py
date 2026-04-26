@@ -282,12 +282,34 @@ class TestGameInfoLoaderExceptions(unittest.TestCase):
         config.game_info.sheet_gid = 123
         return config
 
+    def _empty_store(self):
+        store = MagicMock()
+        store.has_any_games.return_value = False
+        store.import_records.return_value = 0
+        store.load_games.return_value = []
+        return store
+
+    def test_load_uses_local_store_when_games_exist(self):
+        """ローカルDBにゲーム情報がある場合はスプレッドシートを読まない."""
+        store = MagicMock()
+        store.has_any_games.return_value = True
+        store.load_games.return_value = [
+            models.GameEntry(game_title="Local", window_title="Local")
+        ]
+        config = self._create_mock_config()
+        loader = services.GameInfoLoader(config, game_store=store)
+
+        result = loader.load()
+
+        self.assertEqual(result[0].game_title, "Local")
+        store.load_games.assert_called_once()
+
     @patch('src.infra.gspread_service.gspread.service_account')
     def test_load_file_not_found_raises(self, mock_sa):
         """認証ファイルが見つからない場合は起動側へ再送出する."""
         mock_sa.side_effect = FileNotFoundError("fake.json not found")
         config = self._create_mock_config()
-        loader = services.GameInfoLoader(config)
+        loader = services.GameInfoLoader(config, game_store=self._empty_store())
 
         with self.assertRaises(FileNotFoundError):
             loader.load()
@@ -297,7 +319,7 @@ class TestGameInfoLoaderExceptions(unittest.TestCase):
         """スプレッドシートが見つからない場合は空リストを返す."""
         mock_sa.side_effect = fake_gspread.exceptions.SpreadsheetNotFound("Not found")
         config = self._create_mock_config()
-        loader = services.GameInfoLoader(config)
+        loader = services.GameInfoLoader(config, game_store=self._empty_store())
 
         result = loader.load()
 
@@ -311,7 +333,7 @@ class TestGameInfoLoaderExceptions(unittest.TestCase):
             fake_gspread.exceptions.WorksheetNotFound("gid not found")
         mock_sa.return_value = mock_gc
         config = self._create_mock_config()
-        loader = services.GameInfoLoader(config)
+        loader = services.GameInfoLoader(config, game_store=self._empty_store())
 
         result = loader.load()
 
@@ -325,7 +347,7 @@ class TestGameInfoLoaderExceptions(unittest.TestCase):
         mock_response.json.return_value = {}
         mock_sa.side_effect = fake_gspread.exceptions.APIError(mock_response)
         config = self._create_mock_config()
-        loader = services.GameInfoLoader(config)
+        loader = services.GameInfoLoader(config, game_store=self._empty_store())
 
         result = loader.load()
 
@@ -336,7 +358,7 @@ class TestGameInfoLoaderExceptions(unittest.TestCase):
         """想定外の例外は握りつぶさず再送出する."""
         mock_sa.side_effect = RuntimeError("Unexpected error")
         config = self._create_mock_config()
-        loader = services.GameInfoLoader(config)
+        loader = services.GameInfoLoader(config, game_store=self._empty_store())
 
         with self.assertRaises(RuntimeError):
             loader.load()
@@ -355,7 +377,21 @@ class TestGameInfoLoaderExceptions(unittest.TestCase):
         mock_gc.open_by_key.return_value.get_worksheet_by_id.return_value = mock_sheet
         mock_sa.return_value = mock_gc
         config = self._create_mock_config()
-        loader = services.GameInfoLoader(config)
+        store = self._empty_store()
+        store.import_records.return_value = 2
+        store.load_games.return_value = [
+            models.GameEntry(
+                game_title='Game1',
+                window_title='Game1',
+                play_with_friends=True,
+            ),
+            models.GameEntry(
+                game_title='Game2',
+                window_title='Game2 Window',
+                is_browser_game=True,
+            ),
+        ]
+        loader = services.GameInfoLoader(config, game_store=store)
 
         result = loader.load()
 
@@ -364,6 +400,7 @@ class TestGameInfoLoaderExceptions(unittest.TestCase):
         self.assertTrue(result[0].play_with_friends)
         self.assertEqual(result[1].game_title, 'Game2')
         self.assertTrue(result[1].is_browser_game)
+        store.import_records.assert_called_once_with(mock_sheet.get_all_records.return_value)
 
 
 class TestWindowScannerGetTitles(unittest.TestCase):

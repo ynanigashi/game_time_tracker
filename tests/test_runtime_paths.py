@@ -67,6 +67,18 @@ class TestRuntimePaths(unittest.TestCase):
 
         self.assertEqual(db_path, self.base_dir / "data" / "settings.sqlite3")
 
+    def test_default_play_log_db_file_uses_data_directory(self):
+        with patch("src.infra.runtime_paths.app_base_dir", return_value=self.base_dir):
+            db_path = runtime_paths.default_play_log_db_file()
+
+        self.assertEqual(db_path, self.base_dir / "data" / "play_logs.sqlite3")
+
+    def test_default_game_catalog_db_file_uses_data_directory(self):
+        with patch("src.infra.runtime_paths.app_base_dir", return_value=self.base_dir):
+            db_path = runtime_paths.default_game_catalog_db_file()
+
+        self.assertEqual(db_path, self.base_dir / "data" / "game_catalog.sqlite3")
+
 
 if __name__ == "__main__":
     unittest.main()

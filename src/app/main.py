@@ -81,6 +81,7 @@ from src.infra.runtime_paths import (
     resolve_window_state_file,
 )
 from src.ui.gui_layout import build_main_layout
+from src.ui.game_catalog_dialog import GameCatalogDialog
 from src.ui.report_dialog import ReportDialog
 from src.ui.settings_dialog import SettingsDialog
 
@@ -235,6 +236,7 @@ class MainWindow(QWidget):
         self._overtime_alert_toggle_connected = False
         self._report_button_connected = False
         self._report_dialog: Optional[ReportDialog] = None
+        self._game_catalog_dialog: Optional[GameCatalogDialog] = None
         self._settings_dialog: Optional[SettingsDialog] = None
         self._overtime_alert_tracker = OvertimeAlertTracker(
             thresholds_minutes=OVERTIME_ALERT_THRESHOLDS_MINUTES,
@@ -476,6 +478,10 @@ class MainWindow(QWidget):
                     )
                 self._open_settings_dialog()
                 return
+            if getattr(e, "open_game_catalog", False):
+                self._set_status(e.status_message)
+                self._open_game_catalog_dialog()
+                return
             self._disable_with_status(e.status_message)
             return
 
@@ -700,6 +706,22 @@ class MainWindow(QWidget):
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+
+    def _open_game_catalog_dialog(self) -> None:
+        """Open a non-modal game catalog dialog."""
+        dialog = getattr(self, "_game_catalog_dialog", None)
+        if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
+            dialog = GameCatalogDialog(self, on_saved=self._on_game_catalog_saved)
+            self._game_catalog_dialog = dialog
+
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _on_game_catalog_saved(self) -> None:
+        """Reload runtime services after the game catalog changes."""
+        self._set_status("ゲーム情報を保存しました。")
+        self._init_components()
 
     def _on_settings_saved(self) -> None:
         """Reload runtime services after settings are saved."""
@@ -1007,6 +1029,7 @@ class MainWindow(QWidget):
     def _show_context_menu(self, event: QMouseEvent) -> None:
         menu = QMenu(self)
         report_action = menu.addAction("レポート")
+        game_catalog_action = menu.addAction("ゲーム管理")
         settings_action = menu.addAction("設定")
         exit_action = menu.addAction("終了")
 
@@ -1020,6 +1043,7 @@ class MainWindow(QWidget):
         self._handle_context_menu_selection(
             selected_action,
             report_action=report_action,
+            game_catalog_action=game_catalog_action,
             settings_action=settings_action,
             exit_action=exit_action,
         )
@@ -1031,9 +1055,12 @@ class MainWindow(QWidget):
         report_action: object,
         settings_action: object,
         exit_action: object,
+        game_catalog_action: object = None,
     ) -> None:
         if selected_action is report_action:
             self._open_report_dialog()
+        elif selected_action is game_catalog_action:
+            self._open_game_catalog_dialog()
         elif selected_action is settings_action:
             self._open_settings_dialog()
         elif selected_action is exit_action:

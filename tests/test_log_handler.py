@@ -9,11 +9,277 @@ from src.infra.log_handler import LogHandler
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+import tempfile
 from unittest.mock import MagicMock, patch
 
 # 共通スタブをインストール
 from tests.test_stubs import install_stubs, fake_gspread, FakeLogHandler
 install_stubs()
+
+
+class TestLogHandlerLocalPrimary(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def _store(self):
+        from src.infra.play_log_store import PlayLogStore
+
+        return PlayLogStore(Path(self.temp_dir.name) / "play_logs.sqlite3")
+
+    def _config(self):
+        from src.infra.config_loader import LogHandlerConfig
+
+        return LogHandlerConfig(cert_file_path="service_account.json", sheet_key="key")
+
+    def _local_only_config(self):
+        from src.infra.config_loader import LogHandlerConfig
+
+        return LogHandlerConfig(
+            cert_file_path="service_account.json",
+            sheet_key="",
+            backup_mode="local_only",
+        )
+
+    def test_imports_spreadsheet_records_when_local_db_empty(self):
+        spreadsheet = MagicMock()
+        spreadsheet.get_all_records.return_value = [
+            {
+                "index": 1,
+                "start_time": "2026/04/26 10:00:00",
+                "end_time": "2026/04/26 10:30:00",
+                "title": "Game",
+                "play_with_friends": "TRUE",
+            }
+        ]
+        with patch("src.infra.log_handler.GspreadService", return_value=spreadsheet):
+            handler = LogHandler(self._config(), play_log_store=self._store())
+
+        self.assertEqual(len(handler.records), 1)
+        self.assertEqual(handler.index, 1)
+        self.assertEqual(handler.records[0]["title"], "Game")
+
+    def test_save_record_succeeds_when_spreadsheet_backup_fails(self):
+        spreadsheet = MagicMock()
+        spreadsheet.get_all_records.return_value = []
+        spreadsheet.append_row.return_value = False
+        with patch("src.infra.log_handler.GspreadService", return_value=spreadsheet):
+            handler = LogHandler(self._config(), play_log_store=self._store())
+
+        result = handler.save_record(
+            [1, "2026/04/26 10:00:00", "2026/04/26 10:30:00", "Game", False]
+        )
+
+        self.assertTrue(result)
+        self.assertEqual(len(handler.records), 1)
+        spreadsheet.append_row.assert_called_once()
+
+    def test_startup_backs_up_pending_local_records(self):
+        store = self._store()
+        store.save_record(
+            [1, "2026/04/26 10:00:00", "2026/04/26 10:30:00", "Game", False],
+            backed_up=False,
+        )
+        spreadsheet = MagicMock()
+        spreadsheet.get_all_records.return_value = []
+        spreadsheet.append_row.return_value = True
+
+        with patch("src.infra.log_handler.GspreadService", return_value=spreadsheet):
+            handler = LogHandler(self._config(), play_log_store=store)
+
+        self.assertEqual(spreadsheet.get_all_records.call_count, 1)
+        args = spreadsheet.append_row.call_args.args[0]
+        self.assertEqual(
+            args[2:],
+            [1, "2026/04/26 10:00:00", "2026/04/26 10:30:00", "Game", False],
+        )
+        self.assertEqual(handler.records[0]["title"], "Game")
+        self.assertEqual(store.load_pending_backup_records(), [])
+
+    def test_fetch_failure_keeps_pending_records_for_later_retry(self):
+        store = self._store()
+        store.save_record(
+            [1, "2026/04/26 10:00:00", "2026/04/26 10:30:00", "Game", False],
+            backed_up=False,
+        )
+        spreadsheet = MagicMock()
+        spreadsheet.get_all_records.side_effect = RuntimeError("network error")
+
+        with patch("src.infra.log_handler.GspreadService", return_value=spreadsheet):
+            LogHandler(self._config(), play_log_store=store)
+
+        spreadsheet.append_row.assert_not_called()
+        self.assertEqual(len(store.load_pending_backup_records()), 1)
+
+    def test_spreadsheet_sync_imports_remote_records_even_when_local_has_data(self):
+        store = self._store()
+        store.save_record(
+            [1, "2026/04/26 10:00:00", "2026/04/26 10:30:00", "Local", False],
+            backed_up=True,
+        )
+        spreadsheet = MagicMock()
+        spreadsheet.get_all_records.return_value = [
+            {
+                "record_id": "remote-1",
+                "device_id": "pc-2",
+                "index": 1,
+                "start_time": "2026/04/26 11:00:00",
+                "end_time": "2026/04/26 11:30:00",
+                "title": "Remote",
+                "play_with_friends": "FALSE",
+            }
+        ]
+        spreadsheet.append_row.return_value = True
+
+        with patch("src.infra.log_handler.GspreadService", return_value=spreadsheet):
+            handler = LogHandler(self._config(), play_log_store=store)
+
+        titles = [record["title"] for record in handler.records]
+        self.assertEqual(titles, ["Local", "Remote"])
+
+    def test_manual_sync_with_spreadsheet_updates_cache_and_returns_counts(self):
+        spreadsheet = MagicMock()
+        spreadsheet.get_all_records.side_effect = [
+            [],
+            [
+                {
+                    "record_id": "remote-1",
+                    "device_id": "pc-2",
+                    "index": 1,
+                    "start_time": "2026/04/26 11:00:00",
+                    "end_time": "2026/04/26 11:30:00",
+                    "title": "Remote",
+                    "play_with_friends": "FALSE",
+                }
+            ],
+        ]
+
+        with patch("src.infra.log_handler.GspreadService", return_value=spreadsheet):
+            handler = LogHandler(self._config(), play_log_store=self._store())
+            result = handler.sync_with_spreadsheet()
+
+        self.assertEqual(result.imported, 1)
+        self.assertEqual(result.backed_up, 0)
+        self.assertEqual(result.total, 1)
+        self.assertEqual(handler.records[0]["title"], "Remote")
+
+    def test_duplicate_record_id_overwrites_spreadsheet_row_by_default(self):
+        store = self._store()
+        saved = store.save_record(
+            [1, "2026/04/26 10:00:00", "2026/04/26 10:30:00", "Local", False],
+            backed_up=False,
+        )
+        spreadsheet = MagicMock()
+        spreadsheet.get_all_records.return_value = [
+            {
+                "record_id": saved["record_id"],
+                "device_id": "pc-2",
+                "index": 1,
+                "start_time": "2026/04/26 09:00:00",
+                "end_time": "2026/04/26 09:30:00",
+                "title": "Remote",
+                "play_with_friends": "FALSE",
+            }
+        ]
+        spreadsheet.update_row_by_record_id.return_value = True
+
+        with patch("src.infra.log_handler.GspreadService", return_value=spreadsheet):
+            LogHandler(self._config(), play_log_store=store)
+
+        spreadsheet.update_row_by_record_id.assert_called_once()
+        spreadsheet.append_row.assert_not_called()
+        self.assertEqual(store.load_pending_backup_records(), [])
+
+    def test_duplicate_record_id_can_be_reissued_before_append(self):
+        from src.infra.config_loader import LogHandlerConfig
+
+        store = self._store()
+        saved = store.save_record(
+            [1, "2026/04/26 10:00:00", "2026/04/26 10:30:00", "Local", False],
+            backed_up=False,
+        )
+        spreadsheet = MagicMock()
+        spreadsheet.get_all_records.return_value = [
+            {
+                "record_id": saved["record_id"],
+                "device_id": "pc-2",
+                "index": 1,
+                "start_time": "2026/04/26 09:00:00",
+                "end_time": "2026/04/26 09:30:00",
+                "title": "Remote",
+                "play_with_friends": "FALSE",
+            }
+        ]
+        spreadsheet.append_row.return_value = True
+        config = LogHandlerConfig(
+            cert_file_path="service_account.json",
+            sheet_key="key",
+            sync_conflict_policy="new_id",
+        )
+
+        with patch("src.infra.log_handler.GspreadService", return_value=spreadsheet):
+            LogHandler(config, play_log_store=store)
+
+        appended = spreadsheet.append_row.call_args.args[0]
+        self.assertNotEqual(appended[0], saved["record_id"])
+        spreadsheet.update_row_by_record_id.assert_not_called()
+        self.assertEqual(store.load_pending_backup_records(), [])
+
+    def test_pending_backup_uses_legacy_values_for_legacy_sheet_headers(self):
+        store = self._store()
+        store.save_record(
+            [3, "2026/04/26 10:00:00", "2026/04/26 10:30:00", "Legacy", True],
+            backed_up=False,
+        )
+        spreadsheet = MagicMock()
+        spreadsheet.get_all_records.return_value = [
+            {
+                "No": 1,
+                "start_time": "2026/04/26 09:00:00",
+                "end_time": "2026/04/26 09:30:00",
+                "title": "Remote",
+                "with_friends": "FALSE",
+            }
+        ]
+        spreadsheet.append_row.return_value = True
+
+        with patch("src.infra.log_handler.GspreadService", return_value=spreadsheet):
+            LogHandler(self._config(), play_log_store=store)
+
+        spreadsheet.append_row.assert_called_once_with(
+            [3, "2026/04/26 10:00:00", "2026/04/26 10:30:00", "Legacy", True]
+        )
+        self.assertEqual(store.load_pending_backup_records(), [])
+
+    def test_log_sheet_gid_is_passed_to_gspread_service(self):
+        from src.infra.config_loader import LogHandlerConfig
+
+        config = LogHandlerConfig(
+            cert_file_path="service_account.json",
+            sheet_key="key",
+            sheet_gid=123,
+        )
+        spreadsheet = MagicMock()
+        spreadsheet.get_all_records.return_value = []
+        with patch("src.infra.log_handler.GspreadService", return_value=spreadsheet) as service:
+            LogHandler(config, play_log_store=self._store())
+
+        service.assert_called_once_with(
+            cert_file_path="service_account.json",
+            sheet_key="key",
+            sheet_gid=123,
+        )
+
+    def test_local_only_mode_does_not_connect_spreadsheet_backup(self):
+        store = self._store()
+        with patch("src.infra.log_handler.GspreadService") as service:
+            handler = LogHandler(self._local_only_config(), play_log_store=store)
+
+        service.assert_not_called()
+        self.assertIsNone(handler.gspread_service)
+        self.assertEqual(handler.records, [])
 
 
 class TestLogHandlerCache(unittest.TestCase):
@@ -389,6 +655,47 @@ class TestGspreadService(unittest.TestCase):
         result = service.append_row(['value1', 'value2'])
 
         self.assertFalse(result)
+
+    @patch('src.infra.gspread_service.gspread.service_account')
+    def test_update_row_by_record_id_updates_matching_row(self, mock_sa):
+        """record_idが一致する行を更新する."""
+        from src.infra.gspread_service import GspreadService
+
+        mock_gc = MagicMock()
+        mock_sheet = MagicMock()
+        mock_sheet.get_all_values.return_value = [
+            ["record_id", "device_id", "index"],
+            ["record-1", "pc", "1"],
+        ]
+        mock_gc.open_by_key.return_value.sheet1 = mock_sheet
+        mock_sa.return_value = mock_gc
+
+        service = GspreadService(cert_file_path='test.json', sheet_key='test_key')
+        result = service.update_row_by_record_id("record-1", ["record-1", "pc", 1])
+
+        self.assertTrue(result)
+        mock_sheet.update.assert_called_once_with(
+            range_name="A2:C2",
+            values=[["record-1", "pc", 1]],
+            value_input_option="USER_ENTERED",
+        )
+
+    @patch('src.infra.gspread_service.gspread.service_account')
+    def test_update_row_by_record_id_returns_false_when_missing(self, mock_sa):
+        """record_id列または一致行がない場合はFalseを返す."""
+        from src.infra.gspread_service import GspreadService
+
+        mock_gc = MagicMock()
+        mock_sheet = MagicMock()
+        mock_sheet.get_all_values.return_value = [["index"], ["1"]]
+        mock_gc.open_by_key.return_value.sheet1 = mock_sheet
+        mock_sa.return_value = mock_gc
+
+        service = GspreadService(cert_file_path='test.json', sheet_key='test_key')
+        result = service.update_row_by_record_id("record-1", ["record-1"])
+
+        self.assertFalse(result)
+        mock_sheet.update.assert_not_called()
 
 
 class TestLogHandlerGetTodayStats(unittest.TestCase):

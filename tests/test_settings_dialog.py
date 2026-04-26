@@ -5,6 +5,7 @@ from tests.test_stubs import install_stubs
 install_stubs()
 
 from src.infra.settings_config import EditableAppConfig
+from src.infra.config_loader import PLAY_LOG_BACKUP_MODE_LOCAL_ONLY
 from src.ui.settings_dialog import SettingsDialog
 
 
@@ -30,6 +31,29 @@ class TestSettingsDialog(unittest.TestCase):
 
         self.assertEqual(collected.json_file_path, "custom.json")
         self.assertEqual(collected.browsers, ["Chrome", "Edge", "Firefox"])
+
+    def test_local_only_mode_disables_log_sheet_key(self):
+        loaded_config = EditableAppConfig(
+            json_file_path="service_account.json",
+            log_sheet_key="",
+            game_info_sheet_key="game_key",
+            game_info_sheet_gid=123,
+            browsers=["Chrome"],
+            excluded_titles=["Settings"],
+            play_log_backup_mode=PLAY_LOG_BACKUP_MODE_LOCAL_ONLY,
+        )
+        with patch(
+            "src.ui.settings_dialog.load_editable_config",
+            return_value=loaded_config,
+        ):
+            dialog = SettingsDialog()
+
+        collected = dialog._collect()
+
+        self.assertEqual(collected.play_log_backup_mode, PLAY_LOG_BACKUP_MODE_LOCAL_ONLY)
+        self.assertFalse(dialog.log_sheet_key_edit.enabled)
+        self.assertFalse(dialog.log_sheet_gid_edit.enabled)
+        self.assertFalse(dialog.sync_conflict_policy_combo.enabled)
 
     def test_save_calls_callback_on_success(self):
         loaded_config = EditableAppConfig(

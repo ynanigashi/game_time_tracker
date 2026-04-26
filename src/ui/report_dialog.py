@@ -171,6 +171,8 @@ class ReportDialog(QDialog):
         self.summary_unit_control = self._create_unit_toggle()
         self.trend_unit_control = self._create_unit_toggle()
         self._sync_unit_controls()
+        self.log_sync_button = QPushButton("スプシ同期", self)
+        self.log_sync_button.clicked.connect(self._sync_from_spreadsheet)
 
         self.summary_label = QLabel("", self)
         self.debug_label = QLabel("", self)
@@ -211,6 +213,11 @@ class ReportDialog(QDialog):
         self.title_filter_label = QLabel("タイトル", self)
         self._updating_title_filter = False
         self._title_filter_initialized = False
+        self.log_summary_label = QLabel("", self)
+        self.log_table = self._create_table(
+            ["ID", "PC", "No.", "開始", "終了", "タイトル", "フレンド"],
+            stretch_columns=(0, 1, 5),
+        )
 
         self.chart_view = None
         self.trend_chart_view = None
@@ -287,6 +294,7 @@ class ReportDialog(QDialog):
         tabs = QTabWidget(self)
         tabs.addTab(self._build_summary_tab(), "ゲーム別")
         tabs.addTab(self._build_trend_tab(), "推移")
+        tabs.addTab(self._build_log_tab(), "ログ")
 
         layout = QVBoxLayout()
         layout.addWidget(tabs)
@@ -351,6 +359,20 @@ class ReportDialog(QDialog):
         content_layout.addLayout(title_filter_layout, 1)
         content_layout.addLayout(trend_layout, 4)
         layout.addLayout(content_layout)
+
+        tab = QWidget(self)
+        tab.setLayout(layout)
+        return tab
+
+    def _build_log_tab(self) -> QWidget:
+        controls = QHBoxLayout()
+        controls.addWidget(self.log_sync_button)
+        controls.addStretch()
+
+        layout = QVBoxLayout()
+        layout.addLayout(controls)
+        layout.addWidget(self.log_summary_label)
+        layout.addWidget(self.log_table)
 
         tab = QWidget(self)
         tab.setLayout(layout)
@@ -638,6 +660,33 @@ class ReportDialog(QDialog):
         except Exception:
             logger.exception("Failed to load title filter")
         self.refresh_trend()
+        self.refresh_logs()
+
+    def _sync_from_spreadsheet(self, *_args: object) -> None:
+        sync_with_spreadsheet = getattr(
+            self.log_handler,
+            "sync_with_spreadsheet",
+            None,
+        )
+        if not callable(sync_with_spreadsheet):
+            self._set_debug_message("スプシ同期に対応していないログハンドラです")
+            return
+
+        self._set_debug_message("スプシ同期中...", process_events=True)
+        try:
+            result = sync_with_spreadsheet()
+        except Exception:
+            logger.exception("Failed to sync play logs from spreadsheet")
+            self._set_debug_message("スプシ同期に失敗しました")
+            return
+
+        self.refresh()
+        self._set_debug_message(
+            "スプシ同期完了: "
+            f"取込 {getattr(result, 'imported', 0)} 件 / "
+            f"バックアップ {getattr(result, 'backed_up', 0)} 件 / "
+            f"合計 {getattr(result, 'total', len(self._cached_records()))} 件"
+        )
 
     def refresh_summary(self, *_args: object) -> None:
         """Refresh the game summary table and chart."""
@@ -691,6 +740,12 @@ class ReportDialog(QDialog):
             f"{point_count} 点 ({elapsed_ms:.0f} ms)"
         )
 
+    def refresh_logs(self, *_args: object) -> None:
+        """Refresh the raw play-log table."""
+        records = self._cached_records()
+        self.log_summary_label.setText(f"ログ {len(records)} 件")
+        self._populate_log_table(records)
+
     def _populate_table(self, summary: ReportSummary) -> None:
         self.table.setRowCount(len(summary.rows))
         for row_index, row in enumerate(summary.rows):
@@ -732,6 +787,30 @@ class ReportDialog(QDialog):
             ]
             for column, value in enumerate(values):
                 self.trend_table.setItem(row_index, column, QTableWidgetItem(value))
+
+    def _populate_log_table(self, records: List[dict]) -> None:
+        rows = sorted(
+            records,
+            key=lambda record: int(record.get("index") or 0),
+            reverse=True,
+        )
+        self.log_table.setRowCount(len(rows))
+        for row_index, record in enumerate(rows):
+            values = [
+                str(record.get("record_id", "")),
+                str(record.get("device_id", "")),
+                str(record.get("index", "")),
+                str(record.get("start_time", "")),
+                str(record.get("end_time", "")),
+                str(record.get("title", "")),
+                self._bool_text(record.get("play_with_friends", False)),
+            ]
+            for column, value in enumerate(values):
+                self.log_table.setItem(row_index, column, QTableWidgetItem(value))
+
+    @staticmethod
+    def _bool_text(value: object) -> str:
+        return "TRUE" if value is True or str(value).upper() == "TRUE" else "FALSE"
 
     def _populate_chart(self, summary: ReportSummary) -> None:
         if self.chart_view is None or not CHARTS_AVAILABLE:
