@@ -52,7 +52,8 @@ try:
     from PySide6.QtGui import QColor, QPainter
 
     CHARTS_AVAILABLE = True
-except Exception:
+    CHARTS_IMPORT_ERROR = ""
+except Exception as exc:
     QBarCategoryAxis = None  # type: ignore
     QBarSet = None  # type: ignore
     QCategoryAxis = None  # type: ignore
@@ -65,6 +66,7 @@ except Exception:
     QColor = None  # type: ignore
     QPainter = None  # type: ignore
     CHARTS_AVAILABLE = False
+    CHARTS_IMPORT_ERROR = str(exc)
 
 
 class ReportDialog(QDialog):
@@ -221,13 +223,20 @@ class ReportDialog(QDialog):
                 self.trend_chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
         else:
             self.chart_fallback_label = QLabel(
-                "PySide6.QtCharts が利用できないため、表のみ表示します。",
+                self._chart_fallback_message(),
                 self,
             )
             self.chart_fallback_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self._build_layout()
         self.refresh()
+
+    @staticmethod
+    def _chart_fallback_message() -> str:
+        message = "PySide6.QtCharts が利用できないため、表のみ表示します。"
+        if CHARTS_IMPORT_ERROR:
+            return f"{message}\n原因: {CHARTS_IMPORT_ERROR}"
+        return message
 
     def _create_table(
         self,
