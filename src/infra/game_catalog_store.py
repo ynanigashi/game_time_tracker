@@ -26,6 +26,17 @@ class GameCatalogSyncResult:
     total: int
 
 
+@dataclass(frozen=True)
+class GameCatalogPushResult:
+    """Summary of a game-catalog spreadsheet push."""
+
+    sent: int
+    updated: int
+    appended: int
+    failed: int
+    total: int
+
+
 class GameCatalogStore:
     """Persist editable game definitions locally in SQLite."""
 
@@ -102,6 +113,23 @@ class GameCatalogStore:
             ),
             is_browser_game=parse_bool(record.get("is_browser_game", "FALSE")),
         )
+
+    @staticmethod
+    def game_to_spreadsheet_values(game: GameEntry) -> List[Any]:
+        return [
+            game.game_id,
+            game.game_title,
+            game.window_title,
+            "TRUE" if game.play_with_friends else "FALSE",
+            "TRUE" if game.is_browser_game else "FALSE",
+        ]
+
+    def spreadsheet_records(self) -> List[List[Any]]:
+        return [
+            self.game_to_spreadsheet_values(game)
+            for game in self.load_games()
+            if game.game_id
+        ]
 
     def has_any_games(self) -> bool:
         with self._connection() as conn:

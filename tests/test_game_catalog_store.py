@@ -92,6 +92,30 @@ class TestGameCatalogStore(unittest.TestCase):
         self.assertEqual(active_games[0].game_id, "sheet-1")
         self.assertEqual(active_games[0].game_title, "Remote")
 
+    def test_spreadsheet_records_exports_enabled_games_only(self):
+        self.store.save_game(
+            GameEntry(
+                game_id="game-1",
+                game_title="Game",
+                window_title="Game Window",
+                play_with_friends=True,
+                is_browser_game=False,
+            )
+        )
+        self.store.save_game(
+            GameEntry(
+                game_id="deleted-game",
+                game_title="Deleted",
+                window_title="Deleted Window",
+            )
+        )
+        self.store.delete_game("deleted-game")
+
+        self.assertEqual(
+            self.store.spreadsheet_records(),
+            [["game-1", "Game", "Game Window", "TRUE", "FALSE"]],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

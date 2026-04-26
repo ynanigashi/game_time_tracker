@@ -163,7 +163,55 @@ class TestLogHandlerLocalPrimary(unittest.TestCase):
         self.assertEqual(result.imported, 1)
         self.assertEqual(result.backed_up, 0)
         self.assertEqual(result.total, 1)
+        self.assertEqual(result.remote_count, 1)
+        self.assertEqual(result.import_skipped, 0)
+        self.assertEqual(result.pending_count, 0)
         self.assertEqual(handler.records[0]["title"], "Remote")
+
+    def test_manual_sync_result_counts_invalid_remote_rows(self):
+        spreadsheet = MagicMock()
+        spreadsheet.get_all_records.side_effect = [
+            [],
+            [
+                {
+                    "record_id": "remote-1",
+                    "device_id": "pc-2",
+                    "index": 1,
+                    "start_time": "2026/04/26 11:00:00",
+                    "end_time": "2026/04/26 11:30:00",
+                    "title": "Remote",
+                    "play_with_friends": "FALSE",
+                },
+                {"record_id": "bad-row", "index": ""},
+            ],
+        ]
+
+        with patch("src.infra.log_handler.GspreadService", return_value=spreadsheet):
+            handler = LogHandler(self._config(), play_log_store=self._store())
+            result = handler.sync_with_spreadsheet()
+
+        self.assertEqual(result.remote_count, 2)
+        self.assertEqual(result.imported, 1)
+        self.assertEqual(result.import_skipped, 1)
+        self.assertEqual(result.total, 1)
+
+    def test_manual_sync_result_reports_fetch_error_and_pending_count(self):
+        store = self._store()
+        store.save_record(
+            [1, "2026/04/26 10:00:00", "2026/04/26 10:30:00", "Game", False],
+            backed_up=False,
+        )
+        spreadsheet = MagicMock()
+        spreadsheet.get_all_records.side_effect = RuntimeError("network error")
+
+        with patch("src.infra.log_handler.GspreadService", return_value=spreadsheet):
+            handler = LogHandler(self._config(), play_log_store=store)
+            result = handler.sync_with_spreadsheet()
+
+        self.assertEqual(result.remote_count, 0)
+        self.assertEqual(result.pending_count, 1)
+        self.assertEqual(result.backup_failed, 1)
+        self.assertIn("network error", result.error_message)
 
     def test_duplicate_record_id_overwrites_spreadsheet_row_by_default(self):
         store = self._store()
@@ -677,6 +725,34 @@ class TestGspreadService(unittest.TestCase):
         mock_sheet.update.assert_called_once_with(
             range_name="A2:C2",
             values=[["record-1", "pc", 1]],
+            value_input_option="USER_ENTERED",
+        )
+
+    @patch('src.infra.gspread_service.gspread.service_account')
+    def test_update_row_by_key_updates_matching_row(self, mock_sa):
+        """任意のキー列が一致する行を更新する."""
+        from src.infra.gspread_service import GspreadService
+
+        mock_gc = MagicMock()
+        mock_sheet = MagicMock()
+        mock_sheet.get_all_values.return_value = [
+            ["id", "game_title", "window_title"],
+            ["game-1", "Old", "Old Window"],
+        ]
+        mock_gc.open_by_key.return_value.sheet1 = mock_sheet
+        mock_sa.return_value = mock_gc
+
+        service = GspreadService(cert_file_path='test.json', sheet_key='test_key')
+        result = service.update_row_by_key(
+            "id",
+            "game-1",
+            ["game-1", "New", "New Window"],
+        )
+
+        self.assertTrue(result)
+        mock_sheet.update.assert_called_once_with(
+            range_name="A2:C2",
+            values=[["game-1", "New", "New Window"]],
             value_input_option="USER_ENTERED",
         )
 

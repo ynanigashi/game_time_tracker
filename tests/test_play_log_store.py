@@ -44,6 +44,24 @@ class TestPlayLogStore(unittest.TestCase):
         self.assertEqual(imported, 1)
         self.assertEqual(len(self.store.load_records()), 1)
 
+    def test_import_records_detailed_counts_invalid_rows(self):
+        result = self.store.import_records_detailed(
+            [
+                {
+                    "index": 1,
+                    "start_time": "2026/04/26 10:00:00",
+                    "end_time": "2026/04/26 10:30:00",
+                    "title": "Game",
+                    "play_with_friends": "TRUE",
+                },
+                {"index": ""},
+            ],
+            backed_up=True,
+        )
+
+        self.assertEqual(result.imported, 1)
+        self.assertEqual(result.skipped, 1)
+
     def test_import_records_accepts_legacy_sheet_headers(self):
         imported = self.store.import_records(
             [

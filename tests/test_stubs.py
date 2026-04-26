@@ -295,12 +295,25 @@ class FakeFileDialog:
 class FakeMenu:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.actions = []
+        self.menus = []
         self.selected_action = None
 
     def addAction(self, text: str) -> object:
-        action = types.SimpleNamespace(text=text)
+        action = types.SimpleNamespace(
+            text=text,
+            checkable=False,
+            checked=False,
+        )
+        action.setCheckable = lambda value: setattr(action, "checkable", value)
+        action.setChecked = lambda value: setattr(action, "checked", value)
         self.actions.append(action)
         return action
+
+    def addMenu(self, text: str) -> "FakeMenu":
+        menu = FakeMenu()
+        menu.text = text
+        self.menus.append(menu)
+        return menu
 
     def exec(self, position: Any) -> object:
         return self.selected_action

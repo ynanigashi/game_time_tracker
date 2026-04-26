@@ -2268,6 +2268,52 @@ class TestMousePressEventRealMethod(unittest.TestCase):
         window._open_settings_dialog.assert_not_called()
         window.close.assert_not_called()
 
+    def test_context_menu_selection_changes_display_mode(self):
+        with patch.object(main.MainWindow, '__init__', lambda self: None):
+            window = main.MainWindow()
+        report_action = object()
+        game_catalog_action = object()
+        settings_action = object()
+        exit_action = object()
+        mode_action = object()
+        window.display_mode = 'max'
+        window._apply_display_mode = MagicMock()
+        window._save_window_state = MagicMock()
+        window._open_report_dialog = MagicMock()
+        window._open_game_catalog_dialog = MagicMock()
+        window._open_settings_dialog = MagicMock()
+        window.close = MagicMock()
+
+        window._handle_context_menu_selection(
+            mode_action,
+            report_action=report_action,
+            game_catalog_action=game_catalog_action,
+            settings_action=settings_action,
+            exit_action=exit_action,
+            mode_actions={'mid': mode_action},
+        )
+
+        self.assertEqual(window.display_mode, 'mid')
+        window._apply_display_mode.assert_called_once()
+        window._save_window_state.assert_called_once()
+        window._open_report_dialog.assert_not_called()
+        window._open_game_catalog_dialog.assert_not_called()
+        window._open_settings_dialog.assert_not_called()
+        window.close.assert_not_called()
+
+    def test_add_display_mode_menu_marks_current_mode(self):
+        with patch.object(main.MainWindow, '__init__', lambda self: None):
+            window = main.MainWindow()
+        window.display_mode = 'mid'
+        menu = main.QMenu()
+
+        actions = window._add_display_mode_menu(menu)
+
+        self.assertEqual(set(actions.keys()), set(main.DISPLAY_MODES))
+        self.assertTrue(actions['mid'].checked)
+        self.assertFalse(actions['max'].checked)
+        self.assertFalse(actions['min'].checked)
+
     def test_context_menu_selection_exits(self):
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()

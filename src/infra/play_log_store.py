@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
 import logging
 import os
 import platform
@@ -14,6 +15,14 @@ from uuid import uuid4
 from src.infra.runtime_paths import default_play_log_db_file
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PlayLogImportResult:
+    """Summary of play-log rows imported from an external source."""
+
+    imported: int
+    skipped: int
 
 
 class PlayLogStore:
@@ -273,7 +282,16 @@ class PlayLogStore:
         }
 
     def import_records(self, records: List[Dict[str, Any]], *, backed_up: bool) -> int:
+        return self.import_records_detailed(records, backed_up=backed_up).imported
+
+    def import_records_detailed(
+        self,
+        records: List[Dict[str, Any]],
+        *,
+        backed_up: bool,
+    ) -> PlayLogImportResult:
         imported = 0
+        skipped = 0
         with self._connection() as conn:
             for record in records:
                 try:
@@ -285,9 +303,10 @@ class PlayLogStore:
                     )
                 except (KeyError, TypeError, ValueError) as exc:
                     logger.debug("skipped invalid play record during import: %s", exc)
+                    skipped += 1
                     continue
                 imported += 1
-        return imported
+        return PlayLogImportResult(imported=imported, skipped=skipped)
 
     def _normalize_imported_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
         record_id = self._record_id_from(record)

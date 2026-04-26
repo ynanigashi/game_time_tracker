@@ -90,19 +90,28 @@ class GspreadService:
 
     def update_row_by_record_id(self, record_id: str, values: List[Any]) -> bool:
         """Update a row whose record_id column matches the given value."""
+        return self.update_row_by_key("record_id", record_id, values)
+
+    def update_row_by_key(
+        self,
+        key_column: str,
+        key_value: str,
+        values: List[Any],
+    ) -> bool:
+        """Update a row whose key column matches the given value."""
         try:
             rows = self.sheet.get_all_values()
             if not rows:
                 return False
             header = [str(value).strip() for value in rows[0]]
             try:
-                record_id_col = header.index("record_id")
+                key_col = header.index(key_column)
             except ValueError:
                 return False
 
             for row_number, row in enumerate(rows[1:], start=2):
-                if record_id_col < len(row) and str(row[record_id_col]) == record_id:
-                    last_column = self._column_name(max(len(header), len(values)))
+                if key_col < len(row) and str(row[key_col]) == key_value:
+                    last_column = self._column_name(len(values))
                     self.sheet.update(
                         range_name=f"A{row_number}:{last_column}{row_number}",
                         values=[values],

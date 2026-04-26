@@ -1028,6 +1028,7 @@ class MainWindow(QWidget):
 
     def _show_context_menu(self, event: QMouseEvent) -> None:
         menu = QMenu(self)
+        mode_actions = self._add_display_mode_menu(menu)
         report_action = menu.addAction("レポート")
         game_catalog_action = menu.addAction("ゲーム管理")
         settings_action = menu.addAction("設定")
@@ -1046,7 +1047,23 @@ class MainWindow(QWidget):
             game_catalog_action=game_catalog_action,
             settings_action=settings_action,
             exit_action=exit_action,
+            mode_actions=mode_actions,
         )
+
+    def _add_display_mode_menu(self, menu: QMenu) -> Dict[str, object]:
+        size_menu = menu.addMenu("サイズ")
+        mode_actions: Dict[str, object] = {}
+        current_mode = getattr(self, "display_mode", "")
+        for mode in DISPLAY_MODES:
+            action = size_menu.addAction(mode)
+            set_checkable = getattr(action, "setCheckable", None)
+            if callable(set_checkable):
+                set_checkable(True)
+            set_checked = getattr(action, "setChecked", None)
+            if callable(set_checked):
+                set_checked(mode == current_mode)
+            mode_actions[mode] = action
+        return mode_actions
 
     def _handle_context_menu_selection(
         self,
@@ -1056,7 +1073,13 @@ class MainWindow(QWidget):
         settings_action: object,
         exit_action: object,
         game_catalog_action: object = None,
+        mode_actions: Optional[Dict[str, object]] = None,
     ) -> None:
+        if mode_actions:
+            for mode, action in mode_actions.items():
+                if selected_action is action:
+                    self._set_display_mode(mode)
+                    return
         if selected_action is report_action:
             self._open_report_dialog()
         elif selected_action is game_catalog_action:
@@ -1065,6 +1088,15 @@ class MainWindow(QWidget):
             self._open_settings_dialog()
         elif selected_action is exit_action:
             self.close()
+
+    def _set_display_mode(self, display_mode: str) -> None:
+        if display_mode not in DISPLAY_MODES:
+            return
+        if self.display_mode == display_mode:
+            return
+        self.display_mode = display_mode
+        self._apply_display_mode()
+        self._save_window_state()
 
     def _cycle_display_mode(self) -> None:
         """表示モードを循環。"""

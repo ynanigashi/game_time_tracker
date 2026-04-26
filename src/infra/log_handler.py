@@ -35,6 +35,23 @@ class PlayLogSyncResult:
     imported: int
     backed_up: int
     total: int
+    remote_count: int = 0
+    import_skipped: int = 0
+    pending_count: int = 0
+    backup_failed: int = 0
+    overwritten: int = 0
+    reissued: int = 0
+    error_message: str = ""
+
+
+@dataclass(frozen=True)
+class _PlayLogBackupResult:
+    backed_up: int
+    pending_count: int
+    failed: int = 0
+    overwritten: int = 0
+    reissued: int = 0
+    error_message: str = ""
 
 
 class LogHandler:
@@ -78,16 +95,19 @@ class LogHandler:
             logger.warning("spreadsheet backup is unavailable: %s", exc)
             return None
 
-    def _fetch_backup_records(self) -> Optional[List[Dict[str, Any]]]:
+    def _fetch_backup_records(self) -> Tuple[Optional[List[Dict[str, Any]]], str]:
         if self.gspread_service is None:
-            return []
+            return [], ""
         try:
-            return self.gspread_service.get_all_records()
+            return self.gspread_service.get_all_records(), ""
         except Exception as exc:
             logger.warning("failed to fetch spreadsheet backup records: %s", exc)
-            return None
+            return None, f"スプレッドシート取得に失敗: {exc}"
 
-    def _sync_backup_records(self, records: List[Dict[str, Any]]) -> int:
+    def _sync_backup_records(
+        self,
+        records: List[Dict[str, Any]],
+    ) -> Tuple[int, int]:
         pending_ids = {
             str(record["record_id"])
             for record in self.play_log_store.load_pending_backup_records()
@@ -97,10 +117,18 @@ class LogHandler:
             for record in records
             if self._remote_record_id(record) not in pending_ids
         ]
-        imported = self.play_log_store.import_records(records_to_import, backed_up=True)
-        if imported:
-            logger.info("synced %s play records from spreadsheet backup", imported)
-        return imported
+        import_result = self.play_log_store.import_records_detailed(
+            records_to_import,
+            backed_up=True,
+        )
+        skipped_pending = len(records) - len(records_to_import)
+        skipped = skipped_pending + import_result.skipped
+        if import_result.imported:
+            logger.info(
+                "synced %s play records from spreadsheet backup",
+                import_result.imported,
+            )
+        return import_result.imported, skipped
 
     @staticmethod
     def _remote_record_id(record: Dict[str, Any]) -> str:
@@ -154,15 +182,21 @@ class LogHandler:
             return cls._record_to_legacy_values(record)
         return cls._record_to_values(record)
 
-    def _back_up_pending_records(self, remote_records: List[Dict[str, Any]]) -> int:
+    def _back_up_pending_records(
+        self,
+        remote_records: List[Dict[str, Any]],
+    ) -> _PlayLogBackupResult:
         if self.gspread_service is None:
-            return 0
+            return _PlayLogBackupResult(backed_up=0, pending_count=0)
         pending_records = self.play_log_store.load_pending_backup_records()
+        pending_count = len(pending_records)
         if not pending_records:
-            return 0
+            return _PlayLogBackupResult(backed_up=0, pending_count=0)
         legacy_schema = self._uses_legacy_backup_schema(remote_records)
         remote_record_ids = self._remote_record_ids(remote_records)
         backed_up = 0
+        overwritten = 0
+        reissued = 0
         for record in pending_records:
             record_id = str(record["record_id"])
             if not legacy_schema and record_id in remote_record_ids:
@@ -176,13 +210,22 @@ class LogHandler:
                             "failed to update duplicated play record: %s",
                             record_id,
                         )
-                        return backed_up
+                        return _PlayLogBackupResult(
+                            backed_up=backed_up,
+                            pending_count=pending_count,
+                            failed=pending_count - backed_up,
+                            overwritten=overwritten,
+                            reissued=reissued,
+                            error_message=f"重複IDの更新に失敗: {record_id}",
+                        )
                     self.play_log_store.mark_backed_up(record_id)
                     backed_up += 1
+                    overwritten += 1
                     continue
                 if self.sync_conflict_policy == PLAY_LOG_SYNC_CONFLICT_NEW_ID:
                     record = self.play_log_store.reissue_record_id(record_id)
                     record_id = str(record["record_id"])
+                    reissued += 1
             try:
                 values = self._record_to_backup_values(
                     record,
@@ -191,33 +234,68 @@ class LogHandler:
                 success = self.gspread_service.append_row(values)
             except Exception as exc:
                 logger.warning("failed to back up pending play record: %s", exc)
-                return backed_up
+                return _PlayLogBackupResult(
+                    backed_up=backed_up,
+                    pending_count=pending_count,
+                    failed=pending_count - backed_up,
+                    overwritten=overwritten,
+                    reissued=reissued,
+                    error_message=f"未バックアップログの送信に失敗: {exc}",
+                )
             if not success:
                 logger.warning(
                     "failed to back up pending play record: %s",
                     record.get("index"),
                 )
-                return backed_up
+                return _PlayLogBackupResult(
+                    backed_up=backed_up,
+                    pending_count=pending_count,
+                    failed=pending_count - backed_up,
+                    overwritten=overwritten,
+                    reissued=reissued,
+                    error_message=f"未バックアップログの送信に失敗: No.{record.get('index')}",
+                )
             self.play_log_store.mark_backed_up(str(record["record_id"]))
             remote_record_ids.add(record_id)
             backed_up += 1
-        return backed_up
+        return _PlayLogBackupResult(
+            backed_up=backed_up,
+            pending_count=pending_count,
+            overwritten=overwritten,
+            reissued=reissued,
+        )
 
     def sync_with_spreadsheet(self) -> PlayLogSyncResult:
         """Pull remote play logs and push pending local records."""
-        remote_records = self._fetch_backup_records()
+        remote_records, fetch_error = self._fetch_backup_records()
         if remote_records is None:
             imported = 0
-            backed_up = 0
+            import_skipped = 0
+            pending_count = len(self.play_log_store.load_pending_backup_records())
+            backup_result = _PlayLogBackupResult(
+                backed_up=0,
+                pending_count=pending_count,
+                failed=pending_count,
+                error_message=fetch_error,
+            )
+            remote_count = 0
         else:
-            imported = self._sync_backup_records(remote_records)
-            backed_up = self._back_up_pending_records(remote_records)
+            remote_count = len(remote_records)
+            imported, import_skipped = self._sync_backup_records(remote_records)
+            backup_result = self._back_up_pending_records(remote_records)
         self.records = self.get_all_records()
         self.index = self.play_log_store.max_index()
         return PlayLogSyncResult(
             imported=imported,
-            backed_up=backed_up,
+            backed_up=backup_result.backed_up,
             total=len(self.records),
+            remote_count=remote_count,
+            import_skipped=import_skipped,
+            pending_count=backup_result.pending_count,
+            backup_failed=backup_result.failed,
+            overwritten=backup_result.overwritten,
+            reissued=backup_result.reissued,
+            error_message=backup_result.error_message,
         )
 
     def get_all_records(self) -> List[Dict[str, Any]]:

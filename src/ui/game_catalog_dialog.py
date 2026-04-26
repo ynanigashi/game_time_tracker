@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 
 from src.core.models import GameEntry
 from src.infra.config_loader import ConfigLoader
-from src.infra.game_catalog_store import GameCatalogStore
+from src.infra.game_catalog_store import GameCatalogPushResult, GameCatalogStore
 from src.infra.gspread_service import GspreadService
 
 logger = logging.getLogger(__name__)
@@ -60,13 +60,15 @@ class GameCatalogDialog(QDialog):
         self.add_button = QPushButton("追加", self)
         self.update_button = QPushButton("更新", self)
         self.delete_button = QPushButton("削除", self)
-        self.sync_button = QPushButton("スプシから取得", self)
+        self.pull_button = QPushButton("スプシから取得", self)
+        self.push_button = QPushButton("スプシへ送信", self)
         self.close_button = QPushButton("閉じる", self)
 
         self.add_button.clicked.connect(self._add_game)
         self.update_button.clicked.connect(self._update_game)
         self.delete_button.clicked.connect(self._delete_game)
-        self.sync_button.clicked.connect(self._sync_from_spreadsheet)
+        self.pull_button.clicked.connect(self._sync_from_spreadsheet)
+        self.push_button.clicked.connect(self._push_to_spreadsheet)
         self.close_button.clicked.connect(self.accept)
 
         self._build_layout()
@@ -83,7 +85,8 @@ class GameCatalogDialog(QDialog):
         buttons.addWidget(self.add_button)
         buttons.addWidget(self.update_button)
         buttons.addWidget(self.delete_button)
-        buttons.addWidget(self.sync_button)
+        buttons.addWidget(self.pull_button)
+        buttons.addWidget(self.push_button)
         buttons.addStretch()
         buttons.addWidget(self.close_button)
 
@@ -193,12 +196,7 @@ class GameCatalogDialog(QDialog):
 
     def _sync_from_spreadsheet(self) -> None:
         try:
-            config = ConfigLoader().load()
-            service = GspreadService(
-                cert_file_path=config.log_handler.cert_file_path,
-                sheet_key=config.game_info.sheet_key,
-                sheet_gid=config.game_info.sheet_gid,
-            )
+            service = self._game_info_service()
             records = service.get_all_records()
             result = self.game_store.sync_records_from_spreadsheet(records)
         except Exception as exc:
@@ -213,4 +211,66 @@ class GameCatalogDialog(QDialog):
             "スプシから取得しました: "
             f"取得 {result.received} 件 / 反映 {result.imported} 件 / "
             f"無効化 {result.disabled} 件"
+        )
+
+    def _push_to_spreadsheet(self) -> None:
+        try:
+            service = self._game_info_service()
+            result = self._push_local_games(service)
+        except Exception as exc:
+            logger.exception("Failed to push game catalog to spreadsheet")
+            QMessageBox.warning(self, "ゲーム管理エラー", str(exc))
+            return
+
+        self.status_label.setText(
+            "スプシへ送信しました: "
+            f"送信 {result.sent} 件 / 更新 {result.updated} 件 / "
+            f"追記 {result.appended} 件 / 失敗 {result.failed} 件"
+        )
+
+    def _game_info_service(self) -> GspreadService:
+        config = ConfigLoader().load()
+        return GspreadService(
+            cert_file_path=config.log_handler.cert_file_path,
+            sheet_key=config.game_info.sheet_key,
+            sheet_gid=config.game_info.sheet_gid,
+        )
+
+    def _push_local_games(self, service: GspreadService) -> GameCatalogPushResult:
+        remote_records = service.get_all_records()
+        remote_ids = {
+            str(record.get("id", "")).strip()
+            for record in remote_records
+            if str(record.get("id", "")).strip()
+        }
+
+        updated = 0
+        appended = 0
+        failed = 0
+        local_records = self.game_store.spreadsheet_records()
+        for values in local_records:
+            game_id = str(values[0]).strip()
+            if not game_id:
+                failed += 1
+                continue
+            if game_id in remote_ids:
+                success = service.update_row_by_key("id", game_id, values)
+                if success:
+                    updated += 1
+                else:
+                    failed += 1
+                continue
+            success = service.append_row(values)
+            if success:
+                appended += 1
+                remote_ids.add(game_id)
+            else:
+                failed += 1
+
+        return GameCatalogPushResult(
+            sent=len(local_records),
+            updated=updated,
+            appended=appended,
+            failed=failed,
+            total=len(self.game_store.load_games()),
         )
