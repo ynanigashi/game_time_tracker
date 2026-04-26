@@ -34,16 +34,7 @@ jobs:
       - name: Build EXE
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --windowed --name game_time_tracker --collect-all PySide6 main.py
-
-      - name: Verify QtCharts is bundled
-        shell: pwsh
-        run: |
-          $qtCharts = Get-ChildItem -Path dist/game_time_tracker -Recurse -Filter "QtCharts*" -ErrorAction SilentlyContinue
-          if (-not $qtCharts) {
-            Write-Error "PySide6.QtCharts was not bundled into the release package."
-          }
-          $qtCharts | Select-Object FullName
+          pyinstaller --noconfirm --clean --windowed --name game_time_tracker --hidden-import PySide6.QtCharts main.py
 
       - name: Package release files
         shell: pwsh
