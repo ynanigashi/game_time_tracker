@@ -8,6 +8,7 @@ Windows PC で実行中のゲームをウィンドウタイトルから自動検
 - `config/config.ini` / `service_account.json` は EXE に同梱せず、実行時に外部ファイルとして参照する。
 - 既定では EXE と同じディレクトリ配下の `config/config.ini` を読み込む。
 - 旧配置の `config.ini`, `game_time_tracker.log`, `window_state.txt` は初回利用時に `config/`, `logs/`, `data/` へ移行する。
+- `config/config.ini` の設定値とウィンドウ状態は `data/settings.sqlite3` に保存する。`config/config.ini` は編集用の取り込み元として残し、起動時に SQLite へ同期する。
 - ソースコード実行（`python main.py`）は開発・検証用途とする。
 
 ## クラス構成図
@@ -619,10 +620,26 @@ GUI版メインウィンドウ。
 | `app_base_dir()` | PyInstaller 実行時は EXE のディレクトリ、ソース実行時はリポジトリルートを返す |
 | `default_log_file()` | `logs/game_time_tracker.log` を返す |
 | `default_config_file()` | `config/config.ini` を返す |
+| `default_settings_db_file()` | `data/settings.sqlite3` を返す |
 | `default_window_state_file()` | `data/window_state.txt` を返す |
 | `resolve_log_file()` | 旧 `game_time_tracker.log` を `logs/` へ移行して返す |
 | `resolve_config_file()` | 旧 `config.ini` を `config/` へ移行して返す |
 | `resolve_window_state_file()` | 旧 `window_state.txt` を `data/` へ移行して返す |
+
+---
+
+### settings_store.py
+
+SQLite で小さな実行時設定を保存する。DB ファイルは `data/settings.sqlite3`。
+
+| クラス/メソッド | 説明 |
+|----------------|------|
+| `SettingsStore(db_path=None)` | SQLite DB のパスを受け取り、未指定時は `runtime_paths.default_settings_db_file()` を使う |
+| `save_config(config)` | INI 形式の `ConfigParser` を `settings(section, key, value)` に保存する |
+| `load_config()` | SQLite の `settings` テーブルから `ConfigParser` を復元する |
+| `import_config_file(path)` | `config/config.ini` を読み込み、SQLite へ同期する |
+| `save_window_state(value)` / `load_window_state()` | ウィンドウ状態を JSON document として保存/取得する |
+| `migrate_window_state_file(path)` | 旧 `data/window_state.txt` を SQLite に取り込み、成功時は旧ファイルを削除する |
 
 ---
 
@@ -669,7 +686,7 @@ Google Spreadsheet操作を抽象化するサービスクラス。
   - 5分以上のプレイのみスプレッドシートへ追記。
   - ステータスをタイトルバーに表示し、左クリックで表示モード切替（max/mid/min）。
   - ウィンドウ検出は1秒間隔、UI更新は0.1秒間隔。
-  - 位置・サイズ・モードを `data/window_state.txt` に保存/復元。
+  - 位置・サイズ・モードを `data/settings.sqlite3` に保存/復元。
   - `WindowState` クラス: 静的メソッドのみのシンプルなユーティリティクラス（`load_all()`/`load()`/`save()`）。
   - `MainWindow`: ウィジェット参照を `self.w` に統合、タイマー初期化ヘルパー `_start_timer()` で簡潔化。
   - 状態管理の二重化を解消し、約30行のコード削減を実現。
@@ -689,8 +706,11 @@ Google Spreadsheet操作を抽象化するサービスクラス。
   - **キャッシュ機構**: 起動時に全レコードを`self.records`（`List[dict]`）にキャッシュし、`get_cached_records()`で取得。`save_record()`はスプレッドシート書き込みと同時にキャッシュも更新。UI更新時のAPI呼び出しを排除。
 
 - **[src/infra/config_loader.py](../src/infra/config_loader.py)**
-  - `config/config.ini` を読み込み。
+  - `config/config.ini` を読み込み、SQLite に同期する。INI がない場合は SQLite の設定から読み込む。
   - スプレッドシートキー、ゲーム情報シートの gid、サービスアカウント JSON パスを提供。
+
+- **[src/infra/settings_store.py](../src/infra/settings_store.py)**
+  - `data/settings.sqlite3` に設定値とウィンドウ状態を保存する。
 
 ## 設定・外部リソース
 - **`config/config.ini`**
@@ -916,7 +936,7 @@ def matches_window(self, window_title: str, browsers: Sequence[str]) -> bool:
 - `時間超過防止アラート == OFF` の間は、オーバーレイ表示判定をスキップし常時非表示。
 
 ### 永続化
-- トグル状態は `data/window_state.txt` に保存・復元する。
+- トグル状態は `data/settings.sqlite3` に保存・復元する。
   - 追加キー（案）: `overtime_alert_enabled: bool`
   - 旧形式ファイル（キーなし）読み込み時は `True` 扱い
 

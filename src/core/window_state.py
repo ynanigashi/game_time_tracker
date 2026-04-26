@@ -1,4 +1,4 @@
-"""ウィンドウ状態の保存/読み込み."""
+"""Window state serialization helpers."""
 
 import json
 import logging
@@ -7,7 +7,6 @@ from typing import Dict, Tuple
 
 logger = logging.getLogger(__name__)
 
-# 表示モード定数
 DISPLAY_MODES = ("max", "mid", "min")
 MODE_DEFAULT_SIZES = {
     "max": (480, 400),
@@ -19,7 +18,17 @@ OVERTIME_ALERT_ENABLED_KEY = "overtime_alert_enabled"
 
 
 class WindowState:
-    """ウィンドウ状態の保存/読み込み用クラス."""
+    """Load and save persisted window state."""
+
+    @staticmethod
+    def _default_state() -> Tuple[int, int, str, Dict[str, Tuple[int, int]], bool]:
+        return (
+            0,
+            0,
+            "max",
+            dict(MODE_DEFAULT_SIZES),
+            DEFAULT_OVERTIME_ALERT_ENABLED,
+        )
 
     @staticmethod
     def _load_data(path: Path) -> Dict[str, object]:
@@ -60,72 +69,78 @@ class WindowState:
 
     @staticmethod
     def load_all(path: Path) -> Tuple[int, int, str, Dict[str, Tuple[int, int]], bool]:
-        """保存ファイルから(x, y, display_mode, mode_sizes, overtime_alert_enabled)を読み込む."""
+        """Load x, y, display mode, mode sizes, and alert setting from a file."""
         if not path.exists():
-            return (
-                0,
-                0,
-                "max",
-                dict(MODE_DEFAULT_SIZES),
-                DEFAULT_OVERTIME_ALERT_ENABLED,
-            )
+            return WindowState._default_state()
 
         try:
-            data = WindowState._load_data(path)
-            x = WindowState._coerce_int(data.get("x", 0), 0)
-            y = WindowState._coerce_int(data.get("y", 0), 0)
-
-            mode_raw = data.get("display_mode", "max")
-            mode = mode_raw if isinstance(mode_raw, str) else "max"
-
-            if mode not in DISPLAY_MODES:
-                mode = "max"
-
-            mode_sizes: Dict[str, Tuple[int, int]] = {}
-            mode_sizes_raw_obj = data.get("mode_sizes", {})
-            mode_sizes_raw: Dict[str, object] = (
-                mode_sizes_raw_obj if isinstance(mode_sizes_raw_obj, dict) else {}
-            )
-            for key in DISPLAY_MODES:
-                size_value = mode_sizes_raw.get(key)
-                if (
-                    isinstance(size_value, list)
-                    and len(size_value) == 2
-                ):
-                    try:
-                        mode_sizes[key] = (
-                            int(size_value[0]),
-                            int(size_value[1]),
-                        )
-                    except (ValueError, TypeError):
-                        mode_sizes[key] = MODE_DEFAULT_SIZES[key]
-                else:
-                    mode_sizes[key] = MODE_DEFAULT_SIZES[key]
-
-            overtime_alert_enabled = WindowState._coerce_bool(
-                data.get(OVERTIME_ALERT_ENABLED_KEY),
-                DEFAULT_OVERTIME_ALERT_ENABLED,
-            )
-
-            return (x, y, mode, mode_sizes, overtime_alert_enabled)
+            return WindowState.load_all_from_data(WindowState._load_data(path))
         except (OSError, json.JSONDecodeError, ValueError):
-            return (
-                0,
-                0,
-                "max",
-                dict(MODE_DEFAULT_SIZES),
-                DEFAULT_OVERTIME_ALERT_ENABLED,
-            )
+            return WindowState._default_state()
+
+    @staticmethod
+    def load_all_from_data(
+        data: Dict[str, object],
+    ) -> Tuple[int, int, str, Dict[str, Tuple[int, int]], bool]:
+        """Load x, y, display mode, mode sizes, and alert setting from a dict."""
+        x = WindowState._coerce_int(data.get("x", 0), 0)
+        y = WindowState._coerce_int(data.get("y", 0), 0)
+
+        mode_raw = data.get("display_mode", "max")
+        mode = mode_raw if isinstance(mode_raw, str) else "max"
+        if mode not in DISPLAY_MODES:
+            mode = "max"
+
+        mode_sizes: Dict[str, Tuple[int, int]] = {}
+        mode_sizes_raw_obj = data.get("mode_sizes", {})
+        mode_sizes_raw: Dict[str, object] = (
+            mode_sizes_raw_obj if isinstance(mode_sizes_raw_obj, dict) else {}
+        )
+        for key in DISPLAY_MODES:
+            size_value = mode_sizes_raw.get(key)
+            if isinstance(size_value, list) and len(size_value) == 2:
+                try:
+                    mode_sizes[key] = (int(size_value[0]), int(size_value[1]))
+                except (ValueError, TypeError):
+                    mode_sizes[key] = MODE_DEFAULT_SIZES[key]
+            else:
+                mode_sizes[key] = MODE_DEFAULT_SIZES[key]
+
+        overtime_alert_enabled = WindowState._coerce_bool(
+            data.get(OVERTIME_ALERT_ENABLED_KEY),
+            DEFAULT_OVERTIME_ALERT_ENABLED,
+        )
+
+        return (x, y, mode, mode_sizes, overtime_alert_enabled)
+
+    @staticmethod
+    def to_data(
+        x: int,
+        y: int,
+        display_mode: str,
+        mode_sizes: Dict[str, Tuple[int, int]],
+        overtime_alert_enabled: bool = DEFAULT_OVERTIME_ALERT_ENABLED,
+    ) -> Dict[str, object]:
+        mode_sizes_serialized = {k: [v[0], v[1]] for k, v in mode_sizes.items()}
+        return {
+            "x": x,
+            "y": y,
+            "width": mode_sizes[display_mode][0],
+            "height": mode_sizes[display_mode][1],
+            "display_mode": display_mode,
+            "mode_sizes": mode_sizes_serialized,
+            OVERTIME_ALERT_ENABLED_KEY: bool(overtime_alert_enabled),
+        }
 
     @staticmethod
     def load(path: Path) -> Tuple[int, int, str, Dict[str, Tuple[int, int]]]:
-        """保存ファイルから(x, y, display_mode, mode_sizes)を読み込む."""
+        """Load x, y, display mode, and mode sizes from a file."""
         x, y, mode, mode_sizes, _ = WindowState.load_all(path)
         return x, y, mode, mode_sizes
 
     @staticmethod
     def load_overtime_alert_enabled(path: Path) -> bool:
-        """時間超過防止アラート設定を読み込む（未設定時はTrue）。"""
+        """Load the overtime alert setting. Defaults to True."""
         _, _, _, _, overtime_alert_enabled = WindowState.load_all(path)
         return overtime_alert_enabled
 
@@ -138,21 +153,18 @@ class WindowState:
         mode_sizes: Dict[str, Tuple[int, int]],
         overtime_alert_enabled: bool = DEFAULT_OVERTIME_ALERT_ENABLED,
     ) -> None:
-        """現在の状態をファイルに保存."""
+        """Save current window state to a file."""
         try:
-            mode_sizes_serialized = {k: [v[0], v[1]] for k, v in mode_sizes.items()}
-            data = {
-                "x": x,
-                "y": y,
-                "width": mode_sizes[display_mode][0],
-                "height": mode_sizes[display_mode][1],
-                "display_mode": display_mode,
-                "mode_sizes": mode_sizes_serialized,
-                OVERTIME_ALERT_ENABLED_KEY: bool(overtime_alert_enabled),
-            }
+            data = WindowState.to_data(
+                x,
+                y,
+                display_mode,
+                mode_sizes,
+                overtime_alert_enabled=overtime_alert_enabled,
+            )
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except OSError as e:
-            logger.warning("ウィンドウ状態の保存に失敗しました: %s", e)
+            logger.warning("failed to save window state: %s", e)
         except (ValueError, KeyError) as e:
-            logger.error("ウィンドウ状態データの変換に失敗しました: %s", e)
+            logger.error("failed to serialize window state: %s", e)

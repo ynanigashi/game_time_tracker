@@ -731,12 +731,24 @@ class TestMainWindowDisplayModeAndState(unittest.TestCase):
         window._geom.width.return_value = 350
         window._geom.height.return_value = 250
 
-        with patch.object(main.WindowState, 'save') as mock_save:
-            window._save_window_state()
+        mock_state_controller = MagicMock()
+
+        def save_side_effect(
+            geom,
+            display_mode,
+            mode_sizes,
+            overtime_alert_enabled,
+        ):
+            mode_sizes[display_mode] = (int(geom.width()), int(geom.height()))
+
+        mock_state_controller.save.side_effect = save_side_effect
+        window._get_state_controller = MagicMock(return_value=mock_state_controller)
+
+        window._save_window_state()
 
         self.assertEqual(window.mode_sizes['mid'], (350, 250))
-        mock_save.assert_called_once()
-        self.assertEqual(mock_save.call_args.kwargs.get('overtime_alert_enabled'), True)
+        mock_state_controller.save.assert_called_once()
+        self.assertTrue(mock_state_controller.save.call_args.args[3])
 
     def test_on_overtime_alert_toggled_off_syncs_overlay_immediately(self):
         """トグルOFF時に状態更新し、オーバーレイ同期を即時実行する."""

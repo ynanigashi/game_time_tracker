@@ -3,6 +3,7 @@
 
 from src.core import services
 from src.infra.config_loader import ConfigLoader
+from src.infra.settings_store import SettingsStore
 from src.app import main
 import configparser
 import os
@@ -159,6 +160,60 @@ class TestConfigLoaderGetList(unittest.TestCase):
         cfg = config_loader.ConfigLoader(config_path).load()
 
         self.assertEqual(cfg.window_scan.browsers, ['Chrome', 'Firefox', 'Edge'])
+
+
+class TestConfigLoaderSettingsStore(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.base_dir = Path(self.temp_dir)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _write_config(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "\n".join([
+                "[LOGHANDLER]",
+                "json_file_path=service_account.json",
+                "sheet_key=log_key",
+                "[GAMEINFO]",
+                "sheet_key=game_key",
+                "sheet_gid=12345",
+            ]),
+            encoding="utf-8",
+        )
+
+    def test_default_loader_imports_config_file_to_sqlite(self):
+        config_path = self.base_dir / "config" / "config.ini"
+        self._write_config(config_path)
+        store = SettingsStore(self.base_dir / "data" / "settings.sqlite3")
+
+        with patch("src.infra.runtime_paths.app_base_dir", return_value=self.base_dir):
+            cfg = ConfigLoader(settings_store=store).load()
+
+        self.assertEqual(cfg.log_handler.sheet_key, "log_key")
+        loaded_from_db = store.load_config()
+        self.assertEqual(loaded_from_db["GAMEINFO"]["sheet_gid"], "12345")
+
+    def test_default_loader_reads_sqlite_when_config_file_missing(self):
+        store = SettingsStore(self.base_dir / "data" / "settings.sqlite3")
+        config = configparser.ConfigParser()
+        config["LOGHANDLER"] = {
+            "json_file_path": "service_account.json",
+            "sheet_key": "log_key",
+        }
+        config["GAMEINFO"] = {
+            "sheet_key": "game_key",
+            "sheet_gid": "12345",
+        }
+        store.save_config(config)
+
+        with patch("src.infra.runtime_paths.app_base_dir", return_value=self.base_dir):
+            cfg = ConfigLoader(settings_store=store).load()
+
+        self.assertEqual(cfg.game_info.sheet_key, "game_key")
 
 
 class TestConfigLoaderExcludedTitles(unittest.TestCase):

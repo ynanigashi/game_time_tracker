@@ -47,6 +47,7 @@ from src.core.time_utils import (
 from src.core.window_state import DISPLAY_MODES, MODE_DEFAULT_SIZES, WindowState
 from src.infra.config_loader import ConfigLoader
 from src.infra.log_handler import LogHandler
+from src.infra.settings_store import SettingsStore
 from src.ui.gui_layout import LayoutWidgets
 
 logger = logging.getLogger(__name__)
@@ -375,12 +376,21 @@ class MainWindowDisplayController:
 class MainWindowStateController:
     """MainWindow の状態読み書きロジック."""
 
-    def __init__(self, state_file: Path) -> None:
+    def __init__(
+        self,
+        state_file: Path,
+        settings_store: Optional[SettingsStore] = None,
+    ) -> None:
         self.state_file = state_file
+        self.settings_store = settings_store or SettingsStore()
+        self.settings_store.migrate_window_state_file(self.state_file)
 
     def load_all(self) -> Tuple[int, int, str, Dict[str, Tuple[int, int]], bool]:
         """永続化されたウィンドウ状態と設定を読み込む."""
-        return WindowState.load_all(self.state_file)
+        data = self.settings_store.load_window_state()
+        if data is None:
+            return WindowState.load_all(self.state_file)
+        return WindowState.load_all_from_data(data)
 
     def load(self) -> Tuple[int, int, str, Dict[str, Tuple[int, int]]]:
         """永続化されたウィンドウ状態を読み込む."""
@@ -405,14 +415,14 @@ class MainWindowStateController:
             int(geom.width()),
             int(geom.height()),
         )
-        WindowState.save(
-            self.state_file,
+        data = WindowState.to_data(
             geom.x(),
             geom.y(),
             display_mode,
             mode_sizes,
             overtime_alert_enabled=bool(overtime_alert_enabled),
         )
+        self.settings_store.save_window_state(data)
 
     @staticmethod
     def record_resize(

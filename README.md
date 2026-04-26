@@ -97,7 +97,7 @@ Windows PC で起動しているアプリケーションのウィンドウタイ
   - プレイ時間の長い順にソート
   - 現在プレイ中のゲームの時間も含めてリアルタイムに更新（**5分以上のセッションのみ**）
   - 日跨ぎセッションは当日0:00以降の分のみカウント
-- モード・位置・サイズは `data/window_state.txt` に保存/復元されます。
+- モード・位置・サイズは `data/settings.sqlite3` に保存/復元されます。
 - ウィンドウ検出は 1 秒間隔、UI 更新は 0.1 秒間隔です。
 - **スプレッドシートアクセスの最適化**:
   - 起動時に全レコードを読み込み、メモリ上にキャッシュ（`List[dict]`形式）
@@ -109,9 +109,10 @@ Windows PC で起動しているアプリケーションのウィンドウタイ
 - `config.ini` は EXE と同じフォルダ配下の `config/config.ini` から読み込まれます。
 - 旧配置の `config.ini` が残っている場合は、初回起動時に `config/config.ini` へ移動します。
 - `service_account.json` は EXE と同じフォルダに置く運用を推奨します（`config/config.ini` 側で相対パス指定可能）。
+- 設定値は起動時に `data/settings.sqlite3` へ同期されます。`config/config.ini` がない場合は SQLite 側の設定から起動できます。
 - ログは `logs/game_time_tracker.log` に出力され、1MB + 3世代までローテートします。
-- ウィンドウ状態は `data/window_state.txt` に保存されます。
-- 旧配置の `game_time_tracker.log` / `window_state.txt` が残っている場合は、初回起動時にそれぞれ `logs/` / `data/` へ移動します。
+- ウィンドウ状態は `data/settings.sqlite3` に保存されます。旧 `data/window_state.txt` は初回起動時に SQLite へ取り込まれます。
+- 旧配置の `game_time_tracker.log` / `window_state.txt` が残っている場合は、初回起動時にそれぞれ `logs/` / `data/` へ移動してから必要に応じて SQLite に取り込みます。
 
 #### 実行時の動作
 起動すると、1秒間隔（`POLL_INTERVAL_SECONDS = 1`）で起動中のウィンドウをスキャンします：
@@ -133,6 +134,7 @@ Windows PC で起動しているアプリケーションのウィンドウタイ
 - [src/ui/gui_layout.py](src/ui/gui_layout.py) : UIレイアウト構築。
 - [src/infra/log_handler.py](src/infra/log_handler.py) : スプレッドシート操作（読み込み・追記・インデックス管理）。起動時に全レコードをキャッシュし、記録時に更新することでAPI呼び出しを最小化。
 - [src/infra/config_loader.py](src/infra/config_loader.py) : `config/config.ini` の読み込みと設定値管理。ブラウザ判定/除外タイトルはここで定義。
+- [src/infra/settings_store.py](src/infra/settings_store.py) : `data/settings.sqlite3` への設定値・ウィンドウ状態の保存。
 
 ### 設定・その他
 - [game_time_tracker.bat](game_time_tracker.bat) : 開発者向けのWindowsバッチファイル。仮想環境を有効化して main.py を実行。

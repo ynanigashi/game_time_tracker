@@ -31,6 +31,10 @@ def default_config_file() -> Path:
     return runtime_path("config", "config.ini")
 
 
+def default_settings_db_file() -> Path:
+    return runtime_path("data", "settings.sqlite3")
+
+
 def legacy_config_file() -> Path:
     return runtime_path("config.ini")
 

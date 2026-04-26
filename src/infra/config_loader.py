@@ -1,8 +1,10 @@
 import configparser
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional
 
 from src.infra.runtime_paths import default_config_file, resolve_config_file
+from src.infra.settings_store import SettingsStore
 
 
 DEFAULT_CONFIG_FILE = str(default_config_file())
@@ -70,12 +72,24 @@ class ConfigLoader:
         'GAMEINFO': ['sheet_key', 'sheet_gid'],
     }
 
-    def __init__(self, config_file_path: Optional[str] = None):
-        self.config_file_path = (
-            str(resolve_config_file()) if config_file_path is None else config_file_path
-        )
+    def __init__(
+        self,
+        config_file_path: Optional[str] = None,
+        settings_store: Optional[SettingsStore] = None,
+    ):
         self.config = configparser.ConfigParser()
-        self.config.read(self.config_file_path, encoding='utf-8')
+        if config_file_path is None:
+            self.config_file_path = str(resolve_config_file())
+            self.settings_store = settings_store or SettingsStore()
+            config_path = Path(self.config_file_path)
+            if config_path.exists():
+                self.config = self.settings_store.import_config_file(config_path)
+            else:
+                self.config = self.settings_store.load_config()
+        else:
+            self.config_file_path = config_file_path
+            self.settings_store = settings_store
+            self.config.read(self.config_file_path, encoding='utf-8')
         self._validate_required_keys()
 
     def _validate_required_keys(self) -> None:
