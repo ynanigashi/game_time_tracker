@@ -24,15 +24,15 @@ Windows PC で起動しているアプリケーションのウィンドウタイ
 
 ### 1. EXE の入手
 - GitHub Releases から `game_time_tracker-windows.zip` をダウンロードして展開します。
-- ZIP には `game_time_tracker.exe` / `config.ini.example` / `README.md` が含まれます。
-- セキュリティのため、`config.ini` と `service_account.json` は同梱しません。
+- ZIP には `game_time_tracker.exe` / `config/config.ini.example` / `README.md` が含まれます。
+- セキュリティのため、`config/config.ini` と `service_account.json` は同梱しません。
 
 ### 2. Google スプレッドシートの準備
 1) **Google Cloud でサービスアカウントを作成**
    - Google Cloud Console で新しいプロジェクトを作成。
    - 「Google Sheets API」と「Google Drive API」を有効化。
    - サービスアカウントを作成し、秘密鍵（JSON）をダウンロード。
-   - JSON ファイルを `service_account.json` として保存（パスは `config.ini` で変更可）。
+   - JSON ファイルを `service_account.json` として保存（パスは `config/config.ini` で変更可）。
 
 2) **スプレッドシートを作成**
    - Google Sheets で新規スプレッドシートを作成。
@@ -42,11 +42,11 @@ Windows PC で起動しているアプリケーションのウィンドウタイ
    - **ログシート (sheet1)**: ヘッダー行 `index,start_time,end_time,title,play_with_friends` を作成。
    - **ゲーム情報シート**: 別シートを用意し、ヘッダー行 `game_title,window_title,play_with_friends,is_browser_game` を作成。
 
-4) **config.ini を設定**
+4) **config/config.ini を設定**
    - スプレッドシート URL から以下を確認：
      - `<sheet_key>`: URL内の `https://docs.google.com/spreadsheets/d/<sheet_key>/edit#gid=0` から取得。
      - `sheet_gid`: ゲーム情報シートの gid（URL末尾の `#gid=<gid>`）。
-   - `config.ini` に設定を記入：
+   - `config/config.ini.example` を `config/config.ini` にコピーして設定を記入：
      ```ini
      [LOGHANDLER]
      json_file_path = service_account.json
@@ -97,7 +97,7 @@ Windows PC で起動しているアプリケーションのウィンドウタイ
   - プレイ時間の長い順にソート
   - 現在プレイ中のゲームの時間も含めてリアルタイムに更新（**5分以上のセッションのみ**）
   - 日跨ぎセッションは当日0:00以降の分のみカウント
-- モード・位置・サイズは `window_state.txt` に保存/復元されます。
+- モード・位置・サイズは `data/window_state.txt` に保存/復元されます。
 - ウィンドウ検出は 1 秒間隔、UI 更新は 0.1 秒間隔です。
 - **スプレッドシートアクセスの最適化**:
   - 起動時に全レコードを読み込み、メモリ上にキャッシュ（`List[dict]`形式）
@@ -106,8 +106,12 @@ Windows PC で起動しているアプリケーションのウィンドウタイ
   - 冗長な読み込みを排除し、API呼び出しを大幅に削減
 
 #### 設定ファイルの配置（EXE）
-- `config.ini` は EXE と同じフォルダから読み込まれます。
-- `service_account.json` も同じフォルダに置く運用を推奨します（`config.ini` 側で相対パス指定可能）。
+- `config.ini` は EXE と同じフォルダ配下の `config/config.ini` から読み込まれます。
+- 旧配置の `config.ini` が残っている場合は、初回起動時に `config/config.ini` へ移動します。
+- `service_account.json` は EXE と同じフォルダに置く運用を推奨します（`config/config.ini` 側で相対パス指定可能）。
+- ログは `logs/game_time_tracker.log` に出力され、1MB + 3世代までローテートします。
+- ウィンドウ状態は `data/window_state.txt` に保存されます。
+- 旧配置の `game_time_tracker.log` / `window_state.txt` が残っている場合は、初回起動時にそれぞれ `logs/` / `data/` へ移動します。
 
 #### 実行時の動作
 起動すると、1秒間隔（`POLL_INTERVAL_SECONDS = 1`）で起動中のウィンドウをスキャンします：
@@ -128,15 +132,15 @@ Windows PC で起動しているアプリケーションのウィンドウタイ
 - [src/core/window_state.py](src/core/window_state.py) : ウィンドウ状態の保存/読み込み（`WindowState`）。
 - [src/ui/gui_layout.py](src/ui/gui_layout.py) : UIレイアウト構築。
 - [src/infra/log_handler.py](src/infra/log_handler.py) : スプレッドシート操作（読み込み・追記・インデックス管理）。起動時に全レコードをキャッシュし、記録時に更新することでAPI呼び出しを最小化。
-- [src/infra/config_loader.py](src/infra/config_loader.py) : `config.ini` の読み込みと設定値管理。ブラウザ判定/除外タイトルはここで定義。
+- [src/infra/config_loader.py](src/infra/config_loader.py) : `config/config.ini` の読み込みと設定値管理。ブラウザ判定/除外タイトルはここで定義。
 
 ### 設定・その他
 - [game_time_tracker.bat](game_time_tracker.bat) : 開発者向けのWindowsバッチファイル。仮想環境を有効化して main.py を実行。
-- [config.ini](config.ini) : スプレッドシートのキーや認証情報を指定。
+- `config/config.ini` : スプレッドシートのキーや認証情報を指定。
 - [service_account.json](service_account.json) : Google Cloud サービスアカウント秘密鍵（.gitignore で除外）。
 - [.github/workflows/release-exe.yml](.github/workflows/release-exe.yml) : GitHub Releases 公開時に Windows EXE を自動ビルドして添付。
 
-## 設定ファイル（config.ini）
+## 設定ファイル（config/config.ini）
 ```ini
 [LOGHANDLER]
 json_file_path = service_account.json      ; サービスアカウント JSON のパス
@@ -154,7 +158,7 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
 ## 注意・トラブルシューティング
 
 ### ウィンドウタイトルが認識されない
-- [config.ini](config.ini) の `[WINDOW_SCAN]` セクションで `exclude_titles` を確認・編集してください（未設定時は `config_loader.py` のデフォルト値を使用）。
+- `config/config.ini` の `[WINDOW_SCAN]` セクションで `exclude_titles` を確認・編集してください（未設定時は `config_loader.py` のデフォルト値を使用）。
 - ゲーム情報シートの `window_title` が、実際のウィンドウタイトル（の一部）と一致しているか確認してください。
 - 実際のウィンドウタイトルはGUIウィンドウの「現在のウィンドウタイトル」リスト（maxモード）で確認できます。
 - 「現在のウィンドウタイトル」リストはクリックでコピーできるため、ゲーム追加時に `window_title` へ貼り付けて使えます。
@@ -169,7 +173,7 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
 - API キーが有効か確認（Google Cloud Console で確認）。
 
 ### 設定ファイルのエラー
-- `config.ini` の必須項目（`[LOGHANDLER]` の `json_file_path`, `sheet_key` 、`[GAMEINFO]` の `sheet_key`, `sheet_gid`）が欠けていると起動時にエラーになります。
+- `config/config.ini` の必須項目（`[LOGHANDLER]` の `json_file_path`, `sheet_key` 、`[GAMEINFO]` の `sheet_key`, `sheet_gid`）が欠けていると起動時にエラーになります。
 - `sheet_gid` は整数値で指定してください（例: `sheet_gid = 1198224769`）。
 
 ## 開発向け
@@ -178,7 +182,7 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
   - `POLL_INTERVAL_SECONDS = 1`（デフォルト: 1秒）
 - 最小記録時間は `src/core/services_domain.py` の定数で変更できます：
   - `MIN_PLAY_MINUTES = 5`（デフォルト: 5分）
-- 監視対象ブラウザ・除外ウィンドウは `config.ini` の `[WINDOW_SCAN]` で変更できます（未設定時は `config_loader.py` のデフォルト値）。
+- 監視対象ブラウザ・除外ウィンドウは `config/config.ini` の `[WINDOW_SCAN]` で変更できます（未設定時は `config_loader.py` のデフォルト値）。
 - モジュール構成:
   - `src/core`: ドメイン層（`models.py`, `services.py`, `services_domain.py`, `time_utils.py`, `window_state.py`）
   - `src/infra`: 外部連携層（`config_loader.py`, `gspread_service.py`, `log_handler.py`）
@@ -189,12 +193,12 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
 ## 開発ガイド
 - 仮想環境: `python -m venv .venv && .\.venv\Scripts\activate && pip install -r requirements.txt`
 - 実行: `python main.py`（Google Sheets への書き込みが発生するため必要なら別シートで検証）
-- 設定: `config.ini` にログシート・ゲーム情報シートのキーと gid、サービスアカウント JSON のパスを指定
+- 設定: `config/config.ini` にログシート・ゲーム情報シートのキーと gid、サービスアカウント JSON のパスを指定
 - テスト: 依存をスタブ化した単体テストを `python -m unittest` で実行（`tests/` 配下, 308件のテスト）
 - 拡張例:
   - ポーリング間隔の変更は `src/app/main.py` の `POLL_INTERVAL_SECONDS`
   - 最小記録時間の変更は `src/core/services_domain.py` の `MIN_PLAY_MINUTES`
-  - 対応ブラウザや除外ウィンドウの追加は `config.ini` の `[WINDOW_SCAN]`（未設定時は `config_loader.py` のデフォルト値）
+  - 対応ブラウザや除外ウィンドウの追加は `config/config.ini` の `[WINDOW_SCAN]`（未設定時は `config_loader.py` のデフォルト値）
   - 新しいデータモデルは `src/core/models.py` に追加
   - 新しいビジネスロジックは `src/core/services.py` / `src/core/services_domain.py` に追加
   - UIの拡張は `src/app/main.py` の `MainWindow` を拡張
@@ -203,7 +207,7 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
 ```mermaid
 flowchart LR
     subgraph Config
-        C[config.ini] --> CL[ConfigLoader]
+        C[config/config.ini] --> CL[ConfigLoader]
     end
     subgraph Models
         GE[GameEntry<br/>matches_window / start_session / end_session]

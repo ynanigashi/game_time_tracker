@@ -15,9 +15,11 @@ from src.core import services
 from src.core import models
 from src.app import main
 import configparser
+import logging
 import sys
 import unittest
 from datetime import datetime, time, timedelta
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from unittest.mock import MagicMock, patch, PropertyMock
 import tempfile
@@ -26,6 +28,42 @@ import os
 
 # servicesモジュールにpygetwindowのスタブを設定
 services.gw = pygetwindow
+
+
+class TestLoggingConfiguration(unittest.TestCase):
+    def test_configure_logging_uses_rotating_file_handler(self):
+        root_logger = logging.getLogger()
+        original_handlers = list(root_logger.handlers)
+        original_configured = main._LOGGING_CONFIGURED
+        for handler in original_handlers:
+            root_logger.removeHandler(handler)
+
+        try:
+            main._LOGGING_CONFIGURED = False
+            main.configure_logging()
+
+            rotating_handlers = [
+                handler
+                for handler in root_logger.handlers
+                if isinstance(handler, RotatingFileHandler)
+            ]
+            self.assertEqual(len(rotating_handlers), 1)
+            self.assertEqual(rotating_handlers[0].baseFilename, str(
+                main.LOG_FILE_PATH.resolve()
+            ))
+            self.assertEqual(rotating_handlers[0].maxBytes, main.LOG_MAX_BYTES)
+            self.assertEqual(
+                rotating_handlers[0].backupCount,
+                main.LOG_BACKUP_COUNT,
+            )
+            self.assertTrue(main.LOG_DIR.exists())
+        finally:
+            for handler in list(root_logger.handlers):
+                root_logger.removeHandler(handler)
+                handler.close()
+            for handler in original_handlers:
+                root_logger.addHandler(handler)
+            main._LOGGING_CONFIGURED = original_configured
 
 
 class TestTodayCalculations(unittest.TestCase):

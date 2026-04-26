@@ -46,6 +46,15 @@ class TestWindowState(unittest.TestCase):
         self.assertEqual(mode, "mid")
         self.assertEqual(loaded_sizes["mid"], (450, 300))
 
+    def test_save_creates_parent_directory(self):
+        """親ディレクトリがなくても保存できる."""
+        nested_path = Path(self.temp_dir) / "data" / "window_state.txt"
+        mode_sizes = {"max": (500, 400), "mid": (450, 300), "min": (300, 150)}
+
+        WindowState.save(nested_path, 100, 200, "mid", mode_sizes)
+
+        self.assertTrue(nested_path.exists())
+
     def test_load_invalid_mode_falls_back_to_max(self):
         """荳肴ｭ｣縺ｪdisplay_mode縺ｯ'max'縺ｫ繝輔か繝ｼ繝ｫ繝舌ャ繧ｯ."""
         import json

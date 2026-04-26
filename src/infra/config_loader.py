@@ -1,21 +1,11 @@
 import configparser
-import sys
 from dataclasses import dataclass
-from pathlib import Path
-from typing import List
+from typing import List, Optional
+
+from src.infra.runtime_paths import default_config_file, resolve_config_file
 
 
-def _resolve_default_config_file() -> str:
-    """デフォルトのconfig.iniパスを解決する。"""
-    if getattr(sys, 'frozen', False):
-        # PyInstaller実行時はEXEと同じディレクトリを基準にする。
-        return str(Path(sys.executable).resolve().parent / 'config.ini')
-
-    # ソース実行時はリポジトリルートを基準にする。
-    return str(Path(__file__).resolve().parents[2] / 'config.ini')
-
-
-DEFAULT_CONFIG_FILE = _resolve_default_config_file()
+DEFAULT_CONFIG_FILE = str(default_config_file())
 
 DEFAULT_BROWSERS = [
     'Google Chrome',
@@ -42,6 +32,7 @@ DEFAULT_EXCLUDED_TITLES = [
 @dataclass
 class LogHandlerConfig:
     """ログハンドラー設定."""
+
     cert_file_path: str
     sheet_key: str
 
@@ -49,6 +40,7 @@ class LogHandlerConfig:
 @dataclass
 class GameInfoConfig:
     """ゲーム情報設定."""
+
     sheet_key: str
     sheet_gid: int
 
@@ -56,36 +48,38 @@ class GameInfoConfig:
 @dataclass
 class WindowScanConfig:
     """ウィンドウスキャン設定."""
+
     browsers: List[str]
     excluded_titles: List[str]
 
 
 @dataclass
 class Config:
-    """アプリケーション設定を保持するデータクラス."""
+    """アプリケーション設定."""
+
     log_handler: LogHandlerConfig
     game_info: GameInfoConfig
     window_scan: WindowScanConfig
 
 
-# 設定ファイルの読み込み
 class ConfigLoader:
     """設定ファイルを読み込むクラス."""
 
-    # 必須の設定キー
     REQUIRED_KEYS = {
         'LOGHANDLER': ['json_file_path', 'sheet_key'],
         'GAMEINFO': ['sheet_key', 'sheet_gid'],
     }
 
-    def __init__(self, config_file_path: str = DEFAULT_CONFIG_FILE):
-        self.config_file_path = config_file_path
+    def __init__(self, config_file_path: Optional[str] = None):
+        self.config_file_path = (
+            str(resolve_config_file()) if config_file_path is None else config_file_path
+        )
         self.config = configparser.ConfigParser()
         self.config.read(self.config_file_path, encoding='utf-8')
         self._validate_required_keys()
 
     def _validate_required_keys(self) -> None:
-        """必須キーの存在を検証。"""
+        """必須キーの存在を検証する."""
         missing = []
         for section, keys in self.REQUIRED_KEYS.items():
             if section not in self.config:
@@ -98,21 +92,12 @@ class ConfigLoader:
             raise KeyError(f"config.ini に必須項目がありません: {', '.join(missing)}")
 
     def load(self) -> Config:
-        """設定を読み込んでConfigオブジェクトを返す.
-
-        Returns:
-            Config: 設定データクラス
-
-        Raises:
-            ValueError: sheet_gidが整数でない場合
-            KeyError: 必須キーが不足している場合
-        """
+        """設定を読み込んで Config オブジェクトを返す."""
         log_handler = LogHandlerConfig(
             cert_file_path=self.config['LOGHANDLER']['json_file_path'],
             sheet_key=self.config['LOGHANDLER']['sheet_key'],
         )
 
-        # sheet_gid を int に変換（スプレッドシートAPIはintを期待）
         try:
             sheet_gid = int(self.config['GAMEINFO']['sheet_gid'])
         except ValueError:

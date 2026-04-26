@@ -5,8 +5,9 @@ Windows PC で実行中のゲームをウィンドウタイトルから自動検
 
 ## 運用前提（配布形態）
 - 通常利用は GitHub Releases で配布する Windows EXE を前提とする。
-- `config.ini` / `service_account.json` は EXE に同梱せず、実行時に外部ファイルとして参照する。
-- 既定では EXE と同じディレクトリの `config.ini` を読み込む。
+- `config/config.ini` / `service_account.json` は EXE に同梱せず、実行時に外部ファイルとして参照する。
+- 既定では EXE と同じディレクトリ配下の `config/config.ini` を読み込む。
+- 旧配置の `config.ini`, `game_time_tracker.log`, `window_state.txt` は初回利用時に `config/`, `logs/`, `data/` へ移行する。
 - ソースコード実行（`python main.py`）は開発・検証用途とする。
 
 ## クラス構成図
@@ -245,7 +246,7 @@ classDiagram
 ```mermaid
 flowchart TB
     subgraph External["外部リソース"]
-        ConfigFile[("config.ini")]
+        ConfigFile[("config/config.ini")]
         Spreadsheet[("Google\nSpreadsheet")]
     end
 
@@ -570,7 +571,7 @@ GUI版メインウィンドウ。
 ### config_loader.py
 
 #### 定数
-- `DEFAULT_CONFIG_FILE = 'config.ini'` - デフォルトの設定ファイルパス
+- `DEFAULT_CONFIG_FILE = '<app>/config/config.ini'` - デフォルトの設定ファイルパス
 - `DEFAULT_BROWSERS` - デフォルトのブラウザリスト
 - `DEFAULT_EXCLUDED_TITLES` - デフォルトの除外タイトルリスト
 
@@ -598,14 +599,30 @@ GUI版メインウィンドウ。
 - `window_scan: WindowScanConfig` - ウィンドウスキャン設定
 
 #### `ConfigLoader`
-config.ini を読み込んで型付き設定（`Config`）を提供する。
+`config/config.ini` を読み込んで型付き設定（`Config`）を提供する。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `__init__(config_file_path=DEFAULT_CONFIG_FILE)` | 指定されたconfig.ini を読み込み、**必須キーを検証** | `MainWindow._init_components()`, `LogHandler.__init__()` |
+| `__init__(config_file_path=DEFAULT_CONFIG_FILE)` | 指定された config.ini を読み込み、**必須キーを検証**。未指定時は `runtime_paths.resolve_config_file()` で旧配置からの移行も行う | `MainWindow._init_components()`, `LogHandler.__init__()` |
 | `_validate_required_keys()` | 必須キー（LOGHANDLER/GAMEINFOセクション）の存在を検証。欠落時はKeyError | `__init__()` 内部 |
 | `load() -> Config` | 設定を読み込んで`Config`データクラスを返す。**sheet_gidはintに変換** | `MainWindow._init_components()`, `LogHandler.__init__()` |
 | `_get_list(section, key, default)` | カンマ区切りの設定をリストに変換 | `load()` 内部 |
+
+---
+
+### runtime_paths.py
+
+実行時に生成・参照するローカルファイルの保存先を集約する。
+
+| 関数 | 説明 |
+|------|------|
+| `app_base_dir()` | PyInstaller 実行時は EXE のディレクトリ、ソース実行時はリポジトリルートを返す |
+| `default_log_file()` | `logs/game_time_tracker.log` を返す |
+| `default_config_file()` | `config/config.ini` を返す |
+| `default_window_state_file()` | `data/window_state.txt` を返す |
+| `resolve_log_file()` | 旧 `game_time_tracker.log` を `logs/` へ移行して返す |
+| `resolve_config_file()` | 旧 `config.ini` を `config/` へ移行して返す |
+| `resolve_window_state_file()` | 旧 `window_state.txt` を `data/` へ移行して返す |
 
 ---
 
@@ -652,7 +669,7 @@ Google Spreadsheet操作を抽象化するサービスクラス。
   - 5分以上のプレイのみスプレッドシートへ追記。
   - ステータスをタイトルバーに表示し、左クリックで表示モード切替（max/mid/min）。
   - ウィンドウ検出は1秒間隔、UI更新は0.1秒間隔。
-  - 位置・サイズ・モードを `window_state.txt` に保存/復元。
+  - 位置・サイズ・モードを `data/window_state.txt` に保存/復元。
   - `WindowState` クラス: 静的メソッドのみのシンプルなユーティリティクラス（`load_all()`/`load()`/`save()`）。
   - `MainWindow`: ウィジェット参照を `self.w` に統合、タイマー初期化ヘルパー `_start_timer()` で簡潔化。
   - 状態管理の二重化を解消し、約30行のコード削減を実現。
@@ -672,11 +689,11 @@ Google Spreadsheet操作を抽象化するサービスクラス。
   - **キャッシュ機構**: 起動時に全レコードを`self.records`（`List[dict]`）にキャッシュし、`get_cached_records()`で取得。`save_record()`はスプレッドシート書き込みと同時にキャッシュも更新。UI更新時のAPI呼び出しを排除。
 
 - **[src/infra/config_loader.py](../src/infra/config_loader.py)**
-  - `config.ini` を読み込み。
+  - `config/config.ini` を読み込み。
   - スプレッドシートキー、ゲーム情報シートの gid、サービスアカウント JSON パスを提供。
 
 ## 設定・外部リソース
-- **[config.ini](../config.ini)**
+- **`config/config.ini`**
   ```ini
   [LOGHANDLER]
   json_file_path = service_account.json    ; サービスアカウント JSON のパス
@@ -899,7 +916,7 @@ def matches_window(self, window_title: str, browsers: Sequence[str]) -> bool:
 - `時間超過防止アラート == OFF` の間は、オーバーレイ表示判定をスキップし常時非表示。
 
 ### 永続化
-- トグル状態は `window_state.txt` に保存・復元する。
+- トグル状態は `data/window_state.txt` に保存・復元する。
   - 追加キー（案）: `overtime_alert_enabled: bool`
   - 旧形式ファイル（キーなし）読み込み時は `True` 扱い
 
@@ -1038,4 +1055,4 @@ game_time_tracker.bat
   - `tests/test_window_state.py` - window_state.pyのテスト
   - `tests/test_gui.py` - DailyStatsTracker/format_hmsのテスト
 - ポーリング間隔・最小記録時間: `src/app/main.py` の `POLL_INTERVAL_SECONDS` と `src/core/services_domain.py` の `MIN_PLAY_MINUTES` で調整。
-- 対応ブラウザ・除外ウィンドウ: `config.ini` の `[WINDOW_SCAN]` または `config_loader.DEFAULT_BROWSERS/DEFAULT_EXCLUDED_TITLES` で設定。
+- 対応ブラウザ・除外ウィンドウ: `config/config.ini` の `[WINDOW_SCAN]` または `config_loader.DEFAULT_BROWSERS/DEFAULT_EXCLUDED_TITLES` で設定。

@@ -150,6 +150,7 @@ class WindowState:
                 "mode_sizes": mode_sizes_serialized,
                 OVERTIME_ALERT_ENABLED_KEY: bool(overtime_alert_enabled),
             }
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except OSError as e:
             logger.warning("ウィンドウ状態の保存に失敗しました: %s", e)

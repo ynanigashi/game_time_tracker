@@ -5,7 +5,7 @@ import logging
 import sys
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
+from logging.handlers import RotatingFileHandler
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
 
 from PySide6.QtCore import QTimer, Qt
@@ -67,17 +67,27 @@ from src.infra.config_loader import (
     DEFAULT_EXCLUDED_TITLES,
 )
 from src.infra.log_handler import LogHandler
+from src.infra.runtime_paths import (
+    default_log_file,
+    default_window_state_file,
+    resolve_log_file,
+    resolve_window_state_file,
+)
 from src.ui.gui_layout import build_main_layout
 from src.ui.report_dialog import ReportDialog
 
 logger = logging.getLogger(__name__)
 
 _LOGGING_CONFIGURED = False
+LOG_FILE_PATH = default_log_file()
+LOG_DIR = LOG_FILE_PATH.parent
+LOG_MAX_BYTES = 1 * 1024 * 1024
+LOG_BACKUP_COUNT = 3
 
 
 def configure_logging() -> None:
     """アプリ起動時にロギングを初期化する（import時は実行しない）。"""
-    global _LOGGING_CONFIGURED
+    global _LOGGING_CONFIGURED, LOG_DIR, LOG_FILE_PATH
     if _LOGGING_CONFIGURED:
         return
 
@@ -86,7 +96,15 @@ def configure_logging() -> None:
         _LOGGING_CONFIGURED = True
         return
 
-    file_handler = logging.FileHandler('game_time_tracker.log', encoding='utf-8')
+    LOG_FILE_PATH = resolve_log_file()
+    LOG_DIR = LOG_FILE_PATH.parent
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    file_handler = RotatingFileHandler(
+        LOG_FILE_PATH,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding='utf-8',
+    )
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -104,7 +122,7 @@ def configure_logging() -> None:
 # =============================================================================
 POLL_INTERVAL_SECONDS = 1
 INACTIVE_TIMEOUT_MINUTES = 5  # 非アクティブ状態でこの時間経過でセッション分割
-STATE_FILE = Path("window_state.txt")
+STATE_FILE = default_window_state_file()
 BASE_TITLE = "Game Time Tracker"
 UI_REFRESH_INTERVAL_SECONDS = 0.1
 MAX_WIDGET_HEIGHT = 16777215  # Qt default max height
@@ -413,7 +431,7 @@ class MainWindow(QWidget):
         """状態保存コントローラーを返す."""
         return self._resolve_dependency(
             "_state_controller",
-            factory=lambda: MainWindowStateController(STATE_FILE),
+            factory=lambda: MainWindowStateController(resolve_window_state_file()),
         )
 
     def _get_loop_controller(self) -> MainWindowLoopController:

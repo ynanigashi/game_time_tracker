@@ -40,8 +40,9 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path release | Out-Null
+          New-Item -ItemType Directory -Force -Path release/config | Out-Null
           Copy-Item -Path dist/game_time_tracker/* -Destination release -Recurse -Force
-          Copy-Item -Path config.ini.example -Destination release/config.ini.example -Force
+          Copy-Item -Path config.ini.example -Destination release/config/config.ini.example -Force
           Copy-Item -Path README.md -Destination release/README.md -Force
           Compress-Archive -Path release/* -DestinationPath game_time_tracker-windows.zip -Force
 
