@@ -47,7 +47,7 @@ class GameInfoLoader:
             records = gspread_service.get_all_records()
         except FileNotFoundError as e:
             logger.error('認証情報ファイルが見つかりません: %s', e)
-            return []
+            raise
         except (
             gspread.exceptions.SpreadsheetNotFound,
             gspread.exceptions.WorksheetNotFound,

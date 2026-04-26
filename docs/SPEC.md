@@ -6,9 +6,12 @@ Windows PC で実行中のゲームをウィンドウタイトルから自動検
 ## 運用前提（配布形態）
 - 通常利用は GitHub Releases で配布する Windows EXE を前提とする。
 - `config/config.ini` / `service_account.json` は EXE に同梱せず、実行時に外部ファイルとして参照する。
-- 既定では EXE と同じディレクトリ配下の `config/config.ini` を読み込む。
+- 既定では `data/settings.sqlite3` の設定を読み込む。SQLite に有効な設定がなく `config/config.ini` がある場合のみ、初回移行として INI を SQLite へ取り込む。
 - 旧配置の `config.ini`, `game_time_tracker.log`, `window_state.txt` は初回利用時に `config/`, `logs/`, `data/` へ移行する。
-- `config/config.ini` の設定値とウィンドウ状態は `data/settings.sqlite3` に保存する。`config/config.ini` は編集用の取り込み元として残し、起動時に SQLite へ同期する。
+- 設定値とウィンドウ状態は `data/settings.sqlite3` に保存する。`config/config.ini` は設定画面の Import/Export で手動入出力する。
+- メインウィンドウ右クリックメニューで `レポート` / `設定` / `終了` を選択できる。
+- SQLite と INI のどちらにも有効な設定がない場合、起動時に設定画面を表示する。
+- 認証JSONファイルが見つからない場合、警告ダイアログを表示して設定画面を開く。
 - ソースコード実行（`python main.py`）は開発・検証用途とする。
 
 ## クラス構成図
@@ -600,11 +603,11 @@ GUI版メインウィンドウ。
 - `window_scan: WindowScanConfig` - ウィンドウスキャン設定
 
 #### `ConfigLoader`
-`config/config.ini` を読み込んで型付き設定（`Config`）を提供する。
+SQLite 設定を読み込んで型付き設定（`Config`）を提供する。SQLite に有効な設定がない場合のみ、`config/config.ini` を初回移行として取り込む。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
-| `__init__(config_file_path=DEFAULT_CONFIG_FILE)` | 指定された config.ini を読み込み、**必須キーを検証**。未指定時は `runtime_paths.resolve_config_file()` で旧配置からの移行も行う | `MainWindow._init_components()`, `LogHandler.__init__()` |
+| `__init__(config_file_path=DEFAULT_CONFIG_FILE)` | 未指定時は SQLite を優先して読み込み、SQLite 未設定時のみ `config/config.ini` を取り込む。指定時は指定 INI を読み込み、**必須キーを検証** | `MainWindow._init_components()`, `LogHandler.__init__()` |
 | `_validate_required_keys()` | 必須キー（LOGHANDLER/GAMEINFOセクション）の存在を検証。欠落時はKeyError | `__init__()` 内部 |
 | `load() -> Config` | 設定を読み込んで`Config`データクラスを返す。**sheet_gidはintに変換** | `MainWindow._init_components()`, `LogHandler.__init__()` |
 | `_get_list(section, key, default)` | カンマ区切りの設定をリストに変換 | `load()` 内部 |
@@ -706,11 +709,21 @@ Google Spreadsheet操作を抽象化するサービスクラス。
   - **キャッシュ機構**: 起動時に全レコードを`self.records`（`List[dict]`）にキャッシュし、`get_cached_records()`で取得。`save_record()`はスプレッドシート書き込みと同時にキャッシュも更新。UI更新時のAPI呼び出しを排除。
 
 - **[src/infra/config_loader.py](../src/infra/config_loader.py)**
-  - `config/config.ini` を読み込み、SQLite に同期する。INI がない場合は SQLite の設定から読み込む。
+  - SQLite の設定を優先して読み込む。SQLite が未設定で INI がある場合のみ、初回移行として `config/config.ini` を取り込む。
   - スプレッドシートキー、ゲーム情報シートの gid、サービスアカウント JSON パスを提供。
 
 - **[src/infra/settings_store.py](../src/infra/settings_store.py)**
   - `data/settings.sqlite3` に設定値とウィンドウ状態を保存する。
+
+- **[src/infra/settings_config.py](../src/infra/settings_config.py)**
+  - 設定画面向けの編集用データ構造を提供する。
+  - 保存時に `data/settings.sqlite3` へ反映する。
+  - `config/config.ini` への書き出しと取り込みは、設定画面の `設定Export` / `設定Import` から手動実行する。
+
+- **[src/ui/settings_dialog.py](../src/ui/settings_dialog.py)**
+  - 認証JSON、シート key、sheet_gid、対象ブラウザ、除外タイトルを編集する。
+  - 認証JSONはファイル選択ダイアログから指定できる。
+  - 保存成功時はメインウィンドウへ通知し、変更は再起動後に反映する。
 
 ## 設定・外部リソース
 - **`config/config.ini`**

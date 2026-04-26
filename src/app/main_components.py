@@ -45,7 +45,7 @@ from src.core.time_utils import (
     format_hms,
 )
 from src.core.window_state import DISPLAY_MODES, MODE_DEFAULT_SIZES, WindowState
-from src.infra.config_loader import ConfigLoader
+from src.infra.config_loader import ConfigLoader, ConfigNotConfiguredError
 from src.infra.log_handler import LogHandler
 from src.infra.settings_store import SettingsStore
 from src.ui.gui_layout import LayoutWidgets
@@ -640,10 +640,21 @@ class MainWindowBootstrapResult:
 class MainWindowBootstrapError(Exception):
     """MainWindow 初期化でユーザー向けに扱う例外."""
 
-    def __init__(self, status_message: str, log_message: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        status_message: str,
+        log_message: Optional[str] = None,
+        *,
+        open_settings: bool = False,
+        alert_title: Optional[str] = None,
+        alert_message: Optional[str] = None,
+    ) -> None:
         super().__init__(status_message)
         self.status_message = status_message
         self.log_message = log_message
+        self.open_settings = open_settings
+        self.alert_title = alert_title
+        self.alert_message = alert_message
 
 
 class MainWindowBootstrapper:
@@ -714,14 +725,26 @@ class MainWindowBootstrapper:
                 today_game_minutes=today_game_minutes,
                 today_completed_seconds=today_completed_seconds,
             )
+        except ConfigNotConfiguredError as e:
+            raise MainWindowBootstrapError(
+                "設定が未作成です。設定画面で入力して保存してください。",
+                str(e),
+                open_settings=True,
+            ) from e
         except NoGamesConfiguredError as e:
             raise MainWindowBootstrapError(
                 'ゲーム情報が取得できませんでした（config.ini を確認）'
             ) from e
         except FileNotFoundError as e:
             raise MainWindowBootstrapError(
-                '認証情報ファイルが見つかりません（config.ini を確認）',
-                f'ログ用認証情報ファイルが見つかりません: {e}',
+                "認証情報ファイルが見つかりません。設定画面で認証JSONを確認してください。",
+                f"認証情報ファイルが見つかりません: {e}",
+                open_settings=True,
+                alert_title="認証情報ファイルが見つかりません",
+                alert_message=(
+                    "設定されている認証JSONファイルを開けませんでした。\n"
+                    "設定画面で認証JSONのパスを選び直してください。"
+                ),
             ) from e
         except Exception as e:
             raise MainWindowBootstrapError(

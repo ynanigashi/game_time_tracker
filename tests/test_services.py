@@ -283,15 +283,14 @@ class TestGameInfoLoaderExceptions(unittest.TestCase):
         return config
 
     @patch('src.infra.gspread_service.gspread.service_account')
-    def test_load_file_not_found_returns_empty(self, mock_sa):
-        """認証ファイルが見つからない場合は空リストを返す."""
+    def test_load_file_not_found_raises(self, mock_sa):
+        """認証ファイルが見つからない場合は起動側へ再送出する."""
         mock_sa.side_effect = FileNotFoundError("fake.json not found")
         config = self._create_mock_config()
         loader = services.GameInfoLoader(config)
 
-        result = loader.load()
-
-        self.assertEqual(result, [])
+        with self.assertRaises(FileNotFoundError):
+            loader.load()
 
     @patch('src.infra.gspread_service.gspread.service_account')
     def test_load_spreadsheet_not_found_returns_empty(self, mock_sa):

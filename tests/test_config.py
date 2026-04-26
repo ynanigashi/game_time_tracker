@@ -215,6 +215,27 @@ class TestConfigLoaderSettingsStore(unittest.TestCase):
 
         self.assertEqual(cfg.game_info.sheet_key, "game_key")
 
+    def test_default_loader_prefers_sqlite_over_existing_config_file(self):
+        config_path = self.base_dir / "config" / "config.ini"
+        self._write_config(config_path)
+        store = SettingsStore(self.base_dir / "data" / "settings.sqlite3")
+        config = configparser.ConfigParser()
+        config["LOGHANDLER"] = {
+            "json_file_path": "db_service_account.json",
+            "sheet_key": "db_log_key",
+        }
+        config["GAMEINFO"] = {
+            "sheet_key": "db_game_key",
+            "sheet_gid": "67890",
+        }
+        store.save_config(config)
+
+        with patch("src.infra.runtime_paths.app_base_dir", return_value=self.base_dir):
+            cfg = ConfigLoader(settings_store=store).load()
+
+        self.assertEqual(cfg.log_handler.sheet_key, "db_log_key")
+        self.assertEqual(cfg.game_info.sheet_gid, 67890)
+
 
 class TestConfigLoaderExcludedTitles(unittest.TestCase):
     """ConfigLoaderのexcluded_titlesがwindow_scanに反映されるテスト."""

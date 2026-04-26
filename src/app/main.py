@@ -10,7 +10,14 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QCloseEvent, QMouseEvent, QResizeEvent
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QLabel,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QWidget,
+)
 
 from src.app import main_components as components
 from src.app.main_components import (
@@ -75,6 +82,7 @@ from src.infra.runtime_paths import (
 )
 from src.ui.gui_layout import build_main_layout
 from src.ui.report_dialog import ReportDialog
+from src.ui.settings_dialog import SettingsDialog
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +235,7 @@ class MainWindow(QWidget):
         self._overtime_alert_toggle_connected = False
         self._report_button_connected = False
         self._report_dialog: Optional[ReportDialog] = None
+        self._settings_dialog: Optional[SettingsDialog] = None
         self._overtime_alert_tracker = OvertimeAlertTracker(
             thresholds_minutes=OVERTIME_ALERT_THRESHOLDS_MINUTES,
             alerted_threshold_minutes=set(),
@@ -456,6 +465,17 @@ class MainWindow(QWidget):
         except MainWindowBootstrapError as e:
             if e.log_message:
                 logger.error(e.log_message)
+            if getattr(e, "open_settings", False):
+                self._set_status(e.status_message)
+                alert_message = getattr(e, "alert_message", None)
+                if alert_message:
+                    QMessageBox.warning(
+                        self,
+                        getattr(e, "alert_title", "設定エラー"),
+                        alert_message,
+                    )
+                self._open_settings_dialog()
+                return
             self._disable_with_status(e.status_message)
             return
 
@@ -669,6 +689,23 @@ class MainWindow(QWidget):
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+
+    def _open_settings_dialog(self) -> None:
+        """Open a non-modal settings dialog."""
+        dialog = getattr(self, "_settings_dialog", None)
+        if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
+            dialog = SettingsDialog(self, on_saved=self._on_settings_saved)
+            self._settings_dialog = dialog
+
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _on_settings_saved(self) -> None:
+        """Reload runtime services after settings are saved."""
+        self.setDisabled(False)
+        self._set_status("設定を保存しました。")
+        self._init_components()
 
     def _on_overtime_alert_toggled(self, checked: bool) -> None:
         """時間超過防止アラートトグル変更時の処理。"""
@@ -950,6 +987,10 @@ class MainWindow(QWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """クリックで表示モードをトグル。"""
+        if self._should_show_context_menu(event):
+            self._show_context_menu(event)
+            super().mousePressEvent(event)
+            return
         if self._should_cycle_display_mode(event):
             self._cycle_display_mode()
         super().mousePressEvent(event)
@@ -958,6 +999,45 @@ class MainWindow(QWidget):
     def _should_cycle_display_mode(event: QMouseEvent) -> bool:
         """表示モード切り替え対象のクリックかを判定."""
         return event.button() == Qt.MouseButton.LeftButton
+
+    @staticmethod
+    def _should_show_context_menu(event: QMouseEvent) -> bool:
+        return event.button() == Qt.MouseButton.RightButton
+
+    def _show_context_menu(self, event: QMouseEvent) -> None:
+        menu = QMenu(self)
+        report_action = menu.addAction("レポート")
+        settings_action = menu.addAction("設定")
+        exit_action = menu.addAction("終了")
+
+        position_getter = getattr(event, "globalPosition", None)
+        if callable(position_getter):
+            position = position_getter().toPoint()
+        else:
+            position = event.globalPos()
+
+        selected_action = menu.exec(position)
+        self._handle_context_menu_selection(
+            selected_action,
+            report_action=report_action,
+            settings_action=settings_action,
+            exit_action=exit_action,
+        )
+
+    def _handle_context_menu_selection(
+        self,
+        selected_action: object,
+        *,
+        report_action: object,
+        settings_action: object,
+        exit_action: object,
+    ) -> None:
+        if selected_action is report_action:
+            self._open_report_dialog()
+        elif selected_action is settings_action:
+            self._open_settings_dialog()
+        elif selected_action is exit_action:
+            self.close()
 
     def _cycle_display_mode(self) -> None:
         """表示モードを循環。"""

@@ -859,10 +859,11 @@ class TestInitComponentsDirect(unittest.TestCase):
         self.assertTrue(window._disabled)
         self.assertIn('ゲーム情報', window._status)
 
-    def test_init_components_loghandler_file_not_found_disables(self):
-        """_init_componentsはLogHandlerのFileNotFoundErrorで無効化."""
+    def test_init_components_loghandler_file_not_found_opens_settings(self):
+        """_init_componentsはLogHandlerのFileNotFoundErrorで設定画面を開く."""
         window = self._create_mock_main_window()
         window._set_status = self._mock_set_status(window)
+        window._open_settings_dialog = MagicMock()
 
         mock_config = MagicMock()
         mock_config.window_scan.browsers = []
@@ -876,11 +877,13 @@ class TestInitComponentsDirect(unittest.TestCase):
                 with patch(
                     'src.app.main.LogHandler',
                     side_effect=FileNotFoundError("service_account.json"),
-                ):
+                ), patch('src.app.main.QMessageBox.warning') as mock_warning:
                     window._init_components()
 
-        self.assertTrue(window._disabled)
+        self.assertFalse(window._disabled)
         self.assertIn('認証情報', window._status)
+        mock_warning.assert_called_once()
+        window._open_settings_dialog.assert_called_once()
 
     def test_init_components_spreadsheet_not_found_disables(self):
         """_init_componentsはSpreadsheetNotFoundで無効化."""
@@ -965,6 +968,25 @@ class TestInitComponentsDirect(unittest.TestCase):
         finally:
             # 元に戻す
             fake_gspread.exceptions.APIError = original_api_error
+
+
+    def test_init_components_missing_settings_opens_settings_dialog(self):
+        window = self._create_mock_main_window()
+        window._set_status = self._mock_set_status(window)
+        window._open_settings_dialog = MagicMock()
+        window._get_bootstrapper = MagicMock()
+        window._get_bootstrapper.return_value.bootstrap.side_effect = (
+            main.components.MainWindowBootstrapError(
+                "設定が未作成です。設定画面で入力して保存してください。",
+                open_settings=True,
+            )
+        )
+
+        window._init_components()
+
+        self.assertFalse(window._disabled)
+        self.assertIn("設定が未作成", window._status)
+        window._open_settings_dialog.assert_called_once()
 
 
 class TestMainWindowEvents(unittest.TestCase):
@@ -2145,6 +2167,7 @@ class TestMousePressEventRealMethod(unittest.TestCase):
             window = main.MainWindow()
 
         window._cycle_display_mode = MagicMock()
+        window._show_context_menu = MagicMock()
 
         mock_event = MagicMock(spec=main.QMouseEvent)
         mock_event.button.return_value = main.Qt.MouseButton.RightButton
@@ -2152,6 +2175,70 @@ class TestMousePressEventRealMethod(unittest.TestCase):
         with patch.object(main.QWidget, 'mousePressEvent'):
             window.mousePressEvent(mock_event)
             window._cycle_display_mode.assert_not_called()
+            window._show_context_menu.assert_called_once_with(mock_event)
+
+    def test_context_menu_selection_opens_report(self):
+        with patch.object(main.MainWindow, '__init__', lambda self: None):
+            window = main.MainWindow()
+        report_action = object()
+        settings_action = object()
+        exit_action = object()
+        window._open_report_dialog = MagicMock()
+        window._open_settings_dialog = MagicMock()
+        window.close = MagicMock()
+
+        window._handle_context_menu_selection(
+            report_action,
+            report_action=report_action,
+            settings_action=settings_action,
+            exit_action=exit_action,
+        )
+
+        window._open_report_dialog.assert_called_once()
+        window._open_settings_dialog.assert_not_called()
+        window.close.assert_not_called()
+
+    def test_context_menu_selection_opens_settings(self):
+        with patch.object(main.MainWindow, '__init__', lambda self: None):
+            window = main.MainWindow()
+        report_action = object()
+        settings_action = object()
+        exit_action = object()
+        window._open_report_dialog = MagicMock()
+        window._open_settings_dialog = MagicMock()
+        window.close = MagicMock()
+
+        window._handle_context_menu_selection(
+            settings_action,
+            report_action=report_action,
+            settings_action=settings_action,
+            exit_action=exit_action,
+        )
+
+        window._open_settings_dialog.assert_called_once()
+        window._open_report_dialog.assert_not_called()
+        window.close.assert_not_called()
+
+    def test_context_menu_selection_exits(self):
+        with patch.object(main.MainWindow, '__init__', lambda self: None):
+            window = main.MainWindow()
+        report_action = object()
+        settings_action = object()
+        exit_action = object()
+        window._open_report_dialog = MagicMock()
+        window._open_settings_dialog = MagicMock()
+        window.close = MagicMock()
+
+        window._handle_context_menu_selection(
+            exit_action,
+            report_action=report_action,
+            settings_action=settings_action,
+            exit_action=exit_action,
+        )
+
+        window.close.assert_called_once()
+        window._open_report_dialog.assert_not_called()
+        window._open_settings_dialog.assert_not_called()
 
 
 class TestResizeEventRealMethod(unittest.TestCase):

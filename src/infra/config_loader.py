@@ -10,30 +10,34 @@ from src.infra.settings_store import SettingsStore
 DEFAULT_CONFIG_FILE = str(default_config_file())
 
 DEFAULT_BROWSERS = [
-    'Google Chrome',
-    'Microsoft Edge',
-    'Mozilla Firefox',
-    'Opera',
-    'Brave',
-    'Vivaldi',
-    'Safari',
+    "Google Chrome",
+    "Microsoft Edge",
+    "Mozilla Firefox",
+    "Opera",
+    "Brave",
+    "Vivaldi",
+    "Safari",
 ]
 
 DEFAULT_EXCLUDED_TITLES = [
-    'Program Manager',
-    'Settings',
-    '設定',
-    'NVIDIA GeForce Overlay',
-    'Windows 入力エクスペリエンス',
-    'Microsoft Store',
-    'game_time_tracker.bat',
-    'Nahimic',
+    "Program Manager",
+    "Settings",
+    "設定",
+    "NVIDIA GeForce Overlay",
+    "Windows 入力エクスペリエンス",
+    "Microsoft Store",
+    "game_time_tracker.bat",
+    "Nahimic",
 ]
+
+
+class ConfigNotConfiguredError(KeyError):
+    """Raised when required application settings are missing."""
 
 
 @dataclass
 class LogHandlerConfig:
-    """ログハンドラー設定."""
+    """Spreadsheet log handler settings."""
 
     cert_file_path: str
     sheet_key: str
@@ -41,7 +45,7 @@ class LogHandlerConfig:
 
 @dataclass
 class GameInfoConfig:
-    """ゲーム情報設定."""
+    """Game info spreadsheet settings."""
 
     sheet_key: str
     sheet_gid: int
@@ -49,7 +53,7 @@ class GameInfoConfig:
 
 @dataclass
 class WindowScanConfig:
-    """ウィンドウスキャン設定."""
+    """Window scanning settings."""
 
     browsers: List[str]
     excluded_titles: List[str]
@@ -57,7 +61,7 @@ class WindowScanConfig:
 
 @dataclass
 class Config:
-    """アプリケーション設定."""
+    """Application settings."""
 
     log_handler: LogHandlerConfig
     game_info: GameInfoConfig
@@ -65,11 +69,11 @@ class Config:
 
 
 class ConfigLoader:
-    """設定ファイルを読み込むクラス."""
+    """Load application settings from SQLite, with config.ini as migration input."""
 
     REQUIRED_KEYS = {
-        'LOGHANDLER': ['json_file_path', 'sheet_key'],
-        'GAMEINFO': ['sheet_key', 'sheet_gid'],
+        "LOGHANDLER": ["json_file_path", "sheet_key"],
+        "GAMEINFO": ["sheet_key", "sheet_gid"],
     }
 
     def __init__(
@@ -82,54 +86,72 @@ class ConfigLoader:
             self.config_file_path = str(resolve_config_file())
             self.settings_store = settings_store or SettingsStore()
             config_path = Path(self.config_file_path)
-            if config_path.exists():
+            stored_config = self.settings_store.load_config()
+            if self._has_required_keys(stored_config):
+                self.config = stored_config
+            elif config_path.exists():
                 self.config = self.settings_store.import_config_file(config_path)
             else:
-                self.config = self.settings_store.load_config()
+                self.config = stored_config
         else:
             self.config_file_path = config_file_path
             self.settings_store = settings_store
-            self.config.read(self.config_file_path, encoding='utf-8')
+            self.config.read(self.config_file_path, encoding="utf-8")
         self._validate_required_keys()
 
+    @classmethod
+    def _has_required_keys(cls, config: configparser.ConfigParser) -> bool:
+        for section, keys in cls.REQUIRED_KEYS.items():
+            if section not in config:
+                return False
+            for key in keys:
+                if key not in config[section]:
+                    return False
+        return True
+
     def _validate_required_keys(self) -> None:
-        """必須キーの存在を検証する."""
+        """Validate that all required config keys are present."""
         missing = []
         for section, keys in self.REQUIRED_KEYS.items():
             if section not in self.config:
-                missing.append(f'セクション [{section}]')
+                missing.append(f"section [{section}]")
             else:
                 for key in keys:
                     if key not in self.config[section]:
-                        missing.append(f'[{section}] の {key}')
+                        missing.append(f"[{section}] {key}")
         if missing:
-            raise KeyError(f"config.ini に必須項目がありません: {', '.join(missing)}")
+            raise ConfigNotConfiguredError(
+                f"config.ini is missing required settings: {', '.join(missing)}"
+            )
 
     def load(self) -> Config:
-        """設定を読み込んで Config オブジェクトを返す."""
+        """Return typed application settings."""
         log_handler = LogHandlerConfig(
-            cert_file_path=self.config['LOGHANDLER']['json_file_path'],
-            sheet_key=self.config['LOGHANDLER']['sheet_key'],
+            cert_file_path=self.config["LOGHANDLER"]["json_file_path"],
+            sheet_key=self.config["LOGHANDLER"]["sheet_key"],
         )
 
         try:
-            sheet_gid = int(self.config['GAMEINFO']['sheet_gid'])
+            sheet_gid = int(self.config["GAMEINFO"]["sheet_gid"])
         except ValueError:
-            configured_sheet_gid = self.config['GAMEINFO']['sheet_gid']
+            configured_sheet_gid = self.config["GAMEINFO"]["sheet_gid"]
             raise ValueError(
                 "config.ini の [GAMEINFO] sheet_gid は整数である必要があります: "
                 f"{configured_sheet_gid}"
             )
 
         game_info = GameInfoConfig(
-            sheet_key=self.config['GAMEINFO']['sheet_key'],
+            sheet_key=self.config["GAMEINFO"]["sheet_key"],
             sheet_gid=sheet_gid,
         )
 
         window_scan = WindowScanConfig(
-            browsers=self._get_list('WINDOW_SCAN', 'browsers', DEFAULT_BROWSERS),
+            browsers=self._get_list("WINDOW_SCAN", "browsers", DEFAULT_BROWSERS),
             excluded_titles=self._get_list(
-                'WINDOW_SCAN', 'exclude_titles', DEFAULT_EXCLUDED_TITLES),
+                "WINDOW_SCAN",
+                "exclude_titles",
+                DEFAULT_EXCLUDED_TITLES,
+            ),
         )
 
         return Config(
@@ -141,6 +163,6 @@ class ConfigLoader:
     def _get_list(self, section: str, key: str, default: List[str]) -> List[str]:
         if section not in self.config or key not in self.config[section]:
             return list(default)
-        raw = self.config.get(section, key, fallback='')
-        items = [item.strip() for item in raw.split(',') if item.strip()]
+        raw = self.config.get(section, key, fallback="")
+        items = [item.strip() for item in raw.split(",") if item.strip()]
         return items if items else list(default)

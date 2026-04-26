@@ -17,6 +17,9 @@ from typing import Any, Dict, List, Tuple
 class FakeQWidget:
     """QWidget のスタブ."""
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
     def closeEvent(self, event) -> None:
         pass
 
@@ -31,6 +34,9 @@ class FakeQMouseEvent:
     """QMouseEvent のスタブ."""
 
     def button(self):
+        return None
+
+    def globalPos(self):
         return None
 
 
@@ -103,6 +109,137 @@ class FakeWidget:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         pass
 
+    def setWindowTitle(self, title: str) -> None:
+        self.window_title = title
+
+    def resize(self, width: int, height: int) -> None:
+        self.size = (width, height)
+
+    def setLayout(self, layout: Any) -> None:
+        self.layout = layout
+
+    def show(self) -> None:
+        self.visible = True
+
+    def raise_(self) -> None:
+        pass
+
+    def activateWindow(self) -> None:
+        pass
+
+    def isVisible(self) -> bool:
+        return bool(getattr(self, "visible", False))
+
+    def accept(self) -> None:
+        self.accepted = True
+
+    def reject(self) -> None:
+        self.rejected = True
+
+
+class FakeLineEdit(FakeWidget):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._text = ""
+
+    def setText(self, text: Any) -> None:
+        self._text = "" if text is None else str(text)
+
+    def text(self) -> str:
+        return self._text
+
+
+class FakeTextEdit(FakeWidget):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._text = ""
+
+    def setPlainText(self, text: Any) -> None:
+        self._text = "" if text is None else str(text)
+
+    def toPlainText(self) -> str:
+        return self._text
+
+
+class FakeLabel(FakeWidget):
+    def __init__(self, text: Any = "", *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._text = "" if text is None else str(text)
+
+    def setText(self, text: Any) -> None:
+        self._text = "" if text is None else str(text)
+
+    def text(self) -> str:
+        return self._text
+
+
+class FakeLayout:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.items = []
+
+    def addRow(self, *args: Any) -> None:
+        self.items.append(args)
+
+    def addLayout(self, *args: Any) -> None:
+        self.items.append(args)
+
+    def addWidget(self, *args: Any) -> None:
+        self.items.append(args)
+
+    def addSpacing(self, *args: Any) -> None:
+        self.items.append(args)
+
+    def addStretch(self, *args: Any) -> None:
+        self.items.append(args)
+
+    def setContentsMargins(self, *args: Any) -> None:
+        self.contents_margins = args
+
+    def setSpacing(self, spacing: int) -> None:
+        self.spacing = spacing
+
+
+class FakeDialogButtonBox(FakeWidget):
+    StandardButton = types.SimpleNamespace(Save=1, Cancel=2)
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.accepted = FakeSignal()
+        self.rejected = FakeSignal()
+
+
+class FakeMessageBox:
+    @staticmethod
+    def warning(*args: Any, **kwargs: Any) -> None:
+        return None
+
+
+class FakeFileDialog:
+    next_open_file_name = ("", "")
+    next_save_file_name = ("", "")
+
+    @staticmethod
+    def getOpenFileName(*args: Any, **kwargs: Any) -> Tuple[str, str]:
+        return FakeFileDialog.next_open_file_name
+
+    @staticmethod
+    def getSaveFileName(*args: Any, **kwargs: Any) -> Tuple[str, str]:
+        return FakeFileDialog.next_save_file_name
+
+
+class FakeMenu:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.actions = []
+        self.selected_action = None
+
+    def addAction(self, text: str) -> object:
+        action = types.SimpleNamespace(text=text)
+        self.actions.append(action)
+        return action
+
+    def exec(self, position: Any) -> object:
+        return self.selected_action
+
 fake_pyside6_core: Any = types.SimpleNamespace(
     QTimer=type("QTimer", (), {}),
     Qt=types.SimpleNamespace(
@@ -122,9 +259,15 @@ fake_pyside6_widgets: Any = types.SimpleNamespace(
     QTableWidgetItem=FakeQTableWidgetItem,
     QCheckBox=type("QCheckBox", (), {}),
     QPushButton=FakeButton,
-    QLabel=type("QLabel", (), {}),
+    QLabel=FakeLabel,
+    QFileDialog=FakeFileDialog,
     QListWidget=type("QListWidget", (), {}),
     QDialog=FakeWidget,
+    QDialogButtonBox=FakeDialogButtonBox,
+    QFormLayout=FakeLayout,
+    QLineEdit=FakeLineEdit,
+    QMessageBox=FakeMessageBox,
+    QTextEdit=FakeTextEdit,
     QComboBox=FakeWidget,
     QTabWidget=FakeWidget,
     QAbstractItemView=type(
@@ -135,10 +278,11 @@ fake_pyside6_widgets: Any = types.SimpleNamespace(
             "SelectionBehavior": types.SimpleNamespace(SelectRows=1),
         },
     ),
-    QVBoxLayout=type("QVBoxLayout", (), {}),
-    QHBoxLayout=type("QHBoxLayout", (), {}),
+    QVBoxLayout=FakeLayout,
+    QHBoxLayout=FakeLayout,
     QTableWidget=type("QTableWidget", (), {}),
     QHeaderView=type("QHeaderView", (), {}),
+    QMenu=FakeMenu,
 )
 
 
