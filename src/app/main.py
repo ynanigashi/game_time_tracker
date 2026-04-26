@@ -243,6 +243,7 @@ class MainWindow(QWidget):
             alerted_threshold_minutes=set(),
         )
         self._window_title_copy_connected = False
+        self._window_title_context_menu_connected = False
 
     def _get_window_list_widget(self) -> Optional[QWidget]:
         """ウィンドウタイトル一覧ウィジェットを取得する。"""
@@ -251,24 +252,58 @@ class MainWindow(QWidget):
     def _initialize_window_title_copy(self) -> None:
         """現在のウィンドウタイトル一覧のクリックコピーを初期化する。"""
         window_list = self._get_window_list_widget()
-        if window_list is None or self._window_title_copy_connected:
+        if window_list is None:
             return
 
-        item_clicked_signal = getattr(window_list, "itemClicked", None)
-        if item_clicked_signal is None:
+        if not getattr(self, "_window_title_copy_connected", False):
+            item_clicked_signal = getattr(window_list, "itemClicked", None)
+            if item_clicked_signal is not None:
+                try:
+                    item_clicked_signal.connect(self._on_window_title_item_clicked)
+                    self._window_title_copy_connected = True
+                except Exception:
+                    logger.debug(
+                        "ウィンドウタイトルクリックシグナルの接続に失敗",
+                        exc_info=True,
+                    )
+
+        if not getattr(self, "_window_title_context_menu_connected", False):
+            self._initialize_window_title_context_menu(window_list)
+
+        if (
+            getattr(self, "_window_title_copy_connected", False)
+            or getattr(self, "_window_title_context_menu_connected", False)
+        ):
+            set_tooltip = getattr(window_list, "setToolTip", None)
+            if callable(set_tooltip):
+                set_tooltip("クリックでコピー。右クリックでゲーム管理に追加")
+
+    def _initialize_window_title_context_menu(self, window_list: QWidget) -> None:
+        signal = getattr(window_list, "customContextMenuRequested", None)
+        if signal is None:
             return
+
+        context_menu_policy = getattr(
+            getattr(Qt, "ContextMenuPolicy", object),
+            "CustomContextMenu",
+            None,
+        )
+        if context_menu_policy is None:
+            context_menu_policy = getattr(Qt, "CustomContextMenu", None)
+
+        set_policy = getattr(window_list, "setContextMenuPolicy", None)
+        if callable(set_policy) and context_menu_policy is not None:
+            try:
+                set_policy(context_menu_policy)
+            except Exception:
+                logger.debug("ウィンドウタイトル右クリック設定に失敗", exc_info=True)
 
         try:
-            item_clicked_signal.connect(self._on_window_title_item_clicked)
+            signal.connect(self._show_window_title_context_menu)
         except Exception:
-            logger.debug("ウィンドウタイトルクリックシグナルの接続に失敗", exc_info=True)
+            logger.debug("ウィンドウタイトル右クリックシグナルの接続に失敗", exc_info=True)
             return
-
-        self._window_title_copy_connected = True
-
-        set_tooltip = getattr(window_list, "setToolTip", None)
-        if callable(set_tooltip):
-            set_tooltip("クリックした行のタイトルをコピー")
+        self._window_title_context_menu_connected = True
 
     def _on_window_title_item_clicked(self, item: object) -> None:
         """現在のウィンドウタイトル一覧の行クリック時に文字列をコピーする。"""
@@ -286,6 +321,48 @@ class MainWindow(QWidget):
             return
 
         self._copy_text_to_clipboard(text)
+
+    def _show_window_title_context_menu(self, position: object) -> None:
+        window_list = self._get_window_list_widget()
+        if window_list is None:
+            return
+
+        item = self._window_title_item_at(window_list, position)
+        title = self._text_from_window_title_item(item)
+        if not title:
+            return
+
+        menu = QMenu(window_list)
+        add_action = menu.addAction("ゲーム一覧に追加")
+
+        map_to_global = getattr(window_list, "mapToGlobal", None)
+        global_position = map_to_global(position) if callable(map_to_global) else position
+        selected_action = menu.exec(global_position)
+        if selected_action is add_action:
+            self._open_game_catalog_dialog(initial_window_title=title)
+
+    @staticmethod
+    def _window_title_item_at(window_list: QWidget, position: object) -> object:
+        item_at = getattr(window_list, "itemAt", None)
+        if callable(item_at):
+            return item_at(position)
+        current_item = getattr(window_list, "currentItem", None)
+        if callable(current_item):
+            return current_item()
+        return None
+
+    @staticmethod
+    def _text_from_window_title_item(item: object) -> str:
+        if item is None:
+            return ""
+        text_getter = getattr(item, "text", None)
+        if not callable(text_getter):
+            return ""
+        try:
+            return str(text_getter()).strip()
+        except Exception:
+            logger.debug("ウィンドウタイトルテキストの取得に失敗", exc_info=True)
+            return ""
 
     def _copy_text_to_clipboard(self, text: str) -> None:
         """指定テキストをクリップボードへコピーする。"""
@@ -707,12 +784,17 @@ class MainWindow(QWidget):
         dialog.raise_()
         dialog.activateWindow()
 
-    def _open_game_catalog_dialog(self) -> None:
+    def _open_game_catalog_dialog(self, *, initial_window_title: str = "") -> None:
         """Open a non-modal game catalog dialog."""
         dialog = getattr(self, "_game_catalog_dialog", None)
         if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
             dialog = GameCatalogDialog(self, on_saved=self._on_game_catalog_saved)
             self._game_catalog_dialog = dialog
+
+        if initial_window_title:
+            prepare = getattr(dialog, "prepare_new_game", None)
+            if callable(prepare):
+                prepare(window_title=initial_window_title)
 
         dialog.show()
         dialog.raise_()

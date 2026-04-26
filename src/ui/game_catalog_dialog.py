@@ -154,6 +154,11 @@ class GameCatalogDialog(QDialog):
         self.play_with_friends_check.setChecked(False)
         self.is_browser_game_check.setChecked(False)
 
+    def prepare_new_game(self, *, window_title: str = "") -> None:
+        """Prepare the form for adding a new game."""
+        self._clear_form()
+        self.window_title_edit.setText(window_title.strip())
+
     def _add_game(self) -> None:
         try:
             self.game_store.save_game(self._collect_game())

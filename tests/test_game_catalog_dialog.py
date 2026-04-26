@@ -60,5 +60,22 @@ class TestGameCatalogDialogSpreadsheetPush(unittest.TestCase):
         )
 
 
+class TestGameCatalogDialogForm(unittest.TestCase):
+    def test_prepare_new_game_prefills_window_title(self):
+        dialog = GameCatalogDialog.__new__(GameCatalogDialog)
+        dialog.game_title_edit = MagicMock()
+        dialog.window_title_edit = MagicMock()
+        dialog.play_with_friends_check = MagicMock()
+        dialog.is_browser_game_check = MagicMock()
+
+        dialog.prepare_new_game(window_title="  Game Window Title  ")
+
+        dialog.game_title_edit.setText.assert_called_once_with("")
+        dialog.window_title_edit.setText.assert_any_call("")
+        dialog.window_title_edit.setText.assert_called_with("Game Window Title")
+        dialog.play_with_friends_check.setChecked.assert_called_once_with(False)
+        dialog.is_browser_game_check.setChecked.assert_called_once_with(False)
+
+
 if __name__ == "__main__":
     unittest.main()

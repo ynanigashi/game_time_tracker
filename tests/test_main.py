@@ -615,7 +615,10 @@ class TestMainWindowUIHelpers(unittest.TestCase):
         """_initialize_window_title_copyはitemClickedシグナルを接続する."""
         window = self._create_mock_main_window()
         window._window_title_copy_connected = False
+        window._window_title_context_menu_connected = False
         window.w.window_list.itemClicked = MagicMock()
+        window.w.window_list.customContextMenuRequested = MagicMock()
+        window.w.window_list.setContextMenuPolicy = MagicMock()
         window.w.window_list.setToolTip = MagicMock()
 
         window._initialize_window_title_copy()
@@ -623,8 +626,34 @@ class TestMainWindowUIHelpers(unittest.TestCase):
         window.w.window_list.itemClicked.connect.assert_called_once_with(
             window._on_window_title_item_clicked
         )
+        window.w.window_list.customContextMenuRequested.connect.assert_called_once_with(
+            window._show_window_title_context_menu
+        )
+        window.w.window_list.setContextMenuPolicy.assert_called_once()
         window.w.window_list.setToolTip.assert_called_once()
         self.assertTrue(window._window_title_copy_connected)
+        self.assertTrue(window._window_title_context_menu_connected)
+
+    def test_window_title_context_menu_opens_game_catalog_with_title(self):
+        """ウィンドウタイトル右クリックメニューからゲーム管理を開く."""
+        window = self._create_mock_main_window()
+        item = MagicMock()
+        item.text.return_value = "Game Window Title"
+        window.w.window_list.itemAt.return_value = item
+        window.w.window_list.mapToGlobal.side_effect = lambda pos: pos
+        window._open_game_catalog_dialog = MagicMock()
+        action = object()
+        menu = MagicMock()
+        menu.addAction.return_value = action
+        menu.exec.return_value = action
+
+        with patch.object(main, "QMenu", return_value=menu):
+            window._show_window_title_context_menu(object())
+
+        menu.addAction.assert_called_once_with("ゲーム一覧に追加")
+        window._open_game_catalog_dialog.assert_called_once_with(
+            initial_window_title="Game Window Title"
+        )
 
     def test_update_today_games_list_clears_when_empty(self):
         """_update_today_games_listは空のとき最終コンテンツを更新."""

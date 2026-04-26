@@ -322,6 +322,7 @@ fake_pyside6_core: Any = types.SimpleNamespace(
     QTimer=type("QTimer", (), {}),
     Qt=types.SimpleNamespace(
         MouseButton=types.SimpleNamespace(LeftButton=1, RightButton=2),
+        ContextMenuPolicy=types.SimpleNamespace(CustomContextMenu=3),
         CheckState=types.SimpleNamespace(Unchecked=0, Checked=2),
         AlignmentFlag=types.SimpleNamespace(AlignCenter=0),
     ),
