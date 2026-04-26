@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
-from typing import Any, Dict, List, Tuple
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional, Tuple
 
+from src.core.reporting import (
+    ReportSummary,
+    TrendPoint,
+    TrendSeries,
+    build_game_report,
+    build_play_time_trend,
+    build_play_time_trend_by_title,
+)
 from src.core.time_utils import GSS_DATETIME_FORMAT, SECONDS_PER_MINUTE
 from src.infra.config_loader import LogHandlerConfig
 from src.infra.gspread_service import GspreadService
@@ -95,6 +103,51 @@ class LogHandler:
             )
 
         return game_minutes, total_seconds
+
+    def get_report_stats(
+        self,
+        *,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> ReportSummary:
+        """Return aggregated report statistics from the local cache."""
+        return build_game_report(
+            self.records,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    def get_trend_stats(
+        self,
+        *,
+        granularity: str,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> List[TrendPoint]:
+        """Return aggregated play-time trend points from the local cache."""
+        return build_play_time_trend(
+            self.records,
+            granularity=granularity,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    def get_trend_stats_by_title(
+        self,
+        *,
+        granularity: str,
+        titles: Optional[List[str]] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> List[TrendSeries]:
+        """Return title-grouped play-time trend points from the local cache."""
+        return build_play_time_trend_by_title(
+            self.records,
+            granularity=granularity,
+            titles=titles,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
     def save_record(self, values: List[Any]) -> bool:
         """レコードをスプレッドシートに保存。

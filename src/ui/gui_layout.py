@@ -89,6 +89,7 @@ class LayoutWidgets:
     today_games_min_height: int
     window_min_height: int
     overtime_alert_toggle: Optional[QPushButton] = None
+    report_button: Optional[QPushButton] = None
 
 
 def build_main_layout(parent: QWidget) -> LayoutWidgets:
@@ -149,10 +150,13 @@ def build_main_layout(parent: QWidget) -> LayoutWidgets:
     settings_label = QLabel('時間超過防止アラート', parent)
     overtime_alert_toggle = SlideToggleButton(parent)
     overtime_alert_toggle.setChecked(DEFAULT_OVERTIME_ALERT_ENABLED)
+    report_button = QPushButton('レポート', parent)
     settings_row = QHBoxLayout()
     settings_row.addWidget(settings_label)
     settings_row.addSpacing(6)
     settings_row.addWidget(overtime_alert_toggle)
+    settings_row.addSpacing(10)
+    settings_row.addWidget(report_button)
     settings_row.addStretch()
     main_layout.addStretch()
     main_layout.addLayout(settings_row)
@@ -175,4 +179,5 @@ def build_main_layout(parent: QWidget) -> LayoutWidgets:
         today_games_min_height=today_games_min_height,
         window_min_height=window_min_height,
         overtime_alert_toggle=overtime_alert_toggle,
+        report_button=report_button,
     )

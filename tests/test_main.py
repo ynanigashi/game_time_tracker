@@ -2199,6 +2199,7 @@ class TestApplyDisplayModeMaxMid(unittest.TestCase):
         window.w.window_label = MagicMock()
         window.w.window_list = MagicMock()
         window.w.overtime_alert_toggle = MagicMock()
+        window.w.report_button = MagicMock()
 
         window._apply_mode_geometry = MagicMock()
 

@@ -6,18 +6,24 @@ __pycache__/
 
 # Virtual environment / caches
 .venv/
+.venv-codex/
+.codex-temp/
 .pytest_cache/
 
 # Runtime artifacts
 window_state.txt
 game_time_tracker.log
+*.log
 build/
 dist/
 *.spec
 
 # Local secrets / local config
 config.ini
+.env
+.env.*
 service_account.json
+service_account*.json
 
 # OS artifacts
 Thumbs.db

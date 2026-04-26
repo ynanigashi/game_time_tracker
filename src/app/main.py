@@ -1,50 +1,18 @@
 """Game Time Tracker - PySide6 GUI."""
 
+import atexit
+import logging
+import sys
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
+
 from PySide6.QtCore import QTimer, Qt
-from src.app.win32_helpers import (
-    Point,
-    Rect,
-    global_rect_of_widget,
-    rect_contains_point,
-    rects_intersect,
-    sample_points_from_rect,
-    window_rect,
-    window_at_point,
-    window_below,
-    root_window,
-    window_handle_of,
-    get_foreground_hwnd,
-    is_own_process_window,
-)
-from src.ui.gui_layout import build_main_layout
-from src.infra.log_handler import LogHandler
-from src.infra.config_loader import (
-    DEFAULT_BROWSERS,
-    DEFAULT_EXCLUDED_TITLES,
-    ConfigLoader,
-)
-from src.core.window_state import (
-    DEFAULT_OVERTIME_ALERT_ENABLED,
-    DISPLAY_MODES,
-    MODE_DEFAULT_SIZES,
-    WindowState,
-)
-from src.core.time_utils import (
-    SECONDS_PER_MINUTE,
-    calc_today_elapsed_seconds,
-    format_hms,
-)
-from src.core.services import (
-    DailyStatsTracker,
-    GameInfoLoader,
-    ScanResult,
-    GameStateTracker,
-    Messages,
-    SessionRecorder,
-    WindowScanner,
-    MIN_PLAY_MINUTES,
-)
-from src.core.models import GameEntry
+from PySide6.QtGui import QCloseEvent, QMouseEvent, QResizeEvent
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QWidget
+
+from src.app import main_components as components
 from src.app.main_components import (
     MainWindowBootstrapError,
     MainWindowBootstrapResult,
@@ -56,16 +24,51 @@ from src.app.main_components import (
     MainWindowUiController,
     TodayTimeOverlayWindow,
 )
-from src.app import main_components as components
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QWidget
-from PySide6.QtGui import QCloseEvent, QMouseEvent, QResizeEvent
-import atexit
-import logging
-import sys
-from dataclasses import dataclass
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
+from src.app.win32_helpers import (
+    get_foreground_hwnd,
+    global_rect_of_widget,
+    is_own_process_window,
+    Point,
+    Rect,
+    rect_contains_point,
+    rects_intersect,
+    root_window,
+    sample_points_from_rect,
+    window_at_point,
+    window_below,
+    window_handle_of,
+    window_rect,
+)
+from src.core.models import GameEntry
+from src.core.services import (
+    DailyStatsTracker,
+    GameInfoLoader,
+    GameStateTracker,
+    Messages,
+    MIN_PLAY_MINUTES,
+    ScanResult,
+    SessionRecorder,
+    WindowScanner,
+)
+from src.core.time_utils import (
+    calc_today_elapsed_seconds,
+    format_hms,
+    SECONDS_PER_MINUTE,
+)
+from src.core.window_state import (
+    DEFAULT_OVERTIME_ALERT_ENABLED,
+    DISPLAY_MODES,
+    MODE_DEFAULT_SIZES,
+    WindowState,
+)
+from src.infra.config_loader import (
+    ConfigLoader,
+    DEFAULT_BROWSERS,
+    DEFAULT_EXCLUDED_TITLES,
+)
+from src.infra.log_handler import LogHandler
+from src.ui.gui_layout import build_main_layout
+from src.ui.report_dialog import ReportDialog
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +207,8 @@ class MainWindow(QWidget):
             getattr(self, "overtime_alert_enabled", DEFAULT_OVERTIME_ALERT_ENABLED)
         )
         self._overtime_alert_toggle_connected = False
+        self._report_button_connected = False
+        self._report_dialog: Optional[ReportDialog] = None
         self._overtime_alert_tracker = OvertimeAlertTracker(
             thresholds_minutes=OVERTIME_ALERT_THRESHOLDS_MINUTES,
             alerted_threshold_minutes=set(),
@@ -438,6 +443,7 @@ class MainWindow(QWidget):
 
         self._apply_bootstrap_result(result)
         self._initialize_overtime_alert_toggle()
+        self._initialize_report_button()
         self._apply_display_mode()
         self._apply_mode_geometry()
         self._set_status(Messages.NO_GAME_PLAYING)
@@ -596,6 +602,10 @@ class MainWindow(QWidget):
         """時間超過防止アラートのトグルを取得する。"""
         return self.w.overtime_alert_toggle
 
+    def _get_report_button(self) -> Optional[QPushButton]:
+        """Return the report button when the layout provides one."""
+        return getattr(self.w, "report_button", None)
+
     def _initialize_overtime_alert_toggle(self) -> None:
         """時間超過防止アラートトグルを初期化する。"""
         toggle = self._get_overtime_alert_toggle()
@@ -613,6 +623,34 @@ class MainWindow(QWidget):
                 pass
         toggle.toggled.connect(self._on_overtime_alert_toggled)
         self._overtime_alert_toggle_connected = True
+
+    def _initialize_report_button(self) -> None:
+        """Connect the report button to the report dialog."""
+        button = self._get_report_button()
+        if button is None:
+            return
+
+        if getattr(self, "_report_button_connected", False):
+            try:
+                button.clicked.disconnect(self._open_report_dialog)
+            except (TypeError, RuntimeError):
+                pass
+        button.clicked.connect(self._open_report_dialog)
+        self._report_button_connected = True
+
+    def _open_report_dialog(self) -> None:
+        """Open a non-modal report dialog backed by the cached log handler."""
+        if not hasattr(self, "recorder"):
+            return
+
+        dialog = getattr(self, "_report_dialog", None)
+        if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
+            dialog = ReportDialog(self.recorder.log_handler, self)
+            self._report_dialog = dialog
+
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _on_overtime_alert_toggled(self, checked: bool) -> None:
         """時間超過防止アラートトグル変更時の処理。"""

@@ -361,6 +361,8 @@ class MainWindowDisplayController:
 
         if widgets.overtime_alert_toggle is not None:
             set_widget_visibility(widgets.overtime_alert_toggle, True)
+        if widgets.report_button is not None:
+            set_widget_visibility(widgets.report_button, True)
 
         apply_mode_geometry()
 

@@ -54,11 +54,61 @@ class FakeQApplication:
     def beep() -> None:
         return None
 
+    @staticmethod
+    def processEvents() -> None:
+        return None
+
+
+class FakeSignal:
+    def connect(self, callback: Any) -> None:
+        self.callback = callback
+
+    def disconnect(self, callback: Any) -> None:
+        self.callback = None
+
+
+class FakeButton:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.clicked = FakeSignal()
+        self.toggled = FakeSignal()
+
+    def setCheckable(self, value: bool) -> None:
+        self.checkable = value
+
+    def setFixedSize(self, width: int, height: int) -> None:
+        self.fixed_size = (width, height)
+
+    def setMinimumWidth(self, width: int) -> None:
+        self.minimum_width = width
+
+    def setObjectName(self, name: str) -> None:
+        self.object_name = name
+
+    def isChecked(self) -> bool:
+        return bool(getattr(self, "checked", False))
+
+    def setChecked(self, value: bool) -> None:
+        self.checked = value
+
+    def setText(self, text: str) -> None:
+        self.text = text
+
+    def setStyleSheet(self, style: str) -> None:
+        self.style = style
+
+    def setEnabled(self, value: bool) -> None:
+        self.enabled = value
+
+class FakeWidget:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
 
 fake_pyside6_core: Any = types.SimpleNamespace(
     QTimer=type("QTimer", (), {}),
     Qt=types.SimpleNamespace(
-        MouseButton=types.SimpleNamespace(LeftButton=1, RightButton=2)
+        MouseButton=types.SimpleNamespace(LeftButton=1, RightButton=2),
+        CheckState=types.SimpleNamespace(Unchecked=0, Checked=2),
+        AlignmentFlag=types.SimpleNamespace(AlignCenter=0),
     ),
 )
 fake_pyside6_gui: Any = types.SimpleNamespace(
@@ -71,9 +121,20 @@ fake_pyside6_widgets: Any = types.SimpleNamespace(
     QWidget=FakeQWidget,
     QTableWidgetItem=FakeQTableWidgetItem,
     QCheckBox=type("QCheckBox", (), {}),
-    QPushButton=type("QPushButton", (), {}),
+    QPushButton=FakeButton,
     QLabel=type("QLabel", (), {}),
     QListWidget=type("QListWidget", (), {}),
+    QDialog=FakeWidget,
+    QComboBox=FakeWidget,
+    QTabWidget=FakeWidget,
+    QAbstractItemView=type(
+        "QAbstractItemView",
+        (),
+        {
+            "EditTrigger": types.SimpleNamespace(NoEditTriggers=0),
+            "SelectionBehavior": types.SimpleNamespace(SelectRows=1),
+        },
+    ),
     QVBoxLayout=type("QVBoxLayout", (), {}),
     QHBoxLayout=type("QHBoxLayout", (), {}),
     QTableWidget=type("QTableWidget", (), {}),
@@ -213,6 +274,43 @@ class FakeLogHandler:
             print(f"今日の統計情報の取得中にエラーが発生しました: {e}")
 
         return game_minutes, total_seconds
+
+    def get_report_stats(self, *, start_date=None, end_date=None):
+        from src.core.reporting import build_game_report
+
+        return build_game_report(
+            self.records,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    def get_trend_stats(self, *, granularity, start_date=None, end_date=None):
+        from src.core.reporting import build_play_time_trend
+
+        return build_play_time_trend(
+            self.records,
+            granularity=granularity,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    def get_trend_stats_by_title(
+        self,
+        *,
+        granularity,
+        titles=None,
+        start_date=None,
+        end_date=None,
+    ):
+        from src.core.reporting import build_play_time_trend_by_title
+
+        return build_play_time_trend_by_title(
+            self.records,
+            granularity=granularity,
+            titles=titles,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
     def save_record(self, values: List[Any]) -> bool:
         """レコードを保存し、キャッシュにも追加。成功時Trueを返す。"""
