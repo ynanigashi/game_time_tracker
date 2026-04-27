@@ -77,6 +77,13 @@ class PlayLogStore:
             if "record_id" not in columns:
                 PlayLogStore._migrate_legacy_schema(conn)
                 return
+            if "sync_action" not in columns:
+                conn.execute(
+                    """
+                    ALTER TABLE play_records
+                    ADD COLUMN sync_action TEXT NOT NULL DEFAULT 'append'
+                    """
+                )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS play_records (
@@ -88,6 +95,7 @@ class PlayLogStore:
                 title TEXT NOT NULL,
                 play_with_friends TEXT NOT NULL,
                 backed_up INTEGER NOT NULL DEFAULT 0,
+                sync_action TEXT NOT NULL DEFAULT 'append',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
@@ -114,6 +122,7 @@ class PlayLogStore:
                 title TEXT NOT NULL,
                 play_with_friends TEXT NOT NULL,
                 backed_up INTEGER NOT NULL DEFAULT 0,
+                sync_action TEXT NOT NULL DEFAULT 'append',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
@@ -130,6 +139,7 @@ class PlayLogStore:
                 title,
                 play_with_friends,
                 backed_up,
+                sync_action,
                 created_at,
                 updated_at
             )
@@ -142,6 +152,7 @@ class PlayLogStore:
                 title,
                 play_with_friends,
                 backed_up,
+                'append',
                 created_at,
                 updated_at
             FROM play_records
@@ -177,6 +188,13 @@ class PlayLogStore:
             "end_time": row["end_time"],
             "title": row["title"],
             "play_with_friends": cls._deserialize_bool(row["play_with_friends"]),
+        }
+
+    @classmethod
+    def _row_to_pending_record(cls, row: sqlite3.Row) -> Dict[str, Any]:
+        return {
+            **cls._row_to_record(row),
+            "_sync_action": row["sync_action"],
         }
 
     @staticmethod
@@ -253,9 +271,10 @@ class PlayLogStore:
                     title,
                     play_with_friends,
                     backed_up,
+                    sync_action,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(record_id) DO UPDATE SET
                     device_id = excluded.device_id,
                     start_time = excluded.start_time,
@@ -263,6 +282,7 @@ class PlayLogStore:
                     title = excluded.title,
                     play_with_friends = excluded.play_with_friends,
                     backed_up = excluded.backed_up,
+                    sync_action = excluded.sync_action,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -274,6 +294,7 @@ class PlayLogStore:
                     record["title"],
                     record["play_with_friends"],
                     1 if backed_up else 0,
+                    "append",
                 ),
             )
         return {
@@ -340,9 +361,10 @@ class PlayLogStore:
                 title,
                 play_with_friends,
                 backed_up,
+                sync_action,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(record_id) DO UPDATE SET
                 device_id = excluded.device_id,
                 record_index = excluded.record_index,
@@ -351,6 +373,7 @@ class PlayLogStore:
                 title = excluded.title,
                 play_with_friends = excluded.play_with_friends,
                 backed_up = excluded.backed_up,
+                sync_action = excluded.sync_action,
                 updated_at = CURRENT_TIMESTAMP
             """,
             (
@@ -362,6 +385,7 @@ class PlayLogStore:
                 normalized["title"],
                 normalized["play_with_friends"],
                 1 if backed_up else 0,
+                "append",
             ),
         )
 
@@ -386,7 +410,9 @@ class PlayLogStore:
             conn.execute(
                 """
                 UPDATE play_records
-                SET backed_up = 1, updated_at = CURRENT_TIMESTAMP
+                SET backed_up = 1,
+                    sync_action = 'append',
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE record_id = ?
                 """,
                 (record_id,),
@@ -400,6 +426,7 @@ class PlayLogStore:
                 UPDATE play_records
                 SET record_id = ?,
                     backed_up = 0,
+                    sync_action = 'append',
                     updated_at = CURRENT_TIMESTAMP
                 WHERE record_id = ?
                 """,
@@ -423,10 +450,62 @@ class PlayLogStore:
             rows = conn.execute(
                 """
                 SELECT record_id, device_id, record_index, start_time, end_time,
-                       title, play_with_friends
+                       title, play_with_friends, sync_action
                 FROM play_records
                 WHERE backed_up = 0
                 ORDER BY record_index
                 """
             ).fetchall()
-        return [self._row_to_record(row) for row in rows]
+        return [self._row_to_pending_record(row) for row in rows]
+
+    def update_record(
+        self,
+        record_id: str,
+        values: List[Any],
+        *,
+        backed_up: bool = False,
+        sync_action: str = "update",
+    ) -> Dict[str, Any]:
+        if len(values) < 5:
+            raise ValueError("play record requires index, start, end, title, friends")
+        if sync_action not in {"append", "update"}:
+            raise ValueError(f"unknown play log sync action: {sync_action}")
+
+        serialized_friends = self._serialize_bool(values[4])
+        with self._connection() as conn:
+            conn.execute(
+                """
+                UPDATE play_records
+                SET record_index = ?,
+                    start_time = ?,
+                    end_time = ?,
+                    title = ?,
+                    play_with_friends = ?,
+                    backed_up = ?,
+                    sync_action = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE record_id = ?
+                """,
+                (
+                    int(values[0]),
+                    str(values[1]),
+                    str(values[2]),
+                    str(values[3]),
+                    serialized_friends,
+                    1 if backed_up else 0,
+                    "append" if backed_up else sync_action,
+                    record_id,
+                ),
+            )
+            row = conn.execute(
+                """
+                SELECT record_id, device_id, record_index, start_time, end_time,
+                       title, play_with_friends
+                FROM play_records
+                WHERE record_id = ?
+                """,
+                (record_id,),
+            ).fetchone()
+        if row is None:
+            raise ValueError(f"play record not found: {record_id}")
+        return self._row_to_record(row)

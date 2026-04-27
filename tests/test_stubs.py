@@ -7,7 +7,7 @@ PySide6, gspread, pygetwindow の外部依存をスタブで置き換え、
 
 import sys
 import types
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Dict, List, Tuple
 
 
@@ -63,6 +63,23 @@ class FakeQApplication:
     @staticmethod
     def processEvents() -> None:
         return None
+
+
+class FakeQDate:
+    def __init__(self, year: int, month: int, day: int) -> None:
+        self._date = date(year, month, day)
+
+    def year(self) -> int:
+        return self._date.year
+
+    def month(self) -> int:
+        return self._date.month
+
+    def day(self) -> int:
+        return self._date.day
+
+    def toPython(self) -> date:
+        return self._date
 
 
 class FakeSignal:
@@ -162,6 +179,24 @@ class FakeTextEdit(FakeWidget):
 
     def toPlainText(self) -> str:
         return self._text
+
+
+class FakeDateEdit(FakeWidget):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._date = FakeQDate(2000, 1, 1)
+
+    def setCalendarPopup(self, value: bool) -> None:
+        self.calendar_popup = value
+
+    def setDisplayFormat(self, value: str) -> None:
+        self.display_format = value
+
+    def setDate(self, value: Any) -> None:
+        self._date = value
+
+    def date(self) -> Any:
+        return self._date
 
 
 class FakeComboBox(FakeWidget):
@@ -319,6 +354,7 @@ class FakeMenu:
         return self.selected_action
 
 fake_pyside6_core: Any = types.SimpleNamespace(
+    QDate=FakeQDate,
     QTimer=type("QTimer", (), {}),
     Qt=types.SimpleNamespace(
         MouseButton=types.SimpleNamespace(LeftButton=1, RightButton=2),
@@ -348,6 +384,7 @@ fake_pyside6_widgets: Any = types.SimpleNamespace(
     QMessageBox=FakeMessageBox,
     QTextEdit=FakeTextEdit,
     QComboBox=FakeComboBox,
+    QDateEdit=FakeDateEdit,
     QTabWidget=FakeWidget,
     QAbstractItemView=type(
         "QAbstractItemView",

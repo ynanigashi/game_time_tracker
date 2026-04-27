@@ -329,6 +329,98 @@ class TestLogHandlerLocalPrimary(unittest.TestCase):
         self.assertIsNone(handler.gspread_service)
         self.assertEqual(handler.records, [])
 
+    def test_update_record_updates_local_cache_and_spreadsheet_row(self):
+        store = self._store()
+        saved = store.save_record(
+            [1, "2026/04/26 10:00:00", "2026/04/26 10:30:00", "Game", True],
+            backed_up=True,
+        )
+        spreadsheet = MagicMock()
+        spreadsheet.get_all_records.side_effect = [
+            [],
+            [
+                {
+                    "record_id": saved["record_id"],
+                    "device_id": saved["device_id"],
+                    "index": 1,
+                    "start_time": "2026/04/26 10:00:00",
+                    "end_time": "2026/04/26 10:30:00",
+                    "title": "Game",
+                    "play_with_friends": "TRUE",
+                }
+            ],
+        ]
+        spreadsheet.update_row_by_record_id.return_value = True
+
+        with patch("src.infra.log_handler.GspreadService", return_value=spreadsheet):
+            handler = LogHandler(self._config(), play_log_store=store)
+            result = handler.update_record(
+                saved["record_id"],
+                [
+                    1,
+                    "2026/04/26 11:00:00",
+                    "2026/04/26 12:00:00",
+                    "Edited",
+                    False,
+                ],
+            )
+
+        self.assertTrue(result.local_updated)
+        self.assertTrue(result.spreadsheet_updated)
+        self.assertEqual(handler.records[0]["title"], "Edited")
+        spreadsheet.update_row_by_record_id.assert_called_once_with(
+            saved["record_id"],
+            [
+                saved["record_id"],
+                saved["device_id"],
+                1,
+                "2026/04/26 11:00:00",
+                "2026/04/26 12:00:00",
+                "Edited",
+                False,
+            ],
+        )
+        spreadsheet.append_row.assert_not_called()
+        self.assertEqual(store.load_pending_backup_records(), [])
+
+    def test_pending_edited_record_overwrites_even_with_new_id_policy(self):
+        from src.infra.config_loader import LogHandlerConfig
+
+        store = self._store()
+        saved = store.save_record(
+            [1, "2026/04/26 10:00:00", "2026/04/26 10:30:00", "Game", True],
+            backed_up=True,
+        )
+        store.update_record(
+            saved["record_id"],
+            [1, "2026/04/26 11:00:00", "2026/04/26 12:00:00", "Edited", False],
+        )
+        spreadsheet = MagicMock()
+        spreadsheet.get_all_records.return_value = [
+            {
+                "record_id": saved["record_id"],
+                "device_id": saved["device_id"],
+                "index": 1,
+                "start_time": "2026/04/26 10:00:00",
+                "end_time": "2026/04/26 10:30:00",
+                "title": "Game",
+                "play_with_friends": "TRUE",
+            }
+        ]
+        spreadsheet.update_row_by_record_id.return_value = True
+        config = LogHandlerConfig(
+            cert_file_path="service_account.json",
+            sheet_key="key",
+            sync_conflict_policy="new_id",
+        )
+
+        with patch("src.infra.log_handler.GspreadService", return_value=spreadsheet):
+            LogHandler(config, play_log_store=store)
+
+        spreadsheet.update_row_by_record_id.assert_called_once()
+        spreadsheet.append_row.assert_not_called()
+        self.assertEqual(store.load_pending_backup_records(), [])
+
 
 class TestLogHandlerCache(unittest.TestCase):
     """LogHandlerのキャッシュ機能テスト."""

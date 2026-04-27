@@ -115,6 +115,27 @@ class TestPlayLogStore(unittest.TestCase):
             [reissued["record_id"]],
         )
 
+    def test_update_record_changes_values_and_marks_update_pending(self):
+        saved = self.store.save_record(
+            [1, "2026/04/26 10:00:00", "2026/04/26 10:30:00", "Game", True],
+            backed_up=True,
+        )
+
+        updated = self.store.update_record(
+            saved["record_id"],
+            [1, "2026/04/26 11:00:00", "2026/04/26 12:00:00", "Edited", False],
+        )
+
+        self.assertEqual(updated["record_id"], saved["record_id"])
+        self.assertEqual(updated["start_time"], "2026/04/26 11:00:00")
+        self.assertEqual(updated["title"], "Edited")
+        self.assertFalse(updated["play_with_friends"])
+
+        pending = self.store.load_pending_backup_records()
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]["record_id"], saved["record_id"])
+        self.assertEqual(pending[0]["_sync_action"], "update")
+
 
 if __name__ == "__main__":
     unittest.main()

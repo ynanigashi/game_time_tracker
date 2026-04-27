@@ -3,20 +3,26 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import Future, ThreadPoolExecutor
 from hashlib import sha1
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from time import perf_counter
 from typing import List, Optional, Tuple
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDate, QTimer, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
+    QDateEdit,
     QDialog,
+    QFormLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -33,6 +39,7 @@ from src.core.reporting import (
     build_play_time_trend,
     build_play_time_trend_by_title,
 )
+from src.core.time_utils import GSS_DATETIME_FORMAT
 from src.core.time_utils import format_hms
 
 logger = logging.getLogger(__name__)
@@ -67,6 +74,50 @@ except Exception as exc:
     QPainter = None  # type: ignore
     CHARTS_AVAILABLE = False
     CHARTS_IMPORT_ERROR = str(exc)
+
+
+if CHARTS_AVAILABLE and QChartView is not None:
+
+    class _SelectableTrendChartView(QChartView):  # type: ignore[misc]
+        """Chart view that reports a horizontal drag selection in view pixels."""
+
+        def __init__(self, on_selected: object, parent: Optional[QWidget] = None) -> None:
+            super().__init__(parent)
+            self._on_selected = on_selected
+            self._selection_start_x: Optional[float] = None
+            rubber_band = getattr(QChartView, "RubberBand", None)
+            if rubber_band is not None:
+                self.setRubberBand(rubber_band.HorizontalRubberBand)
+
+        @staticmethod
+        def _event_x(event: object) -> Optional[float]:
+            position = None
+            if hasattr(event, "position"):
+                position = event.position()
+            elif hasattr(event, "pos"):
+                position = event.pos()
+            if position is None or not hasattr(position, "x"):
+                return None
+            return float(position.x())
+
+        def mousePressEvent(self, event: object) -> None:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._selection_start_x = self._event_x(event)
+            super().mousePressEvent(event)
+
+        def mouseReleaseEvent(self, event: object) -> None:
+            start_x = self._selection_start_x
+            end_x = self._event_x(event)
+            self._selection_start_x = None
+            super().mouseReleaseEvent(event)
+            if start_x is None or end_x is None or abs(end_x - start_x) < 8:
+                return
+            callback = self._on_selected
+            if callable(callback):
+                callback(min(start_x, end_x), max(start_x, end_x))
+
+else:
+    _SelectableTrendChartView = None  # type: ignore[assignment]
 
 
 class ReportDialog(QDialog):
@@ -148,6 +199,12 @@ class ReportDialog(QDialog):
     def __init__(self, log_handler: object, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.log_handler = log_handler
+        self._log_edit_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="play-log-edit",
+        )
+        self._log_edit_future: Optional[Future] = None
+        self._log_edit_timer: Optional[QTimer] = None
         self.setWindowTitle("プレイレポート")
         self.resize(820, 560)
 
@@ -156,6 +213,23 @@ class ReportDialog(QDialog):
             self.period_combo.addItem(label)
         self.period_combo.setCurrentIndex(1)
         self.period_combo.currentIndexChanged.connect(self.refresh_summary)
+
+        self.trend_period_combo = QComboBox(self)
+        for label, key in self._PERIODS:
+            self.trend_period_combo.addItem(label, key)
+        self.trend_period_combo.addItem("日付指定", "custom")
+        self.trend_period_combo.setCurrentIndex(len(self._PERIODS) - 1)
+        self.trend_period_combo.currentIndexChanged.connect(
+            self._on_trend_period_changed
+        )
+        self.trend_start_date_edit = QDateEdit(self)
+        self.trend_end_date_edit = QDateEdit(self)
+        for date_edit in (self.trend_start_date_edit, self.trend_end_date_edit):
+            date_edit.setCalendarPopup(True)
+            date_edit.setDisplayFormat("yyyy/MM/dd")
+        self.trend_apply_date_button = QPushButton("日付で絞込", self)
+        self.trend_apply_date_button.clicked.connect(self._apply_custom_trend_date_range)
+        self._set_trend_date_edits(date.today() - timedelta(days=29), date.today())
 
         self.chart_type_combo = QComboBox(self)
         self.chart_type_combo.addItem("棒グラフ", "bar")
@@ -166,6 +240,7 @@ class ReportDialog(QDialog):
         self._updating_unit_toggles = False
         self._last_summary: Optional[ReportSummary] = None
         self._last_trend_series: Optional[List[TrendSeries]] = None
+        self._trend_selected_indices: Optional[Tuple[int, int]] = None
         self._unit_minute_buttons: List[QPushButton] = []
         self._unit_hour_buttons: List[QPushButton] = []
         self.summary_unit_control = self._create_unit_toggle()
@@ -173,6 +248,12 @@ class ReportDialog(QDialog):
         self._sync_unit_controls()
         self.log_sync_button = QPushButton("スプシ同期", self)
         self.log_sync_button.clicked.connect(self._sync_from_spreadsheet)
+        self.log_edit_button = QPushButton("編集を保存", self)
+        self.log_edit_button.clicked.connect(self._edit_selected_log_record)
+        self.log_start_time_edit = QLineEdit(self)
+        self.log_end_time_edit = QLineEdit(self)
+        self.log_title_edit = QLineEdit(self)
+        self.log_friends_check = QCheckBox(self)
 
         self.summary_label = QLabel("", self)
         self.debug_label = QLabel("", self)
@@ -190,6 +271,8 @@ class ReportDialog(QDialog):
         for label, key in self._TREND_MODES:
             self.trend_mode_combo.addItem(label, key)
         self.trend_mode_combo.currentIndexChanged.connect(self.refresh_trend)
+        self.clear_trend_selection_button = QPushButton("選択解除", self)
+        self.clear_trend_selection_button.clicked.connect(self._clear_trend_selection)
 
         self.trend_summary_label = QLabel("", self)
         self.trend_table = self._create_table(
@@ -218,13 +301,17 @@ class ReportDialog(QDialog):
             ["ID", "PC", "No.", "開始", "終了", "タイトル", "フレンド"],
             stretch_columns=(0, 1, 5),
         )
+        self.log_table.itemSelectionChanged.connect(self._apply_selected_log_row)
 
         self.chart_view = None
         self.trend_chart_view = None
         self.chart_fallback_label = None
         if CHARTS_AVAILABLE and QChartView is not None:
             self.chart_view = QChartView(self)
-            self.trend_chart_view = QChartView(self)
+            self.trend_chart_view = _SelectableTrendChartView(
+                self._select_trend_range_from_chart,
+                self,
+            )
             if QPainter is not None:
                 self.chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
                 self.trend_chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -328,6 +415,15 @@ class ReportDialog(QDialog):
 
     def _build_trend_tab(self) -> QWidget:
         controls = QHBoxLayout()
+        controls.addWidget(QLabel("期間", self))
+        controls.addWidget(self.trend_period_combo)
+        controls.addSpacing(12)
+        controls.addWidget(QLabel("開始", self))
+        controls.addWidget(self.trend_start_date_edit)
+        controls.addWidget(QLabel("終了", self))
+        controls.addWidget(self.trend_end_date_edit)
+        controls.addWidget(self.trend_apply_date_button)
+        controls.addSpacing(12)
         controls.addWidget(QLabel("表示", self))
         controls.addWidget(self.trend_mode_combo)
         controls.addSpacing(12)
@@ -336,6 +432,8 @@ class ReportDialog(QDialog):
         controls.addSpacing(12)
         controls.addWidget(QLabel("単位", self))
         controls.addWidget(self.trend_unit_control)
+        controls.addSpacing(12)
+        controls.addWidget(self.clear_trend_selection_button)
         controls.addStretch()
 
         layout = QVBoxLayout()
@@ -367,12 +465,20 @@ class ReportDialog(QDialog):
     def _build_log_tab(self) -> QWidget:
         controls = QHBoxLayout()
         controls.addWidget(self.log_sync_button)
+        controls.addWidget(self.log_edit_button)
         controls.addStretch()
+
+        form = QFormLayout()
+        form.addRow("開始時刻", self.log_start_time_edit)
+        form.addRow("終了時刻", self.log_end_time_edit)
+        form.addRow("タイトル", self.log_title_edit)
+        form.addRow("フレンドとプレイ", self.log_friends_check)
 
         layout = QVBoxLayout()
         layout.addLayout(controls)
         layout.addWidget(self.log_summary_label)
         layout.addWidget(self.log_table)
+        layout.addLayout(form)
 
         tab = QWidget(self)
         tab.setLayout(layout)
@@ -411,6 +517,56 @@ class ReportDialog(QDialog):
         index = self.period_combo.currentIndex()
         _, period_key = self._PERIODS[index]
         return self.date_range_for_period(period_key, date.today())
+
+    def _selected_trend_date_range(self) -> Tuple[Optional[date], Optional[date]]:
+        period_key = str(self.trend_period_combo.currentData() or "all")
+        if period_key == "custom":
+            return self._trend_date_edit_value(
+                self.trend_start_date_edit
+            ), self._trend_date_edit_value(self.trend_end_date_edit)
+        return self.date_range_for_period(period_key, date.today())
+
+    @staticmethod
+    def _date_to_qdate(value: date) -> QDate:
+        return QDate(value.year, value.month, value.day)
+
+    @staticmethod
+    def _qdate_to_date(value: object) -> date:
+        if isinstance(value, date):
+            return value
+        to_python = getattr(value, "toPython", None)
+        if callable(to_python):
+            converted = to_python()
+            if isinstance(converted, date):
+                return converted
+        return date(int(value.year()), int(value.month()), int(value.day()))
+
+    def _trend_date_edit_value(self, date_edit: QDateEdit) -> date:
+        return self._qdate_to_date(date_edit.date())
+
+    def _set_trend_date_edits(self, start_date: date, end_date: date) -> None:
+        self.trend_start_date_edit.setDate(self._date_to_qdate(start_date))
+        self.trend_end_date_edit.setDate(self._date_to_qdate(end_date))
+
+    def _on_trend_period_changed(self, *_args: object) -> None:
+        period_key = str(self.trend_period_combo.currentData() or "all")
+        if period_key != "custom":
+            start_date, end_date = self.date_range_for_period(period_key, date.today())
+            if start_date is not None and end_date is not None:
+                self._set_trend_date_edits(start_date, end_date)
+        self.refresh_trend()
+
+    def _apply_custom_trend_date_range(self, *_args: object) -> None:
+        start_date = self._trend_date_edit_value(self.trend_start_date_edit)
+        end_date = self._trend_date_edit_value(self.trend_end_date_edit)
+        if start_date > end_date:
+            QMessageBox.warning(self, "期間指定エラー", "開始日は終了日以前にしてください")
+            return
+
+        custom_index = self.trend_period_combo.findData("custom")
+        if custom_index >= 0:
+            self.trend_period_combo.setCurrentIndex(custom_index)
+        self.refresh_trend()
 
     def _load_summary(self) -> ReportSummary:
         start_date, end_date = self._selected_date_range()
@@ -619,13 +775,20 @@ class ReportDialog(QDialog):
 
     def _load_total_trend_series(self) -> List[TrendSeries]:
         granularity = self._selected_trend_granularity()
+        start_date, end_date = self._selected_trend_date_range()
         get_trend_stats = getattr(self.log_handler, "get_trend_stats", None)
         if callable(get_trend_stats):
-            points = get_trend_stats(granularity=granularity)
+            points = get_trend_stats(
+                granularity=granularity,
+                start_date=start_date,
+                end_date=end_date,
+            )
         else:
             points = build_play_time_trend(
                 self._cached_records(),
                 granularity=granularity,
+                start_date=start_date,
+                end_date=end_date,
             )
         return self._total_points_to_series(points)
 
@@ -634,6 +797,7 @@ class ReportDialog(QDialog):
             return self._load_total_trend_series()
 
         granularity = self._selected_trend_granularity()
+        start_date, end_date = self._selected_trend_date_range()
         titles = self._selected_titles()
         get_trend_stats_by_title = getattr(
             self.log_handler,
@@ -644,12 +808,16 @@ class ReportDialog(QDialog):
             return get_trend_stats_by_title(
                 granularity=granularity,
                 titles=titles,
+                start_date=start_date,
+                end_date=end_date,
             )
 
         return build_play_time_trend_by_title(
             self._cached_records(),
             granularity=granularity,
             titles=titles,
+            start_date=start_date,
+            end_date=end_date,
         )
 
     def refresh(self, *_args: object) -> None:
@@ -732,6 +900,7 @@ class ReportDialog(QDialog):
 
     def refresh_trend(self, *_args: object) -> None:
         """Refresh the trend table and line chart."""
+        self._trend_selected_indices = None
         started_at = perf_counter()
         try:
             series_list = self._load_trend_series()
@@ -740,19 +909,10 @@ class ReportDialog(QDialog):
             series_list = []
         self._last_trend_series = series_list
 
-        total_seconds = sum(
-            point.total_seconds
-            for series in series_list
-            for point in series.points
-        )
-        period_count = len(series_list[0].points) if series_list else 0
-        self.trend_summary_label.setText(
-            f"合計 {format_hms(total_seconds)} / "
-            f"{period_count} 期間 / {len(series_list)} {self._trend_series_label()}"
-        )
-        self._populate_trend_table(series_list)
+        self._populate_trend_selection(series_list)
         self._populate_trend_chart(series_list)
         self._update_title_filter_action_states()
+        self._update_trend_selection_action_states()
         point_count = sum(len(series.points) for series in series_list)
         elapsed_ms = (perf_counter() - started_at) * 1000
         self._set_debug_message(
@@ -765,6 +925,7 @@ class ReportDialog(QDialog):
         records = self._cached_records()
         self.log_summary_label.setText(f"ログ {len(records)} 件")
         self._populate_log_table(records)
+        self._apply_selected_log_row()
 
     def _populate_table(self, summary: ReportSummary) -> None:
         self.table.setRowCount(len(summary.rows))
@@ -808,6 +969,113 @@ class ReportDialog(QDialog):
             for column, value in enumerate(values):
                 self.trend_table.setItem(row_index, column, QTableWidgetItem(value))
 
+    @staticmethod
+    def _filter_trend_series_by_indices(
+        series_list: List[TrendSeries],
+        start_index: int,
+        end_index: int,
+    ) -> List[TrendSeries]:
+        if not series_list:
+            return []
+        lower = max(0, min(start_index, end_index))
+        upper = min(max(start_index, end_index), len(series_list[0].points) - 1)
+        if lower > upper:
+            return []
+
+        filtered: List[TrendSeries] = []
+        for series in series_list:
+            points = series.points[lower : upper + 1]
+            if points:
+                filtered.append(TrendSeries(title=series.title, points=points))
+        return filtered
+
+    def _trend_selection_label(self, series_list: List[TrendSeries]) -> str:
+        if not series_list:
+            return ""
+        first_point = series_list[0].points[0]
+        last_point = series_list[0].points[-1]
+        return f"{first_point.start_date:%Y/%m/%d} - {last_point.end_date:%Y/%m/%d}"
+
+    def _populate_trend_selection(self, series_list: List[TrendSeries]) -> None:
+        display_series = series_list
+        selection_label = ""
+        if self._trend_selected_indices is not None:
+            start_index, end_index = self._trend_selected_indices
+            display_series = self._filter_trend_series_by_indices(
+                series_list,
+                start_index,
+                end_index,
+            )
+            selection_label = self._trend_selection_label(display_series)
+
+        total_seconds = sum(
+            point.total_seconds
+            for series in display_series
+            for point in series.points
+        )
+        period_count = len(display_series[0].points) if display_series else 0
+        prefix = f"選択範囲 {selection_label} / " if selection_label else ""
+        self.trend_summary_label.setText(
+            f"{prefix}合計 {format_hms(total_seconds)} / "
+            f"{period_count} 期間 / {len(display_series)} {self._trend_series_label()}"
+        )
+        self._populate_trend_table(display_series)
+
+    def _select_trend_range_from_chart(self, start_x: float, end_x: float) -> None:
+        if self.trend_chart_view is None or self._last_trend_series is None:
+            return
+        if not self._last_trend_series or not self._last_trend_series[0].points:
+            return
+
+        chart = self.trend_chart_view.chart()
+        plot_area = chart.plotArea()
+        left = float(plot_area.left())
+        right = float(plot_area.right())
+        width = max(1.0, right - left)
+        point_count = len(self._last_trend_series[0].points)
+        if point_count <= 1:
+            return
+
+        def index_for_x(value: float) -> int:
+            clamped = max(left, min(right, value))
+            ratio = (clamped - left) / width
+            return max(0, min(point_count - 1, round(ratio * (point_count - 1))))
+
+        start_index = index_for_x(start_x)
+        end_index = index_for_x(end_x)
+        if start_index == end_index:
+            return
+
+        self._trend_selected_indices = (
+            min(start_index, end_index),
+            max(start_index, end_index),
+        )
+        self._populate_trend_selection(self._last_trend_series)
+        self._update_trend_selection_action_states()
+        self._set_debug_message("推移グラフの選択範囲で集計しました")
+
+    def _clear_trend_selection(self, *_args: object) -> None:
+        had_selection = self._trend_selected_indices is not None
+        self._trend_selected_indices = None
+        self._reset_trend_chart_zoom()
+        self._populate_trend_selection(self._last_trend_series or [])
+        self._update_trend_selection_action_states()
+        if had_selection:
+            self._set_debug_message("推移グラフの選択範囲を解除しました")
+
+    def _reset_trend_chart_zoom(self) -> None:
+        if self.trend_chart_view is None:
+            return
+        chart = self.trend_chart_view.chart()
+        zoom_reset = getattr(chart, "zoomReset", None)
+        if callable(zoom_reset):
+            zoom_reset()
+
+    def _update_trend_selection_action_states(self) -> None:
+        self.clear_trend_selection_button.setEnabled(
+            self._trend_selected_indices is not None
+        )
+
     def _populate_log_table(self, records: List[dict]) -> None:
         rows = sorted(
             records,
@@ -831,6 +1099,145 @@ class ReportDialog(QDialog):
     @staticmethod
     def _bool_text(value: object) -> str:
         return "TRUE" if value is True or str(value).upper() == "TRUE" else "FALSE"
+
+    def _selected_log_row(self) -> int:
+        row = self.log_table.currentRow()
+        return row if 0 <= row < self.log_table.rowCount() else -1
+
+    def _log_table_text(self, row: int, column: int) -> str:
+        item = self.log_table.item(row, column)
+        return item.text() if item is not None else ""
+
+    def _apply_selected_log_row(self) -> None:
+        row = self._selected_log_row()
+        if row < 0:
+            self.log_start_time_edit.setText("")
+            self.log_end_time_edit.setText("")
+            self.log_title_edit.setText("")
+            self.log_friends_check.setChecked(False)
+            return
+        self.log_start_time_edit.setText(self._log_table_text(row, 3))
+        self.log_end_time_edit.setText(self._log_table_text(row, 4))
+        self.log_title_edit.setText(self._log_table_text(row, 5))
+        self.log_friends_check.setChecked(self._log_table_text(row, 6) == "TRUE")
+
+    def _edit_selected_log_record(self, *_args: object) -> None:
+        row = self._selected_log_row()
+        if row < 0:
+            QMessageBox.warning(self, "ログ編集エラー", "編集するレコードを選択してください")
+            return
+
+        record_id = self._log_table_text(row, 0).strip()
+        if not record_id:
+            QMessageBox.warning(self, "ログ編集エラー", "レコードIDが見つかりません")
+            return
+
+        start_time = self.log_start_time_edit.text().strip()
+        end_time = self.log_end_time_edit.text().strip()
+        title = self.log_title_edit.text().strip()
+        if not title:
+            QMessageBox.warning(self, "ログ編集エラー", "タイトルを入力してください")
+            return
+
+        try:
+            start = datetime.strptime(start_time, GSS_DATETIME_FORMAT)
+            end = datetime.strptime(end_time, GSS_DATETIME_FORMAT)
+        except ValueError:
+            QMessageBox.warning(
+                self,
+                "ログ編集エラー",
+                "日時は YYYY/MM/DD HH:MM:SS 形式で入力してください",
+            )
+            return
+        if end <= start:
+            QMessageBox.warning(self, "ログ編集エラー", "終了時刻は開始時刻より後にしてください")
+            return
+
+        update_record = getattr(self.log_handler, "update_record", None)
+        if not callable(update_record):
+            QMessageBox.warning(self, "ログ編集エラー", "このログハンドラは編集に対応していません")
+            return
+
+        values = [
+            int(self._log_table_text(row, 2)),
+            start_time,
+            end_time,
+            title,
+            self.log_friends_check.isChecked(),
+        ]
+        self._start_log_edit(record_id, values)
+
+    def _start_log_edit(self, record_id: str, values: List[object]) -> None:
+        if self._log_edit_future is not None and not self._log_edit_future.done():
+            self._set_debug_message("ログ編集中です。完了まで待ってください")
+            return
+
+        update_record = getattr(self.log_handler, "update_record", None)
+        if not callable(update_record):
+            QMessageBox.warning(self, "ログ編集エラー", "このログハンドラは編集に対応していません")
+            return
+
+        self.log_edit_button.setEnabled(False)
+        self._set_debug_message("ログ編集を保存中...", process_events=True)
+        self._log_edit_future = self._log_edit_executor.submit(
+            update_record,
+            record_id,
+            values,
+        )
+        self._log_edit_timer = QTimer(self)
+        self._log_edit_timer.setInterval(100)
+        self._log_edit_timer.timeout.connect(self._check_log_edit_result)
+        self._log_edit_timer.start()
+
+    def _check_log_edit_result(self) -> None:
+        future = self._log_edit_future
+        if future is None or not future.done():
+            return
+
+        if self._log_edit_timer is not None:
+            self._log_edit_timer.stop()
+            self._log_edit_timer.deleteLater()
+            self._log_edit_timer = None
+        self._log_edit_future = None
+        self.log_edit_button.setEnabled(True)
+
+        try:
+            result = future.result()
+        except Exception as exc:
+            logger.exception("Failed to edit play log")
+            QMessageBox.warning(self, "ログ編集エラー", str(exc))
+            return
+
+        self._finish_log_edit(result)
+
+    def _finish_log_edit(self, result: object) -> None:
+        if not getattr(result, "local_updated", False):
+            QMessageBox.warning(
+                self,
+                "ログ編集エラー",
+                str(getattr(result, "error_message", "") or "ローカルDBの更新に失敗しました"),
+            )
+            return
+
+        self.refresh()
+        if getattr(result, "spreadsheet_updated", False):
+            self._set_debug_message("ログを編集し、スプシにも反映しました")
+            return
+
+        error_message = str(getattr(result, "error_message", "") or "")
+        if error_message:
+            self._set_debug_message(f"ログを編集しました。スプシ反映は失敗しました: {error_message}")
+        else:
+            self._set_debug_message("ログを編集しました。スプシ設定がないためローカルのみ更新しました")
+
+    def closeEvent(self, event: object) -> None:
+        if self._log_edit_timer is not None:
+            self._log_edit_timer.stop()
+            self._log_edit_timer = None
+        self._log_edit_executor.shutdown(wait=False, cancel_futures=True)
+        close_event = getattr(super(), "closeEvent", None)
+        if callable(close_event):
+            close_event(event)
 
     def _populate_chart(self, summary: ReportSummary) -> None:
         if self.chart_view is None or not CHARTS_AVAILABLE:

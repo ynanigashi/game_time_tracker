@@ -45,6 +45,16 @@ class PlayLogSyncResult:
 
 
 @dataclass(frozen=True)
+class PlayLogEditResult:
+    """Summary of editing one play-log record."""
+
+    local_updated: bool
+    spreadsheet_updated: bool
+    record: Optional[Dict[str, Any]] = None
+    error_message: str = ""
+
+
+@dataclass(frozen=True)
 class _PlayLogBackupResult:
     backed_up: int
     pending_count: int
@@ -199,6 +209,49 @@ class LogHandler:
         reissued = 0
         for record in pending_records:
             record_id = str(record["record_id"])
+            sync_action = str(record.get("_sync_action") or "append")
+            if sync_action == "update":
+                try:
+                    success = self._update_backup_record(
+                        record,
+                        legacy_schema=legacy_schema,
+                    )
+                except Exception as exc:
+                    logger.warning("failed to update pending play record: %s", exc)
+                    return _PlayLogBackupResult(
+                        backed_up=backed_up,
+                        pending_count=pending_count,
+                        failed=pending_count - backed_up,
+                        overwritten=overwritten,
+                        reissued=reissued,
+                        error_message=f"譁ｰ譁ｰ荳ｭ繝ｭ繧ｰ縺ｮ譖ｴ譁ｰ縺ｫ螟ｱ謨・ {exc}",
+                    )
+                if not success:
+                    success = self.gspread_service.append_row(
+                        self._record_to_backup_values(
+                            record,
+                            legacy_schema=legacy_schema,
+                        )
+                    )
+                if not success:
+                    logger.warning(
+                        "failed to update or append pending play record: %s",
+                        record_id,
+                    )
+                    return _PlayLogBackupResult(
+                        backed_up=backed_up,
+                        pending_count=pending_count,
+                        failed=pending_count - backed_up,
+                        overwritten=overwritten,
+                        reissued=reissued,
+                        error_message=f"譁ｰ譁ｰ荳ｭ繝ｭ繧ｰ縺ｮ譖ｴ譁ｰ縺ｫ螟ｱ謨・ {record_id}",
+                    )
+                self.play_log_store.mark_backed_up(record_id)
+                backed_up += 1
+                overwritten += 1
+                remote_record_ids.add(record_id)
+                continue
+
             if not legacy_schema and record_id in remote_record_ids:
                 if self.sync_conflict_policy == PLAY_LOG_SYNC_CONFLICT_OVERWRITE:
                     success = self.gspread_service.update_row_by_record_id(
@@ -264,6 +317,53 @@ class LogHandler:
             overwritten=overwritten,
             reissued=reissued,
         )
+
+    def _update_backup_record(
+        self,
+        record: Dict[str, Any],
+        *,
+        legacy_schema: bool,
+    ) -> bool:
+        if self.gspread_service is None:
+            return False
+        if legacy_schema:
+            return self.gspread_service.update_row_by_key(
+                "No",
+                str(record["index"]),
+                self._record_to_legacy_values(record),
+            )
+        return self.gspread_service.update_row_by_record_id(
+            str(record["record_id"]),
+            self._record_to_values(record),
+        )
+
+    def _write_edited_record_to_backup(
+        self,
+        record: Dict[str, Any],
+    ) -> Tuple[bool, str]:
+        if self.gspread_service is None:
+            return False, ""
+        try:
+            remote_records = self.gspread_service.get_all_records()
+            legacy_schema = self._uses_legacy_backup_schema(remote_records)
+            updated = self._update_backup_record(
+                record,
+                legacy_schema=legacy_schema,
+            )
+            if updated:
+                return True, ""
+
+            values = self._record_to_backup_values(
+                record,
+                legacy_schema=legacy_schema,
+            )
+            appended = self.gspread_service.append_row(values)
+            if appended:
+                return True, ""
+            return False, "spreadsheet row update failed"
+        except Exception as exc:
+            logger.warning("failed to update play record backup: %s", exc)
+            return False, str(exc)
 
     def sync_with_spreadsheet(self) -> PlayLogSyncResult:
         """Pull remote play logs and push pending local records."""
@@ -410,3 +510,38 @@ class LogHandler:
 
         self.sync_with_spreadsheet()
         return True
+
+    def update_record(self, record_id: str, values: List[Any]) -> PlayLogEditResult:
+        """Update one play record locally and in the spreadsheet backup."""
+        try:
+            record = self.play_log_store.update_record(
+                record_id,
+                values,
+                backed_up=False,
+                sync_action="update",
+            )
+        except Exception as exc:
+            logger.error("failed to update play record locally: %s", exc)
+            return PlayLogEditResult(
+                local_updated=False,
+                spreadsheet_updated=False,
+                error_message=str(exc),
+            )
+
+        spreadsheet_updated = False
+        error_message = ""
+        if self.gspread_service is not None:
+            spreadsheet_updated, error_message = self._write_edited_record_to_backup(
+                record
+            )
+            if spreadsheet_updated:
+                self.play_log_store.mark_backed_up(record_id)
+
+        self.records = self.get_all_records()
+        self.index = self.play_log_store.max_index()
+        return PlayLogEditResult(
+            local_updated=True,
+            spreadsheet_updated=spreadsheet_updated,
+            record=record,
+            error_message=error_message,
+        )
