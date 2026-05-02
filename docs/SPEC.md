@@ -11,9 +11,12 @@ Windows PC で実行中のゲームをウィンドウタイトルから自動検
 - 設定値とウィンドウ状態は `data/settings.sqlite3` に保存する。`config/config.ini` は設定画面の Import/Export で手動入出力する。
 - プレイログは `data/play_logs.sqlite3` に保存し、Google スプレッドシートへベストエフォートでバックアップする。
 - ゲーム情報は `data/game_catalog.sqlite3` に保存し、空の場合のみ Google スプレッドシートから初回取り込みする。
-- レポート画面の `ログ` タブとゲーム管理画面から、スプレッドシートの手動同期を実行できる。
+- レポート画面の `ログ` タブでプレイログの編集保存・削除とスプレッドシートの手動同期を実行できる。
+- レポート画面は表示中タブだけを更新し、未表示タブは dirty 扱いで遅延更新する。推移タブのタイトルフィルタ用集計は、ログデータが変わるまでキャッシュを再利用する。
 - プレイログのバックアップは設定画面の `プレイログ保存` で `ローカルのみで運用` / `スプレッドシートにバックアップ` を切り替える。
-- メインウィンドウ右クリックメニューで `レポート` / `ゲーム管理` / `設定` / `終了` を選択できる。
+- メインウィンドウ右クリックメニューで `手入力で記録` / `レポート` / `ゲーム管理` / `設定` / `終了` を選択できる。
+- ウィンドウタイトルで自動検出できないゲームは、手入力画面から登録済みゲーム・開始日時・終了日時を指定して記録できる。フレンドプレイ有無はゲーム管理に保存された設定を使う。
+- 手入力画面には開始/停止ボタンと経過時間表示があり、開始/終了日時を自動入力できる。経過時間表示は 100ms 間隔で更新する。
 - SQLite と INI のどちらにも有効な設定がない場合、起動時に設定画面を表示する。
 - 認証JSONファイルが見つからない場合、警告ダイアログを表示して設定画面を開く。
 - ソースコード実行（`python main.py`）は開発・検証用途とする。
@@ -709,12 +712,14 @@ SQLite 設定を読み込んで型付き設定（`Config`）を提供する。SQ
 | クラス/メソッド | 説明 |
 |----------------|------|
 | `PlayLogStore(db_path=None, device_id=None)` | SQLite DB のパスと記録元IDを受け取り、未指定時は `runtime_paths.default_play_log_db_file()` とPC名を使う |
-| `load_records()` | `play_records` テーブルから全プレイログを `record_index` 昇順で取得する |
+| `load_records()` | `play_records` テーブルから削除済みを除く全プレイログを `record_index` 昇順で取得する |
 | `max_index()` | 現在保存済みの最大 `record_index` を返す |
 | `save_record(values, backed_up=False)` | `[index, start_time, end_time, title, play_with_friends]` をローカルDBへ保存し、`record_id` を採番する |
 | `import_records(records, backed_up)` | スプレッドシート既存行をローカルDBへ取り込む。`record_id` があれば重複を避けて同期する |
 | `load_pending_backup_records()` | まだスプレッドシートへバックアップできていない行を取得する |
 | `mark_backed_up(record_id)` | 指定レコードをバックアップ済みに更新する |
+| `update_record(record_id, values, backed_up=False, sync_action="update")` | 指定レコードを更新し、未バックアップ更新として扱う |
+| `delete_record(record_id)` | 指定レコードを削除する。未バックアップの新規ログは物理削除し、バックアップ済みログは削除待ちとして論理削除する |
 
 ---
 
@@ -745,6 +750,8 @@ Google Spreadsheet操作を抽象化するサービスクラス。
 | `sheet` | ワークシートプロパティ。未接続時は`RuntimeError`をスロー | 内部 |
 | `get_all_records() -> List[Dict]` | 全レコードを取得 | `LogHandler`の初回取り込み, `GameInfoLoader.load()` |
 | `append_row(values) -> bool` | 行を追加。成功時True、失敗時False | `LogHandler.save_record()` |
+| `update_row_by_record_id(record_id, values) -> bool` | `record_id` が一致する行を更新する。成功時True、失敗時False | `LogHandler.update_record()` |
+| `delete_row_by_record_id(record_id) -> bool` | `record_id` が一致する行を削除する。既に存在しない行は成功扱い | `LogHandler.delete_record()` |
 
 ---
 
@@ -761,7 +768,9 @@ Google Spreadsheet操作を抽象化するサービスクラス。
 | `get_today_stats() -> Tuple[Dict[str, float], float]` | 今日のゲーム別プレイ時間と合計秒数を計算して返す。キャッシュのみ使用、API呼び出しなし | `MainWindow._load_today_game_minutes()`, `MainWindow._load_today_completed_seconds()` |
 | `get_and_increment_index()` | インデックスを取得して+1 | `SessionRecorder._save_to_spreadsheet()` |
 | `format_datetime_to_gss_style(datetime)` | datetimeをスプレッドシート形式に変換 | `SessionRecorder._save_to_spreadsheet()` |
-| `save_record(values)` | 1行をローカルDBへ保存し、保存時にもスプレッドシート全件をローカルDBへ同期したうえで未バックアップ行を送信する。スプレッドシートへのバックアップに失敗してもローカル保存成功ならTrueを返す | `SessionRecorder._save_to_spreadsheet()` |
+| `save_record(values)` | 1行をローカルDBへ保存し、バックアップ有効時は追加した1件だけをスプレッドシートへ送信する。スプレッドシートへのバックアップに失敗してもローカル保存成功ならTrueを返し、未バックアップ行として次回同期で再試行する | `SessionRecorder._save_to_spreadsheet()` |
+| `update_record(record_id, values)` | 指定ログをローカルDBで更新し、バックアップ有効時はスプレッドシートの既存行を更新または追記する | `ReportDialog._start_log_edit()` |
+| `delete_record(record_id)` | 指定ログをローカルDBから削除し、バックアップ有効時はスプレッドシートの既存行を削除する。未反映の削除は次回同期で再試行する | `ReportDialog._start_log_delete()` |
 | `sync_with_spreadsheet()` | 手動同期用。スプレッドシート側のプレイログを1回取得し、取り込みと未バックアップ送信判定に使ってキャッシュを更新する。取得失敗時は送信せず次回再試行に残す。戻り値には取得件数、取込件数、取込スキップ件数、未送信件数、バックアップ件数、失敗件数、上書き/別ID採番件数、エラー原因を含める | `ReportDialog._sync_from_spreadsheet()` |
 
 ---
@@ -1171,7 +1180,7 @@ def check_day_change(self) -> bool:
 - **スキャン間隔**: 1秒固定（`POLL_INTERVAL_SECONDS = 1`）。
 - **最小記録時間**: 5分以上（`MIN_PLAY_MINUTES = 5`）。
 - **部分一致**: ウィンドウタイトルの部分一致に依存。共通する文字列を登録する必要がある（例: Terraria）。
-- **プレイログ保存**: ローカルDB（`data/play_logs.sqlite3`）を主保存先とする。キャッシュは`LogHandler.records`（`List[dict]`）に保持され、`get_cached_records()`で取得。起動時と記録時はスプレッドシート全件をローカルDBへ同期し、`save_record()`がローカルDBとキャッシュを同時更新してスプレッドシートへバックアップする。バックアップ失敗時もローカル保存は継続し、未バックアップ行は次回起動時に再送する。スプレッドシート取得に失敗した回は、重複防止のため未バックアップ行の送信も止める。同一 `record_id` がスプレッドシート側にある場合は、`sync_conflict_policy` に従って既存行を上書きするか、別IDを採番して新規行として追加する。手動同期の結果は、レポート画面のステータスに取得/取込/スキップ/未送信/バックアップ/失敗/上書き/別ID採番/エラー原因として表示する。
+- **プレイログ保存**: ローカルDB（`data/play_logs.sqlite3`）を主保存先とする。キャッシュは`LogHandler.records`（`List[dict]`）に保持され、`get_cached_records()`で取得。起動時と手動同期時はスプレッドシート全件をローカルDBへ同期し、記録時は `save_record()` がローカルDBとキャッシュを同時更新して追加した1件だけをスプレッドシートへバックアップする。バックアップ失敗時もローカル保存は継続し、未バックアップ行は次回起動時または手動同期時に再送する。スプレッドシート取得に失敗した同期回は、重複防止のため未バックアップ行の送信も止める。同一 `record_id` がスプレッドシート側にある場合は、`sync_conflict_policy` に従って既存行を上書きするか、別IDを採番して新規行として追加する。手動同期の結果は、レポート画面のステータスに取得/取込/スキップ/未送信/バックアップ/失敗/上書き/別ID採番/エラー原因として表示する。
 - **日跨ぎ処理**: プレイセッションが深夜0時を跨いだ場合、日付ごとに分割して記録。
 
 ## 起動方法

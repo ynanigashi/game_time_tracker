@@ -55,6 +55,16 @@ class PlayLogEditResult:
 
 
 @dataclass(frozen=True)
+class PlayLogDeleteResult:
+    """Summary of deleting one play-log record."""
+
+    local_deleted: bool
+    spreadsheet_deleted: bool
+    record_id: str = ""
+    error_message: str = ""
+
+
+@dataclass(frozen=True)
 class _PlayLogBackupResult:
     backed_up: int
     pending_count: int
@@ -86,6 +96,7 @@ class LogHandler:
             config.backup_mode == PLAY_LOG_BACKUP_MODE_SPREADSHEET
         )
         self.sync_conflict_policy = config.sync_conflict_policy
+        self._backup_legacy_schema = False
         self.gspread_service = (
             self._connect_backup_service(config) if self.backup_enabled else None
         )
@@ -203,6 +214,7 @@ class LogHandler:
         if not pending_records:
             return _PlayLogBackupResult(backed_up=0, pending_count=0)
         legacy_schema = self._uses_legacy_backup_schema(remote_records)
+        self._backup_legacy_schema = legacy_schema
         remote_record_ids = self._remote_record_ids(remote_records)
         backed_up = 0
         overwritten = 0
@@ -210,6 +222,40 @@ class LogHandler:
         for record in pending_records:
             record_id = str(record["record_id"])
             sync_action = str(record.get("_sync_action") or "append")
+            if sync_action == "delete":
+                try:
+                    success = self._delete_backup_record(
+                        record,
+                        legacy_schema=legacy_schema,
+                    )
+                except Exception as exc:
+                    logger.warning("failed to delete pending play record: %s", exc)
+                    return _PlayLogBackupResult(
+                        backed_up=backed_up,
+                        pending_count=pending_count,
+                        failed=pending_count - backed_up,
+                        overwritten=overwritten,
+                        reissued=reissued,
+                        error_message=f"failed to delete pending play record: {exc}",
+                    )
+                if not success:
+                    logger.warning(
+                        "failed to delete pending play record: %s",
+                        record_id,
+                    )
+                    return _PlayLogBackupResult(
+                        backed_up=backed_up,
+                        pending_count=pending_count,
+                        failed=pending_count - backed_up,
+                        overwritten=overwritten,
+                        reissued=reissued,
+                        error_message=f"failed to delete pending play record: {record_id}",
+                    )
+                self.play_log_store.mark_backed_up(record_id)
+                backed_up += 1
+                remote_record_ids.discard(record_id)
+                continue
+
             if sync_action == "update":
                 try:
                     success = self._update_backup_record(
@@ -337,6 +383,21 @@ class LogHandler:
             self._record_to_values(record),
         )
 
+    def _delete_backup_record(
+        self,
+        record: Dict[str, Any],
+        *,
+        legacy_schema: bool,
+    ) -> bool:
+        if self.gspread_service is None:
+            return False
+        if legacy_schema:
+            return self.gspread_service.delete_row_by_key(
+                "No",
+                str(record["index"]),
+            )
+        return self.gspread_service.delete_row_by_record_id(str(record["record_id"]))
+
     def _write_edited_record_to_backup(
         self,
         record: Dict[str, Any],
@@ -344,18 +405,16 @@ class LogHandler:
         if self.gspread_service is None:
             return False, ""
         try:
-            remote_records = self.gspread_service.get_all_records()
-            legacy_schema = self._uses_legacy_backup_schema(remote_records)
             updated = self._update_backup_record(
                 record,
-                legacy_schema=legacy_schema,
+                legacy_schema=self._backup_legacy_schema,
             )
             if updated:
                 return True, ""
 
             values = self._record_to_backup_values(
                 record,
-                legacy_schema=legacy_schema,
+                legacy_schema=self._backup_legacy_schema,
             )
             appended = self.gspread_service.append_row(values)
             if appended:
@@ -363,6 +422,24 @@ class LogHandler:
             return False, "spreadsheet row update failed"
         except Exception as exc:
             logger.warning("failed to update play record backup: %s", exc)
+            return False, str(exc)
+
+    def _append_new_record_to_backup(self, record: Dict[str, Any]) -> Tuple[bool, str]:
+        """Append a newly saved record without re-reading the whole spreadsheet."""
+        if self.gspread_service is None:
+            return False, ""
+        try:
+            values = self._record_to_backup_values(
+                record,
+                legacy_schema=self._backup_legacy_schema,
+            )
+            appended = self.gspread_service.append_row(values)
+            if appended:
+                self.play_log_store.mark_backed_up(str(record["record_id"]))
+                return True, ""
+            return False, "spreadsheet row append failed"
+        except Exception as exc:
+            logger.warning("failed to append play record backup: %s", exc)
             return False, str(exc)
 
     def sync_with_spreadsheet(self) -> PlayLogSyncResult:
@@ -381,6 +458,7 @@ class LogHandler:
             remote_count = 0
         else:
             remote_count = len(remote_records)
+            self._backup_legacy_schema = self._uses_legacy_backup_schema(remote_records)
             imported, import_skipped = self._sync_backup_records(remote_records)
             backup_result = self._back_up_pending_records(remote_records)
         self.records = self.get_all_records()
@@ -508,7 +586,7 @@ class LogHandler:
         if self.gspread_service is None:
             return True
 
-        self.sync_with_spreadsheet()
+        self._append_new_record_to_backup(record)
         return True
 
     def update_record(self, record_id: str, values: List[Any]) -> PlayLogEditResult:
@@ -543,5 +621,41 @@ class LogHandler:
             local_updated=True,
             spreadsheet_updated=spreadsheet_updated,
             record=record,
+            error_message=error_message,
+        )
+
+    def delete_record(self, record_id: str) -> PlayLogDeleteResult:
+        """Delete one play record locally and from the spreadsheet backup."""
+        try:
+            record = self.play_log_store.delete_record(record_id)
+        except Exception as exc:
+            logger.error("failed to delete play record locally: %s", exc)
+            return PlayLogDeleteResult(
+                local_deleted=False,
+                spreadsheet_deleted=False,
+                record_id=record_id,
+                error_message=str(exc),
+            )
+
+        spreadsheet_deleted = False
+        error_message = ""
+        if self.gspread_service is not None:
+            try:
+                spreadsheet_deleted = self._delete_backup_record(
+                    record,
+                    legacy_schema=self._backup_legacy_schema,
+                )
+                if spreadsheet_deleted:
+                    self.play_log_store.mark_backed_up(record_id)
+            except Exception as exc:
+                logger.warning("failed to delete play record backup: %s", exc)
+                error_message = str(exc)
+
+        self.records = self.get_all_records()
+        self.index = self.play_log_store.max_index()
+        return PlayLogDeleteResult(
+            local_deleted=True,
+            spreadsheet_deleted=spreadsheet_deleted,
+            record_id=record_id,
             error_message=error_message,
         )

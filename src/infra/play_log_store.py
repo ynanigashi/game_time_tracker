@@ -84,6 +84,13 @@ class PlayLogStore:
                     ADD COLUMN sync_action TEXT NOT NULL DEFAULT 'append'
                     """
                 )
+            if "deleted" not in columns:
+                conn.execute(
+                    """
+                    ALTER TABLE play_records
+                    ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0
+                    """
+                )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS play_records (
@@ -96,6 +103,7 @@ class PlayLogStore:
                 play_with_friends TEXT NOT NULL,
                 backed_up INTEGER NOT NULL DEFAULT 0,
                 sync_action TEXT NOT NULL DEFAULT 'append',
+                deleted INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
@@ -123,6 +131,7 @@ class PlayLogStore:
                 play_with_friends TEXT NOT NULL,
                 backed_up INTEGER NOT NULL DEFAULT 0,
                 sync_action TEXT NOT NULL DEFAULT 'append',
+                deleted INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
@@ -140,6 +149,7 @@ class PlayLogStore:
                 play_with_friends,
                 backed_up,
                 sync_action,
+                deleted,
                 created_at,
                 updated_at
             )
@@ -153,6 +163,7 @@ class PlayLogStore:
                 play_with_friends,
                 backed_up,
                 'append',
+                0,
                 created_at,
                 updated_at
             FROM play_records
@@ -229,6 +240,7 @@ class PlayLogStore:
                 SELECT record_id, device_id, record_index, start_time, end_time,
                        title, play_with_friends
                 FROM play_records
+                WHERE deleted = 0
                 ORDER BY record_index
                 """
             ).fetchall()
@@ -509,3 +521,38 @@ class PlayLogStore:
         if row is None:
             raise ValueError(f"play record not found: {record_id}")
         return self._row_to_record(row)
+
+    def delete_record(self, record_id: str) -> Dict[str, Any]:
+        with self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT record_id, device_id, record_index, start_time, end_time,
+                       title, play_with_friends, backed_up, sync_action
+                FROM play_records
+                WHERE record_id = ?
+                """,
+                (record_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"play record not found: {record_id}")
+
+            record = self._row_to_record(row)
+            if int(row["backed_up"]) == 0 and str(row["sync_action"]) == "append":
+                conn.execute(
+                    "DELETE FROM play_records WHERE record_id = ?",
+                    (record_id,),
+                )
+                return record
+
+            conn.execute(
+                """
+                UPDATE play_records
+                SET deleted = 1,
+                    backed_up = 0,
+                    sync_action = 'delete',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE record_id = ?
+                """,
+                (record_id,),
+            )
+        return record

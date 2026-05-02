@@ -75,6 +75,24 @@ class TestLogHandlerLocalPrimary(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(len(handler.records), 1)
         spreadsheet.append_row.assert_called_once()
+        self.assertEqual(spreadsheet.get_all_records.call_count, 1)
+        self.assertEqual(len(handler.play_log_store.load_pending_backup_records()), 1)
+
+    def test_save_record_appends_without_reloading_spreadsheet(self):
+        spreadsheet = MagicMock()
+        spreadsheet.get_all_records.return_value = []
+        spreadsheet.append_row.return_value = True
+        with patch("src.infra.log_handler.GspreadService", return_value=spreadsheet):
+            handler = LogHandler(self._config(), play_log_store=self._store())
+
+        result = handler.save_record(
+            [1, "2026/04/26 10:00:00", "2026/04/26 10:30:00", "Game", False]
+        )
+
+        self.assertTrue(result)
+        self.assertEqual(spreadsheet.get_all_records.call_count, 1)
+        spreadsheet.append_row.assert_called_once()
+        self.assertEqual(handler.play_log_store.load_pending_backup_records(), [])
 
     def test_startup_backs_up_pending_local_records(self):
         store = self._store()
@@ -368,6 +386,7 @@ class TestLogHandlerLocalPrimary(unittest.TestCase):
         self.assertTrue(result.local_updated)
         self.assertTrue(result.spreadsheet_updated)
         self.assertEqual(handler.records[0]["title"], "Edited")
+        self.assertEqual(spreadsheet.get_all_records.call_count, 1)
         spreadsheet.update_row_by_record_id.assert_called_once_with(
             saved["record_id"],
             [
@@ -381,6 +400,66 @@ class TestLogHandlerLocalPrimary(unittest.TestCase):
             ],
         )
         spreadsheet.append_row.assert_not_called()
+        self.assertEqual(store.load_pending_backup_records(), [])
+
+    def test_delete_record_updates_local_cache_and_spreadsheet_row(self):
+        store = self._store()
+        saved = store.save_record(
+            [1, "2026/04/26 10:00:00", "2026/04/26 10:30:00", "Game", True],
+            backed_up=True,
+        )
+        spreadsheet = MagicMock()
+        spreadsheet.get_all_records.return_value = [
+            {
+                "record_id": saved["record_id"],
+                "device_id": saved["device_id"],
+                "index": 1,
+                "start_time": "2026/04/26 10:00:00",
+                "end_time": "2026/04/26 10:30:00",
+                "title": "Game",
+                "play_with_friends": "TRUE",
+            }
+        ]
+        spreadsheet.delete_row_by_record_id.return_value = True
+
+        with patch("src.infra.log_handler.GspreadService", return_value=spreadsheet):
+            handler = LogHandler(self._config(), play_log_store=store)
+            result = handler.delete_record(saved["record_id"])
+
+        self.assertTrue(result.local_deleted)
+        self.assertTrue(result.spreadsheet_deleted)
+        self.assertEqual(handler.records, [])
+        self.assertEqual(spreadsheet.get_all_records.call_count, 1)
+        spreadsheet.delete_row_by_record_id.assert_called_once_with(saved["record_id"])
+        self.assertEqual(store.load_pending_backup_records(), [])
+
+    def test_startup_sync_deletes_pending_deleted_record(self):
+        store = self._store()
+        saved = store.save_record(
+            [1, "2026/04/26 10:00:00", "2026/04/26 10:30:00", "Game", True],
+            backed_up=True,
+        )
+        store.delete_record(saved["record_id"])
+
+        spreadsheet = MagicMock()
+        spreadsheet.get_all_records.return_value = [
+            {
+                "record_id": saved["record_id"],
+                "device_id": saved["device_id"],
+                "index": 1,
+                "start_time": "2026/04/26 10:00:00",
+                "end_time": "2026/04/26 10:30:00",
+                "title": "Game",
+                "play_with_friends": "TRUE",
+            }
+        ]
+        spreadsheet.delete_row_by_record_id.return_value = True
+
+        with patch("src.infra.log_handler.GspreadService", return_value=spreadsheet):
+            handler = LogHandler(self._config(), play_log_store=store)
+
+        self.assertEqual(handler.records, [])
+        spreadsheet.delete_row_by_record_id.assert_called_once_with(saved["record_id"])
         self.assertEqual(store.load_pending_backup_records(), [])
 
     def test_pending_edited_record_overwrites_even_with_new_id_policy(self):
@@ -864,6 +943,45 @@ class TestGspreadService(unittest.TestCase):
 
         self.assertFalse(result)
         mock_sheet.update.assert_not_called()
+
+    @patch('src.infra.gspread_service.gspread.service_account')
+    def test_delete_row_by_record_id_deletes_matching_row(self, mock_sa):
+        from src.infra.gspread_service import GspreadService
+
+        mock_gc = MagicMock()
+        mock_sheet = MagicMock()
+        mock_sheet.get_all_values.return_value = [
+            ["record_id", "device_id", "index"],
+            ["record-1", "pc", "1"],
+            ["record-2", "pc", "2"],
+        ]
+        mock_gc.open_by_key.return_value.sheet1 = mock_sheet
+        mock_sa.return_value = mock_gc
+
+        service = GspreadService(cert_file_path='test.json', sheet_key='test_key')
+        result = service.delete_row_by_record_id("record-2")
+
+        self.assertTrue(result)
+        mock_sheet.delete_rows.assert_called_once_with(3)
+
+    @patch('src.infra.gspread_service.gspread.service_account')
+    def test_delete_row_by_record_id_treats_missing_row_as_success(self, mock_sa):
+        from src.infra.gspread_service import GspreadService
+
+        mock_gc = MagicMock()
+        mock_sheet = MagicMock()
+        mock_sheet.get_all_values.return_value = [
+            ["record_id", "device_id", "index"],
+            ["record-1", "pc", "1"],
+        ]
+        mock_gc.open_by_key.return_value.sheet1 = mock_sheet
+        mock_sa.return_value = mock_gc
+
+        service = GspreadService(cert_file_path='test.json', sheet_key='test_key')
+        result = service.delete_row_by_record_id("record-2")
+
+        self.assertTrue(result)
+        mock_sheet.delete_rows.assert_not_called()
 
 
 class TestLogHandlerGetTodayStats(unittest.TestCase):

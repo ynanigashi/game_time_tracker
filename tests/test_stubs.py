@@ -90,6 +90,28 @@ class FakeSignal:
         self.callback = None
 
 
+class FakeTimer:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.timeout = FakeSignal()
+        self.active = False
+        self.interval = 0
+
+    def setInterval(self, value: int) -> None:
+        self.interval = value
+
+    def start(self) -> None:
+        self.active = True
+
+    def stop(self) -> None:
+        self.active = False
+
+    def isActive(self) -> bool:
+        return self.active
+
+    def deleteLater(self) -> None:
+        self.deleted_later = True
+
+
 class FakeButton:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.clicked = FakeSignal()
@@ -211,6 +233,10 @@ class FakeComboBox(FakeWidget):
         if self.current_index < 0:
             self.current_index = 0
 
+    def clear(self) -> None:
+        self.items = []
+        self.current_index = -1
+
     def findData(self, data: Any) -> int:
         for index, item in enumerate(self.items):
             if item[1] == data:
@@ -224,6 +250,11 @@ class FakeComboBox(FakeWidget):
         if 0 <= self.current_index < len(self.items):
             return self.items[self.current_index][1]
         return None
+
+    def currentText(self) -> str:
+        if 0 <= self.current_index < len(self.items):
+            return self.items[self.current_index][0]
+        return ""
 
 
 class FakeTableWidget(FakeWidget):
@@ -249,6 +280,9 @@ class FakeTableWidget(FakeWidget):
         if count == 0:
             self.current_row = -1
 
+    def rowCount(self) -> int:
+        return self.row_count
+
     def setItem(self, row: int, column: int, item: Any) -> None:
         self.items[(row, column)] = item
         if self.current_row < 0:
@@ -259,6 +293,25 @@ class FakeTableWidget(FakeWidget):
 
     def currentRow(self) -> int:
         return self.current_row
+
+
+class FakeTabWidget(FakeWidget):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.currentChanged = FakeSignal()
+        self.tabs: List[Tuple[Any, str]] = []
+        self.current_index = 0
+
+    def addTab(self, widget: Any, label: str) -> None:
+        self.tabs.append((widget, label))
+
+    def currentIndex(self) -> int:
+        return self.current_index
+
+    def setCurrentIndex(self, index: int) -> None:
+        self.current_index = index
+        if self.currentChanged.callback is not None:
+            self.currentChanged.callback(index)
 
 
 class FakeLabel(FakeWidget):
@@ -309,9 +362,15 @@ class FakeDialogButtonBox(FakeWidget):
 
 
 class FakeMessageBox:
+    StandardButton = types.SimpleNamespace(Yes=1, No=2)
+
     @staticmethod
     def warning(*args: Any, **kwargs: Any) -> None:
         return None
+
+    @staticmethod
+    def question(*args: Any, **kwargs: Any) -> int:
+        return FakeMessageBox.StandardButton.Yes
 
 
 class FakeFileDialog:
@@ -355,7 +414,7 @@ class FakeMenu:
 
 fake_pyside6_core: Any = types.SimpleNamespace(
     QDate=FakeQDate,
-    QTimer=type("QTimer", (), {}),
+    QTimer=FakeTimer,
     Qt=types.SimpleNamespace(
         MouseButton=types.SimpleNamespace(LeftButton=1, RightButton=2),
         ContextMenuPolicy=types.SimpleNamespace(CustomContextMenu=3),
@@ -385,7 +444,7 @@ fake_pyside6_widgets: Any = types.SimpleNamespace(
     QTextEdit=FakeTextEdit,
     QComboBox=FakeComboBox,
     QDateEdit=FakeDateEdit,
-    QTabWidget=FakeWidget,
+    QTabWidget=FakeTabWidget,
     QAbstractItemView=type(
         "QAbstractItemView",
         (),

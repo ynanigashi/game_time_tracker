@@ -116,6 +116,97 @@ class TestReportDialogSyncMessages(unittest.TestCase):
         self.assertIn("注意: network error", message)
 
 
+class TestReportDialogLazyRefresh(unittest.TestCase):
+    def _dialog(self, current_index=0):
+        dialog = ReportDialog.__new__(ReportDialog)
+        dialog._loaded_tabs = set()
+        dialog._dirty_tabs = set()
+        dialog._title_filter_dirty = False
+        dialog.tabs = SimpleNamespace(currentIndex=lambda: current_index)
+        dialog.refresh_summary_calls = 0
+        dialog.refresh_trend_tab_calls = 0
+        dialog.refresh_logs_calls = 0
+        dialog.refresh_summary = lambda *args: setattr(
+            dialog,
+            "refresh_summary_calls",
+            dialog.refresh_summary_calls + 1,
+        )
+        dialog.refresh_trend_tab = lambda *args: setattr(
+            dialog,
+            "refresh_trend_tab_calls",
+            dialog.refresh_trend_tab_calls + 1,
+        )
+        dialog.refresh_logs = lambda *args: setattr(
+            dialog,
+            "refresh_logs_calls",
+            dialog.refresh_logs_calls + 1,
+        )
+        return dialog
+
+    def test_refresh_marks_all_tabs_dirty_and_refreshes_visible_tab_only(self):
+        dialog = self._dialog(current_index=ReportDialog._TREND_TAB)
+
+        dialog.refresh()
+
+        self.assertEqual(dialog.refresh_summary_calls, 0)
+        self.assertEqual(dialog.refresh_trend_tab_calls, 1)
+        self.assertEqual(dialog.refresh_logs_calls, 0)
+        self.assertIn(ReportDialog._TREND_TAB, dialog._loaded_tabs)
+        self.assertNotIn(ReportDialog._TREND_TAB, dialog._dirty_tabs)
+        self.assertIn(ReportDialog._SUMMARY_TAB, dialog._dirty_tabs)
+        self.assertIn(ReportDialog._LOG_TAB, dialog._dirty_tabs)
+
+    def test_clean_tab_change_does_not_recompute(self):
+        dialog = self._dialog(current_index=ReportDialog._SUMMARY_TAB)
+        dialog._loaded_tabs = {ReportDialog._LOG_TAB}
+
+        dialog._on_tab_changed(ReportDialog._LOG_TAB)
+
+        self.assertEqual(dialog.refresh_logs_calls, 0)
+
+    def test_dirty_tab_change_refreshes_once(self):
+        dialog = self._dialog(current_index=ReportDialog._SUMMARY_TAB)
+        dialog._loaded_tabs = {ReportDialog._LOG_TAB}
+        dialog._dirty_tabs = {ReportDialog._LOG_TAB}
+
+        dialog._on_tab_changed(ReportDialog._LOG_TAB)
+
+        self.assertEqual(dialog.refresh_logs_calls, 1)
+        self.assertNotIn(ReportDialog._LOG_TAB, dialog._dirty_tabs)
+
+    def test_trend_tab_reuses_title_filter_summary_until_data_changes(self):
+        dialog = ReportDialog.__new__(ReportDialog)
+        calls = {"summary": 0, "sync": 0, "trend": 0}
+        summary = SimpleNamespace(rows=[])
+        dialog._title_filter_summary = None
+        dialog._title_filter_dirty = True
+        dialog._title_filter_initialized = False
+        dialog.log_handler = SimpleNamespace(
+            get_report_stats=lambda **kwargs: calls.__setitem__(
+                "summary",
+                calls["summary"] + 1,
+            )
+            or summary
+        )
+        dialog._cached_records = lambda: []
+        dialog._sync_title_filter = lambda value: calls.__setitem__(
+            "sync",
+            calls["sync"] + 1,
+        )
+        dialog.refresh_trend = lambda *args: calls.__setitem__(
+            "trend",
+            calls["trend"] + 1,
+        )
+
+        dialog.refresh_trend_tab()
+        dialog._title_filter_initialized = True
+        dialog.refresh_trend_tab()
+
+        self.assertEqual(calls["summary"], 1)
+        self.assertEqual(calls["sync"], 1)
+        self.assertEqual(calls["trend"], 2)
+
+
 class TestReportDialogTrendPeriod(unittest.TestCase):
     def test_selected_trend_date_range_uses_trend_period_combo(self):
         dialog = ReportDialog.__new__(ReportDialog)
@@ -239,6 +330,71 @@ class TestReportDialogTrendChartSelection(unittest.TestCase):
         self.assertIsNone(dialog._trend_selected_indices)
         self.assertTrue(chart.zoom_reset_called)
         self.assertEqual(dialog.trend_table.row_count, 3)
+
+
+class TestReportDialogLogOperations(unittest.TestCase):
+    def test_finish_log_edit_refreshes_only_log_table(self):
+        dialog = ReportDialog.__new__(ReportDialog)
+        calls = {"refresh": 0, "refresh_logs": 0, "message": ""}
+        dialog.refresh = lambda *args: calls.__setitem__("refresh", calls["refresh"] + 1)
+        dialog.refresh_logs = lambda *args: calls.__setitem__(
+            "refresh_logs",
+            calls["refresh_logs"] + 1,
+        )
+        dialog._set_debug_message = lambda message, **kwargs: calls.__setitem__(
+            "message",
+            message,
+        )
+
+        dialog._finish_log_edit(
+            SimpleNamespace(
+                local_updated=True,
+                spreadsheet_updated=False,
+                error_message="",
+            )
+        )
+
+        self.assertEqual(calls["refresh"], 0)
+        self.assertEqual(calls["refresh_logs"], 1)
+        self.assertIn("ローカル", calls["message"])
+
+    def test_finish_log_delete_refreshes_log_table(self):
+        dialog = ReportDialog.__new__(ReportDialog)
+        calls = {"refresh_logs": 0, "message": ""}
+        dialog.refresh_logs = lambda *args: calls.__setitem__(
+            "refresh_logs",
+            calls["refresh_logs"] + 1,
+        )
+        dialog._set_debug_message = lambda message, **kwargs: calls.__setitem__(
+            "message",
+            message,
+        )
+
+        dialog._finish_log_delete(
+            SimpleNamespace(
+                local_deleted=True,
+                spreadsheet_deleted=True,
+                error_message="",
+            )
+        )
+
+        self.assertEqual(calls["refresh_logs"], 1)
+        self.assertIn("削除", calls["message"])
+
+    def test_delete_selected_log_record_starts_delete_after_confirmation(self):
+        dialog = ReportDialog.__new__(ReportDialog)
+        captured = {}
+        dialog._selected_log_row = lambda: 0
+        dialog._log_table_text = lambda row, column: "record-1" if column == 0 else ""
+        dialog._confirm_delete_log_record = lambda row: True
+        dialog._start_log_delete = lambda record_id: captured.setdefault(
+            "record_id",
+            record_id,
+        )
+
+        dialog._delete_selected_log_record()
+
+        self.assertEqual(captured["record_id"], "record-1")
 
 
 if __name__ == "__main__":

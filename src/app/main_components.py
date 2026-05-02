@@ -364,6 +364,8 @@ class MainWindowDisplayController:
             set_widget_visibility(widgets.overtime_alert_toggle, True)
         if widgets.report_button is not None:
             set_widget_visibility(widgets.report_button, True)
+        if getattr(widgets, "manual_record_button", None) is not None:
+            set_widget_visibility(widgets.manual_record_button, True)
 
         apply_mode_geometry()
 

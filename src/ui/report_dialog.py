@@ -7,7 +7,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from hashlib import sha1
 from datetime import date, datetime, timedelta
 from time import perf_counter
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from PySide6.QtCore import QDate, QTimer, Qt
 from PySide6.QtWidgets import (
@@ -123,6 +123,10 @@ else:
 class ReportDialog(QDialog):
     """A non-modal report window backed by cached log records."""
 
+    _SUMMARY_TAB = 0
+    _TREND_TAB = 1
+    _LOG_TAB = 2
+
     _PERIODS: Tuple[Tuple[str, str], ...] = (
         ("今日", "today"),
         ("今週", "this_week"),
@@ -199,12 +203,20 @@ class ReportDialog(QDialog):
     def __init__(self, log_handler: object, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.log_handler = log_handler
+        self._loaded_tabs: set[int] = set()
+        self._dirty_tabs: set[int] = {
+            self._SUMMARY_TAB,
+            self._TREND_TAB,
+            self._LOG_TAB,
+        }
+        self._title_filter_dirty = True
         self._log_edit_executor = ThreadPoolExecutor(
             max_workers=1,
             thread_name_prefix="play-log-edit",
         )
         self._log_edit_future: Optional[Future] = None
         self._log_edit_timer: Optional[QTimer] = None
+        self._log_edit_finish_callback: Optional[Callable[[object], None]] = None
         self.setWindowTitle("プレイレポート")
         self.resize(820, 560)
 
@@ -212,7 +224,7 @@ class ReportDialog(QDialog):
         for label, _ in self._PERIODS:
             self.period_combo.addItem(label)
         self.period_combo.setCurrentIndex(1)
-        self.period_combo.currentIndexChanged.connect(self.refresh_summary)
+        self.period_combo.currentIndexChanged.connect(self._request_summary_refresh)
 
         self.trend_period_combo = QComboBox(self)
         for label, key in self._PERIODS:
@@ -234,11 +246,12 @@ class ReportDialog(QDialog):
         self.chart_type_combo = QComboBox(self)
         self.chart_type_combo.addItem("棒グラフ", "bar")
         self.chart_type_combo.addItem("パイチャート", "pie")
-        self.chart_type_combo.currentIndexChanged.connect(self.refresh_summary)
+        self.chart_type_combo.currentIndexChanged.connect(self._request_summary_refresh)
 
         self._graph_unit_hours = False
         self._updating_unit_toggles = False
         self._last_summary: Optional[ReportSummary] = None
+        self._title_filter_summary: Optional[ReportSummary] = None
         self._last_trend_series: Optional[List[TrendSeries]] = None
         self._trend_selected_indices: Optional[Tuple[int, int]] = None
         self._unit_minute_buttons: List[QPushButton] = []
@@ -250,6 +263,8 @@ class ReportDialog(QDialog):
         self.log_sync_button.clicked.connect(self._sync_from_spreadsheet)
         self.log_edit_button = QPushButton("編集を保存", self)
         self.log_edit_button.clicked.connect(self._edit_selected_log_record)
+        self.log_delete_button = QPushButton("削除", self)
+        self.log_delete_button.clicked.connect(self._delete_selected_log_record)
         self.log_start_time_edit = QLineEdit(self)
         self.log_end_time_edit = QLineEdit(self)
         self.log_title_edit = QLineEdit(self)
@@ -265,12 +280,14 @@ class ReportDialog(QDialog):
         self.trend_granularity_combo = QComboBox(self)
         for label, key in self._TREND_GRANULARITIES:
             self.trend_granularity_combo.addItem(label, key)
-        self.trend_granularity_combo.currentIndexChanged.connect(self.refresh_trend)
+        self.trend_granularity_combo.currentIndexChanged.connect(
+            self._request_trend_refresh
+        )
 
         self.trend_mode_combo = QComboBox(self)
         for label, key in self._TREND_MODES:
             self.trend_mode_combo.addItem(label, key)
-        self.trend_mode_combo.currentIndexChanged.connect(self.refresh_trend)
+        self.trend_mode_combo.currentIndexChanged.connect(self._request_trend_refresh)
         self.clear_trend_selection_button = QPushButton("選択解除", self)
         self.clear_trend_selection_button.clicked.connect(self._clear_trend_selection)
 
@@ -382,6 +399,8 @@ class ReportDialog(QDialog):
         tabs.addTab(self._build_summary_tab(), "ゲーム別")
         tabs.addTab(self._build_trend_tab(), "推移")
         tabs.addTab(self._build_log_tab(), "ログ")
+        tabs.currentChanged.connect(self._on_tab_changed)
+        self.tabs = tabs
 
         layout = QVBoxLayout()
         layout.addWidget(tabs)
@@ -466,6 +485,7 @@ class ReportDialog(QDialog):
         controls = QHBoxLayout()
         controls.addWidget(self.log_sync_button)
         controls.addWidget(self.log_edit_button)
+        controls.addWidget(self.log_delete_button)
         controls.addStretch()
 
         form = QFormLayout()
@@ -554,7 +574,7 @@ class ReportDialog(QDialog):
             start_date, end_date = self.date_range_for_period(period_key, date.today())
             if start_date is not None and end_date is not None:
                 self._set_trend_date_edits(start_date, end_date)
-        self.refresh_trend()
+        self._request_trend_refresh()
 
     def _apply_custom_trend_date_range(self, *_args: object) -> None:
         start_date = self._trend_date_edit_value(self.trend_start_date_edit)
@@ -566,7 +586,7 @@ class ReportDialog(QDialog):
         custom_index = self.trend_period_combo.findData("custom")
         if custom_index >= 0:
             self.trend_period_combo.setCurrentIndex(custom_index)
-        self.refresh_trend()
+        self._request_trend_refresh()
 
     def _load_summary(self) -> ReportSummary:
         start_date, end_date = self._selected_date_range()
@@ -610,10 +630,16 @@ class ReportDialog(QDialog):
         return titles
 
     def _load_title_filter_summary(self) -> ReportSummary:
+        if self._title_filter_summary is not None and not self._title_filter_dirty:
+            return self._title_filter_summary
+
         get_report_stats = getattr(self.log_handler, "get_report_stats", None)
         if callable(get_report_stats):
-            return get_report_stats(start_date=None, end_date=None)
-        return build_game_report(self._cached_records())
+            summary = get_report_stats(start_date=None, end_date=None)
+        else:
+            summary = build_game_report(self._cached_records())
+        self._title_filter_summary = summary
+        return summary
 
     def _sync_title_filter(self, summary: ReportSummary) -> None:
         checked_titles = (
@@ -704,6 +730,7 @@ class ReportDialog(QDialog):
 
         self._update_title_filter_action_states()
         self.refresh_trend()
+        self._mark_tab_clean(self._TREND_TAB)
         elapsed_ms = (perf_counter() - started_at) * 1000
         action = "全選択" if checked else "全解除"
         self._set_debug_message(f"タイトルを{action} ({elapsed_ms:.0f} ms)")
@@ -740,15 +767,24 @@ class ReportDialog(QDialog):
             process_events=True,
         )
         try:
-            if self._last_summary is None:
-                self.refresh_summary()
+            current_tab = self._current_tab_index()
+            if current_tab == self._SUMMARY_TAB:
+                if self._last_summary is None:
+                    self.refresh_summary()
+                else:
+                    self._populate_chart(self._last_summary)
+                self._mark_tab_clean(self._SUMMARY_TAB)
+                self._mark_tab_dirty(self._TREND_TAB)
+            elif current_tab == self._TREND_TAB:
+                if self._last_trend_series is None:
+                    self.refresh_trend_tab()
+                else:
+                    self._populate_trend_chart(self._last_trend_series)
+                self._mark_tab_clean(self._TREND_TAB)
+                self._mark_tab_dirty(self._SUMMARY_TAB)
             else:
-                self._populate_chart(self._last_summary)
-
-            if self._last_trend_series is None:
-                self.refresh_trend()
-            else:
-                self._populate_trend_chart(self._last_trend_series)
+                self._mark_tab_dirty(self._SUMMARY_TAB)
+                self._mark_tab_dirty(self._TREND_TAB)
         except Exception:
             logger.exception("Failed to redraw report charts after unit toggle")
             self._set_debug_message("単位切替中にエラーが発生しました")
@@ -821,14 +857,90 @@ class ReportDialog(QDialog):
         )
 
     def refresh(self, *_args: object) -> None:
-        """Refresh all report tabs."""
-        self.refresh_summary()
-        try:
-            self._sync_title_filter(self._load_title_filter_summary())
-        except Exception:
-            logger.exception("Failed to load title filter")
+        """Mark every report tab dirty and refresh only the visible tab."""
+        self._mark_all_tabs_dirty()
+        self._refresh_current_tab(force=True)
+
+    def _current_tab_index(self) -> int:
+        tabs = getattr(self, "tabs", None)
+        current_index = getattr(tabs, "currentIndex", None)
+        if callable(current_index):
+            return int(current_index())
+        return self._SUMMARY_TAB
+
+    def _mark_tab_dirty(self, tab_index: int) -> None:
+        self._ensure_refresh_state()
+        self._dirty_tabs.add(tab_index)
+
+    def _mark_tab_clean(self, tab_index: int) -> None:
+        self._ensure_refresh_state()
+        self._loaded_tabs.add(tab_index)
+        self._dirty_tabs.discard(tab_index)
+        if tab_index == self._TREND_TAB:
+            self._title_filter_dirty = False
+
+    def _mark_all_tabs_dirty(self) -> None:
+        self._ensure_refresh_state()
+        self._dirty_tabs.update({self._SUMMARY_TAB, self._TREND_TAB, self._LOG_TAB})
+        self._title_filter_dirty = True
+
+    def _mark_report_data_changed(self) -> None:
+        self._mark_all_tabs_dirty()
+        self._last_summary = None
+        self._title_filter_summary = None
+        self._last_trend_series = None
+
+    def _ensure_refresh_state(self) -> None:
+        if not hasattr(self, "_loaded_tabs"):
+            self._loaded_tabs = set()
+        if not hasattr(self, "_dirty_tabs"):
+            self._dirty_tabs = set()
+        if not hasattr(self, "_title_filter_dirty"):
+            self._title_filter_dirty = True
+
+    def _refresh_current_tab(self, *, force: bool = False) -> None:
+        self._refresh_tab(self._current_tab_index(), force=force)
+
+    def _refresh_tab(self, tab_index: int, *, force: bool = False) -> None:
+        if (
+            not force
+            and tab_index in self._loaded_tabs
+            and tab_index not in self._dirty_tabs
+        ):
+            return
+
+        if tab_index == self._SUMMARY_TAB:
+            self.refresh_summary()
+        elif tab_index == self._TREND_TAB:
+            self.refresh_trend_tab()
+        elif tab_index == self._LOG_TAB:
+            self.refresh_logs()
+        else:
+            return
+        self._mark_tab_clean(tab_index)
+
+    def _on_tab_changed(self, tab_index: int) -> None:
+        self._refresh_tab(tab_index)
+
+    def _request_summary_refresh(self, *_args: object) -> None:
+        self._mark_tab_dirty(self._SUMMARY_TAB)
+        if self._current_tab_index() == self._SUMMARY_TAB:
+            self._refresh_tab(self._SUMMARY_TAB, force=True)
+
+    def _request_trend_refresh(self, *_args: object) -> None:
+        self._mark_tab_dirty(self._TREND_TAB)
+        if self._current_tab_index() == self._TREND_TAB:
+            self._refresh_tab(self._TREND_TAB, force=True)
+
+    def refresh_trend_tab(self, *_args: object) -> None:
+        """Refresh trend controls and chart when the trend tab is visible."""
+        if self._title_filter_dirty or not self._title_filter_initialized:
+            try:
+                self._sync_title_filter(self._load_title_filter_summary())
+                self._title_filter_dirty = False
+            except Exception:
+                logger.exception("Failed to load title filter")
         self.refresh_trend()
-        self.refresh_logs()
 
     def _sync_from_spreadsheet(self, *_args: object) -> None:
         sync_with_spreadsheet = getattr(
@@ -1167,23 +1279,81 @@ class ReportDialog(QDialog):
         ]
         self._start_log_edit(record_id, values)
 
-    def _start_log_edit(self, record_id: str, values: List[object]) -> None:
-        if self._log_edit_future is not None and not self._log_edit_future.done():
-            self._set_debug_message("ログ編集中です。完了まで待ってください")
+    def _delete_selected_log_record(self, *_args: object) -> None:
+        row = self._selected_log_row()
+        if row < 0:
+            QMessageBox.warning(self, "ログ削除エラー", "削除するレコードを選択してください")
             return
 
+        record_id = self._log_table_text(row, 0).strip()
+        if not record_id:
+            QMessageBox.warning(self, "ログ削除エラー", "レコードIDが見つかりません")
+            return
+
+        if not self._confirm_delete_log_record(row):
+            return
+
+        self._start_log_delete(record_id)
+
+    def _confirm_delete_log_record(self, row: int) -> bool:
+        question = getattr(QMessageBox, "question", None)
+        standard_button = getattr(QMessageBox, "StandardButton", None)
+        yes = getattr(standard_button, "Yes", None)
+        no = getattr(standard_button, "No", None)
+        if not callable(question) or yes is None or no is None:
+            return True
+
+        title = self._log_table_text(row, 5)
+        start_time = self._log_table_text(row, 3)
+        selected = question(
+            self,
+            "ログ削除",
+            f"このログを削除しますか？\n{start_time} / {title}",
+            yes | no,
+            no,
+        )
+        return selected == yes
+
+    def _start_log_edit(self, record_id: str, values: List[object]) -> None:
         update_record = getattr(self.log_handler, "update_record", None)
         if not callable(update_record):
             QMessageBox.warning(self, "ログ編集エラー", "このログハンドラは編集に対応していません")
             return
 
-        self.log_edit_button.setEnabled(False)
-        self._set_debug_message("ログ編集を保存中...", process_events=True)
-        self._log_edit_future = self._log_edit_executor.submit(
-            update_record,
-            record_id,
-            values,
+        self._start_log_operation(
+            busy_message="ログ編集を保存中...",
+            worker=lambda: update_record(record_id, values),
+            finish_callback=self._finish_log_edit,
         )
+
+    def _start_log_delete(self, record_id: str) -> None:
+        delete_record = getattr(self.log_handler, "delete_record", None)
+        if not callable(delete_record):
+            QMessageBox.warning(self, "ログ削除エラー", "このログハンドラは削除に対応していません")
+            return
+
+        self._start_log_operation(
+            busy_message="ログを削除中...",
+            worker=lambda: delete_record(record_id),
+            finish_callback=self._finish_log_delete,
+        )
+
+    def _start_log_operation(
+        self,
+        *,
+        busy_message: str,
+        worker: Callable[[], object],
+        finish_callback: Callable[[object], None],
+    ) -> None:
+        if self._log_edit_future is not None and not self._log_edit_future.done():
+            self._set_debug_message("ログ操作中です。完了まで待ってください")
+            return
+
+        self.log_edit_button.setEnabled(False)
+        self.log_delete_button.setEnabled(False)
+        self._set_debug_message(busy_message, process_events=True)
+        self._log_edit_finish_callback = finish_callback
+        self._log_edit_future = self._log_edit_executor.submit(worker)
         self._log_edit_timer = QTimer(self)
         self._log_edit_timer.setInterval(100)
         self._log_edit_timer.timeout.connect(self._check_log_edit_result)
@@ -1200,15 +1370,20 @@ class ReportDialog(QDialog):
             self._log_edit_timer = None
         self._log_edit_future = None
         self.log_edit_button.setEnabled(True)
+        self.log_delete_button.setEnabled(True)
 
         try:
             result = future.result()
         except Exception as exc:
-            logger.exception("Failed to edit play log")
+            self._log_edit_finish_callback = None
+            logger.exception("Failed to complete play log operation")
             QMessageBox.warning(self, "ログ編集エラー", str(exc))
             return
 
-        self._finish_log_edit(result)
+        finish_callback = self._log_edit_finish_callback
+        self._log_edit_finish_callback = None
+        if finish_callback is not None:
+            finish_callback(result)
 
     def _finish_log_edit(self, result: object) -> None:
         if not getattr(result, "local_updated", False):
@@ -1219,7 +1394,9 @@ class ReportDialog(QDialog):
             )
             return
 
-        self.refresh()
+        self._mark_report_data_changed()
+        self.refresh_logs()
+        self._mark_tab_clean(self._LOG_TAB)
         if getattr(result, "spreadsheet_updated", False):
             self._set_debug_message("ログを編集し、スプシにも反映しました")
             return
@@ -1230,10 +1407,33 @@ class ReportDialog(QDialog):
         else:
             self._set_debug_message("ログを編集しました。スプシ設定がないためローカルのみ更新しました")
 
+    def _finish_log_delete(self, result: object) -> None:
+        if not getattr(result, "local_deleted", False):
+            QMessageBox.warning(
+                self,
+                "ログ削除エラー",
+                str(getattr(result, "error_message", "") or "ローカルDBの削除に失敗しました"),
+            )
+            return
+
+        self._mark_report_data_changed()
+        self.refresh_logs()
+        self._mark_tab_clean(self._LOG_TAB)
+        if getattr(result, "spreadsheet_deleted", False):
+            self._set_debug_message("ログを削除し、スプシにも反映しました")
+            return
+
+        error_message = str(getattr(result, "error_message", "") or "")
+        if error_message:
+            self._set_debug_message(f"ログを削除しました。スプシ反映は失敗しました: {error_message}")
+        else:
+            self._set_debug_message("ログを削除しました。スプシ設定がないためローカルのみ削除しました")
+
     def closeEvent(self, event: object) -> None:
         if self._log_edit_timer is not None:
             self._log_edit_timer.stop()
             self._log_edit_timer = None
+        self._log_edit_finish_callback = None
         self._log_edit_executor.shutdown(wait=False, cancel_futures=True)
         close_event = getattr(super(), "closeEvent", None)
         if callable(close_event):

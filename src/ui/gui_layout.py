@@ -90,6 +90,7 @@ class LayoutWidgets:
     window_min_height: int
     overtime_alert_toggle: Optional[QPushButton] = None
     report_button: Optional[QPushButton] = None
+    manual_record_button: Optional[QPushButton] = None
 
 
 def build_main_layout(parent: QWidget) -> LayoutWidgets:
@@ -151,11 +152,14 @@ def build_main_layout(parent: QWidget) -> LayoutWidgets:
     overtime_alert_toggle = SlideToggleButton(parent)
     overtime_alert_toggle.setChecked(DEFAULT_OVERTIME_ALERT_ENABLED)
     report_button = QPushButton('レポート', parent)
+    manual_record_button = QPushButton('手入力', parent)
     settings_row = QHBoxLayout()
     settings_row.addWidget(settings_label)
     settings_row.addSpacing(6)
     settings_row.addWidget(overtime_alert_toggle)
     settings_row.addSpacing(10)
+    settings_row.addWidget(manual_record_button)
+    settings_row.addSpacing(6)
     settings_row.addWidget(report_button)
     settings_row.addStretch()
     main_layout.addStretch()
@@ -180,4 +184,5 @@ def build_main_layout(parent: QWidget) -> LayoutWidgets:
         window_min_height=window_min_height,
         overtime_alert_toggle=overtime_alert_toggle,
         report_button=report_button,
+        manual_record_button=manual_record_button,
     )

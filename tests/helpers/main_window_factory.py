@@ -101,6 +101,7 @@ def create_mock_main_window(
         window.w.window_list = MagicMock()
         window.w.today_games_table = MagicMock()
         window.w.report_button = MagicMock()
+        window.w.manual_record_button = MagicMock()
         if today_games_rowcount_zero:
             window.w.today_games_table.rowCount.return_value = 0
 

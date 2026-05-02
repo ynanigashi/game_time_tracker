@@ -92,6 +92,10 @@ class GspreadService:
         """Update a row whose record_id column matches the given value."""
         return self.update_row_by_key("record_id", record_id, values)
 
+    def delete_row_by_record_id(self, record_id: str) -> bool:
+        """Delete a row whose record_id column matches the given value."""
+        return self.delete_row_by_key("record_id", record_id)
+
     def update_row_by_key(
         self,
         key_column: str,
@@ -124,6 +128,37 @@ class GspreadService:
             return False
         except Exception as e:
             logger.error('行の更新中に例外が発生しました: %s', e)
+            return False
+
+    def delete_row_by_key(
+        self,
+        key_column: str,
+        key_value: str,
+    ) -> bool:
+        """Delete a row whose key column matches the given value.
+
+        Missing rows are treated as success so delete operations are idempotent.
+        """
+        try:
+            rows = self.sheet.get_all_values()
+            if not rows:
+                return True
+            header = [str(value).strip() for value in rows[0]]
+            try:
+                key_col = header.index(key_column)
+            except ValueError:
+                return False
+
+            for row_number, row in enumerate(rows[1:], start=2):
+                if key_col < len(row) and str(row[key_col]) == key_value:
+                    self.sheet.delete_rows(row_number)
+                    return True
+            return True
+        except gspread.exceptions.APIError as e:
+            logger.error("API error occurred while deleting row: %s", e)
+            return False
+        except Exception as e:
+            logger.error("Exception occurred while deleting row: %s", e)
             return False
 
     @staticmethod

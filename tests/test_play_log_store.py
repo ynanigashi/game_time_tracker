@@ -136,6 +136,37 @@ class TestPlayLogStore(unittest.TestCase):
         self.assertEqual(pending[0]["record_id"], saved["record_id"])
         self.assertEqual(pending[0]["_sync_action"], "update")
 
+    def test_delete_record_marks_backed_up_record_pending_delete(self):
+        saved = self.store.save_record(
+            [1, "2026/04/26 10:00:00", "2026/04/26 10:30:00", "Game", True],
+            backed_up=True,
+        )
+
+        deleted = self.store.delete_record(saved["record_id"])
+
+        self.assertEqual(deleted["record_id"], saved["record_id"])
+        self.assertEqual(self.store.load_records(), [])
+
+        pending = self.store.load_pending_backup_records()
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]["record_id"], saved["record_id"])
+        self.assertEqual(pending[0]["_sync_action"], "delete")
+
+        self.store.mark_backed_up(saved["record_id"])
+        self.assertEqual(self.store.load_records(), [])
+        self.assertEqual(self.store.load_pending_backup_records(), [])
+
+    def test_delete_record_hard_deletes_unbacked_append_record(self):
+        saved = self.store.save_record(
+            [1, "2026/04/26 10:00:00", "2026/04/26 10:30:00", "Game", True],
+            backed_up=False,
+        )
+
+        self.store.delete_record(saved["record_id"])
+
+        self.assertEqual(self.store.load_records(), [])
+        self.assertEqual(self.store.load_pending_backup_records(), [])
+
 
 if __name__ == "__main__":
     unittest.main()

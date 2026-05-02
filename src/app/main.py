@@ -82,6 +82,7 @@ from src.infra.runtime_paths import (
 )
 from src.ui.gui_layout import build_main_layout
 from src.ui.game_catalog_dialog import GameCatalogDialog
+from src.ui.manual_record_dialog import ManualPlayRecord, ManualRecordDialog
 from src.ui.report_dialog import ReportDialog
 from src.ui.settings_dialog import SettingsDialog
 
@@ -235,8 +236,10 @@ class MainWindow(QWidget):
         )
         self._overtime_alert_toggle_connected = False
         self._report_button_connected = False
+        self._manual_record_button_connected = False
         self._report_dialog: Optional[ReportDialog] = None
         self._game_catalog_dialog: Optional[GameCatalogDialog] = None
+        self._manual_record_dialog: Optional[ManualRecordDialog] = None
         self._settings_dialog: Optional[SettingsDialog] = None
         self._overtime_alert_tracker = OvertimeAlertTracker(
             thresholds_minutes=OVERTIME_ALERT_THRESHOLDS_MINUTES,
@@ -565,6 +568,7 @@ class MainWindow(QWidget):
         self._apply_bootstrap_result(result)
         self._initialize_overtime_alert_toggle()
         self._initialize_report_button()
+        self._initialize_manual_record_button()
         self._apply_display_mode()
         self._apply_mode_geometry()
         self._set_status(Messages.NO_GAME_PLAYING)
@@ -727,6 +731,10 @@ class MainWindow(QWidget):
         """Return the report button when the layout provides one."""
         return getattr(self.w, "report_button", None)
 
+    def _get_manual_record_button(self) -> Optional[QPushButton]:
+        """Return the manual record button when the layout provides one."""
+        return getattr(self.w, "manual_record_button", None)
+
     def _initialize_overtime_alert_toggle(self) -> None:
         """時間超過防止アラートトグルを初期化する。"""
         toggle = self._get_overtime_alert_toggle()
@@ -759,6 +767,20 @@ class MainWindow(QWidget):
         button.clicked.connect(self._open_report_dialog)
         self._report_button_connected = True
 
+    def _initialize_manual_record_button(self) -> None:
+        """Connect the manual record button to the manual entry dialog."""
+        button = self._get_manual_record_button()
+        if button is None:
+            return
+
+        if getattr(self, "_manual_record_button_connected", False):
+            try:
+                button.clicked.disconnect(self._open_manual_record_dialog)
+            except (TypeError, RuntimeError):
+                pass
+        button.clicked.connect(self._open_manual_record_dialog)
+        self._manual_record_button_connected = True
+
     def _open_report_dialog(self) -> None:
         """Open a non-modal report dialog backed by the cached log handler."""
         if not hasattr(self, "recorder"):
@@ -772,6 +794,63 @@ class MainWindow(QWidget):
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+
+    def _open_manual_record_dialog(self) -> None:
+        """Open a non-modal dialog for manually entering play time."""
+        if not hasattr(self, "recorder"):
+            return
+
+        dialog = self._get_or_create_manual_record_dialog()
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _get_or_create_manual_record_dialog(self) -> ManualRecordDialog:
+        """Return a manual record dialog refreshed with the current game list."""
+        dialog = getattr(self, "_manual_record_dialog", None)
+        if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
+            dialog = ManualRecordDialog(
+                self,
+                on_save=self._save_manual_record,
+                games=self.games,
+            )
+            self._manual_record_dialog = dialog
+        else:
+            dialog.set_games(self.games)
+        return dialog
+
+    def _save_manual_record(self, record: ManualPlayRecord) -> bool:
+        """Persist a manually entered session and refresh today's totals."""
+        recorded_seconds = self.recorder.record_with_times(
+            record.game,
+            record.start_time,
+            record.end_time,
+        )
+        if recorded_seconds is None:
+            self._set_status(
+                f"{record.game.game_title}の手入力記録を保存できませんでした"
+            )
+            return False
+
+        self._refresh_after_manual_record()
+        self._set_status(f"{record.game.game_title}のプレイ時間を手入力で記録しました")
+        return True
+
+    def _refresh_after_manual_record(self) -> None:
+        """Refresh cached stats, visible tables, alert progress, and overlay."""
+        self._reload_today_stats()
+        now = datetime.now()
+        total_seconds = self._update_today_totals(self.active_games_cache, now)
+        self._update_today_games_list(now)
+        self._update_overtime_alert(total_seconds)
+        self._sync_overlay()
+
+    def _reload_today_stats(self) -> None:
+        """Refresh cached completed play time from the log handler."""
+        game_minutes, completed_seconds = self.recorder.log_handler.get_today_stats()
+        self.daily_stats.today_game_minutes_cache = game_minutes
+        self.daily_stats.today_completed_seconds = completed_seconds
+        self.daily_stats.last_today_games_content = ""
 
     def _open_settings_dialog(self) -> None:
         """Open a non-modal settings dialog."""
@@ -1111,6 +1190,7 @@ class MainWindow(QWidget):
     def _show_context_menu(self, event: QMouseEvent) -> None:
         menu = QMenu(self)
         mode_actions = self._add_display_mode_menu(menu)
+        manual_record_action = menu.addAction("手入力で記録")
         report_action = menu.addAction("レポート")
         game_catalog_action = menu.addAction("ゲーム管理")
         settings_action = menu.addAction("設定")
@@ -1125,6 +1205,7 @@ class MainWindow(QWidget):
         selected_action = menu.exec(position)
         self._handle_context_menu_selection(
             selected_action,
+            manual_record_action=manual_record_action,
             report_action=report_action,
             game_catalog_action=game_catalog_action,
             settings_action=settings_action,
@@ -1156,13 +1237,16 @@ class MainWindow(QWidget):
         exit_action: object,
         game_catalog_action: object = None,
         mode_actions: Optional[Dict[str, object]] = None,
+        manual_record_action: object = None,
     ) -> None:
         if mode_actions:
             for mode, action in mode_actions.items():
                 if selected_action is action:
                     self._set_display_mode(mode)
                     return
-        if selected_action is report_action:
+        if selected_action is manual_record_action:
+            self._open_manual_record_dialog()
+        elif selected_action is report_action:
             self._open_report_dialog()
         elif selected_action is game_catalog_action:
             self._open_game_catalog_dialog()
