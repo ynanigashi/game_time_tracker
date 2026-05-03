@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QTableWidgetItem
 
 from src.core.reporting import TrendSeries
 from src.core.time_utils import format_hms
+from src.ui.report_tab_state import ReportTabState
 from src.ui.report_trend_selection_state import ReportTrendSelectionState
 
 
@@ -42,9 +43,15 @@ def trend_selection_label(series_list: List[TrendSeries]) -> str:
 class ReportTrendSelectionController:
     """Manage trend table range selection and chart zoom reset."""
 
-    def __init__(self, owner: object, state: ReportTrendSelectionState) -> None:
+    def __init__(
+        self,
+        owner: object,
+        state: ReportTrendSelectionState,
+        tab_state: ReportTabState,
+    ) -> None:
         self.owner = owner
         self.state = state
+        self.tab_state = tab_state
 
     def populate_trend_table(self, series_list: List[TrendSeries]) -> None:
         rows = [
@@ -93,7 +100,7 @@ class ReportTrendSelectionController:
         self.populate_trend_table(display_series)
 
     def select_trend_range_from_chart(self, start_x: float, end_x: float) -> None:
-        series_list = self.owner._ensure_report_tab_state().last_trend_series
+        series_list = self.tab_state.last_trend_series
         if self.owner.trend_chart_view is None or series_list is None:
             return
         if not series_list or not series_list[0].points:
@@ -131,7 +138,7 @@ class ReportTrendSelectionController:
         self.state.selected_indices = None
         self.reset_trend_chart_zoom()
         self.populate_trend_selection(
-            self.owner._ensure_report_tab_state().last_trend_series or []
+            self.tab_state.last_trend_series or []
         )
         self.update_action_states()
         if had_selection:

@@ -909,6 +909,7 @@ class ReportDialog(QDialog):
             controller = ReportTrendSelectionController(
                 self,
                 self._ensure_trend_selection_state(),
+                self._ensure_report_tab_state(),
             )
             self._trend_selection_controller = controller
         return controller
