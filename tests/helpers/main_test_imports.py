@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, PropertyMock, call, patch
 import pygetwindow
 
 from src.app import main
-from src.app import main_overlay as overlay_components
+from src.app.controllers import overlay as overlay_components
 from src.app.controllers import MainWindowBootstrapError
 from src.core import adapters as services
 from src.core import domain, models, time_utils, window_state

@@ -643,20 +643,20 @@ GUI版メインウィンドウ。
 | クラス | 役割 | 主要メソッド |
 |--------|------|--------------|
 | `GameSessionState` (`session_state.py`) | ゲーム一覧、active/inactive キャッシュ、最新ウィンドウタイトルの実行時状態を保持 | `update_scan_result()` |
-| `MainWindowUiController` (`main_ui.py`) | `active/session/today/windows` のUI更新を担当 | `update_session_times()`, `update_today_totals()`, `update_today_games_list()` |
-| `MainWindowDisplayController` (`main_ui.py`) | `min/mid/max` 表示モードの可視性・サイズ制約・ジオメトリ適用を担当 | `apply_display_mode()`, `apply_mode_geometry()`, `next_display_mode()` |
-| `MainWindowStateController` (`window_state_controller.py`) | ウィンドウ状態、起動時表示設定、トレイ用オーバーレイ設定/位置の読み書きとリサイズ記録を担当 | `load_all()`, `load_startup_window_visible()`, `load_tray_overlay_enabled()`, `load_overlay_position()`, `save()`, `record_resize()` |
-| `MainWindowLoopController` (`main_loop.py`) | タイマー生成と `scan_tick/ui_tick` 実行フローを担当 | `start_timer()`, `run_scan_tick()`, `run_ui_tick()` |
-| `MainWindowScanController` (`main_scan.py`) | ゲーム状態スキャン、スキャン結果のキャッシュ/UI反映、今日統計ロードを担当 | `scan_games()`, `apply_scan_result()`, `update_scan_status()`, `load_today_game_minutes()` |
-| `MainWindowOvertimeAlertController` / `OvertimeAlertTracker` (`main_alerts.py`) | 時間超過アラートの進捗管理、トグル接続、閾値到達通知を担当 | `initialize_toggle()`, `on_toggled()`, `update_alert()`, `prime_progress()` |
-| `MainWindowBootstrapper` (`main_bootstrap.py`) | 初期化依存構築と初期統計ロードを担当（失敗時は `MainWindowBootstrapError`） | `bootstrap()` |
-| `BootstrapDependencies` (`main_bootstrap.py`) | Bootstrapper が生成する依存クラス群をまとめ、長い個別クラス注入を避ける | `MainWindowBootstrapper.__init__()` |
-| `MainWindowDialogController` (`main_dialogs.py`) | レポート、手入力、設定、ゲーム管理ダイアログの生成/再利用と保存後リフレッシュを担当 | `open_report_dialog()`, `open_manual_record_dialog()`, `save_manual_record()`, `open_game_catalog_dialog()` |
-| `MainWindowTrayController` (`tray_controller.py`) | タスクトレイアイコン/メニュー、ウィンドウ表示切替、起動時表示設定、完全終了を担当 | `initialize_tray_icon()`, `build_tray_menu()`, `show_main_window_from_tray()`, `quit_application()` |
-| `MainWindowContextMenuController` (`main_context_menu.py`) | メインウィンドウ右クリックメニューの生成と選択処理を担当 | `show_context_menu()`, `add_display_mode_menu()`, `handle_context_menu_selection()` |
-| `MainWindowTitleController` (`window_title_controller.py`) | 現在のウィンドウタイトル一覧のコピー、右クリックからのゲーム管理追加を担当 | `initialize_window_title_copy()`, `show_window_title_context_menu()`, `copy_text_to_clipboard()` |
+| `MainWindowUiController` (`controllers/ui.py`) | `active/session/today/windows` のUI更新を担当 | `update_session_times()`, `update_today_totals()`, `update_today_games_list()` |
+| `MainWindowDisplayController` (`controllers/display.py`) | `min/mid/max` 表示モードの可視性・サイズ制約・ジオメトリ適用を担当 | `apply_display_mode()`, `apply_mode_geometry()`, `next_display_mode()` |
+| `MainWindowStateController` (`controllers/window_state.py`) | ウィンドウ状態、起動時表示設定、トレイ用オーバーレイ設定/位置の読み書きとリサイズ記録を担当 | `load_all()`, `load_startup_window_visible()`, `load_tray_overlay_enabled()`, `load_overlay_position()`, `save()`, `record_resize()` |
+| `MainWindowLoopController` (`controllers/loop.py`) | タイマー生成と `scan_tick/ui_tick` 実行フローを担当 | `start_timer()`, `run_scan_tick()`, `run_ui_tick()` |
+| `MainWindowScanController` (`controllers/scan.py`) | ゲーム状態スキャン、スキャン結果のキャッシュ/UI反映、今日統計ロードを担当 | `scan_games()`, `apply_scan_result()`, `update_scan_status()`, `load_today_game_minutes()` |
+| `MainWindowOvertimeAlertController` / `OvertimeAlertTracker` (`controllers/overtime_alert.py`) | 時間超過アラートの進捗管理、トグル接続、閾値到達通知を担当 | `initialize_toggle()`, `on_toggled()`, `update_alert()`, `prime_progress()` |
+| `MainWindowBootstrapper` (`controllers/bootstrap.py`) | 初期化依存構築と初期統計ロードを担当（失敗時は `MainWindowBootstrapError`） | `bootstrap()` |
+| `BootstrapDependencies` (`controllers/bootstrap.py`) | Bootstrapper が生成する依存クラス群をまとめ、長い個別クラス注入を避ける | `MainWindowBootstrapper.__init__()` |
+| `MainWindowDialogController` (`controllers/dialog.py`) | レポート、手入力、設定、ゲーム管理ダイアログの生成/再利用と保存後リフレッシュを担当 | `open_report_dialog()`, `open_manual_record_dialog()`, `save_manual_record()`, `open_game_catalog_dialog()` |
+| `MainWindowTrayController` (`controllers/tray.py`) | タスクトレイアイコン/メニュー、ウィンドウ表示切替、起動時表示設定、完全終了を担当 | `initialize_tray_icon()`, `build_tray_menu()`, `show_main_window_from_tray()`, `quit_application()` |
+| `MainWindowContextMenuController` (`controllers/context_menu.py`) | メインウィンドウ右クリックメニューの生成と選択処理を担当 | `show_context_menu()`, `add_display_mode_menu()`, `handle_context_menu_selection()` |
+| `MainWindowTitleController` (`controllers/window_title.py`) | 現在のウィンドウタイトル一覧のコピー、右クリックからのゲーム管理追加を担当 | `initialize_window_title_copy()`, `show_window_title_context_menu()`, `copy_text_to_clipboard()` |
 | `Win32CoverDetector` (`cover_detector.py`) | `today_time_display` が他プロセスのウィンドウに覆われているかを Win32 座標で判定 | `get_today_display_cover_state()`, `find_covering_foreign_window_at_point()`, `to_native_point()` |
-| `MainWindowOverlayController` (`main_overlay.py`) | 今日のプレイ時間オーバーレイの初期化、表示条件判定、位置/可視同期、ドラッグ後の保存を担当 | `initialize_overlay()`, `should_show_overlay()`, `sync_overlay()`, `sync_overlay_geometry()`, `sync_overlay_visibility()` |
+| `MainWindowOverlayController` (`controllers/overlay.py`) | 今日のプレイ時間オーバーレイの初期化、表示条件判定、位置/可視同期、ドラッグ後の保存を担当 | `initialize_overlay()`, `should_show_overlay()`, `sync_overlay()`, `sync_overlay_geometry()`, `sync_overlay_visibility()` |
 | `TodayTimeOverlayWindow` (`overlay_window.py`) | 今日のプレイ時間オーバーレイの描画、ドラッグハンドル、Win32 native event によるクリック透過/ドラッグ処理を担当 | `set_today_text()`, `set_overlay_geometry()`, `start_handle_drag()`, `continue_drag_from_global_cursor()` |
 
 ---

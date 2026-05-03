@@ -258,7 +258,7 @@ class TestOverlayMethods(unittest.TestCase):
         overlay = main.TodayTimeOverlayWindow()
         overlay.setGeometry(100, 200, 240, 40)
 
-        with patch("src.app.main_overlay.sys.platform", "win32"), patch.object(
+        with patch("src.app.controllers.overlay.sys.platform", "win32"), patch.object(
             overlay,
             "_native_window_rect",
             return_value=(150, 300, 510, 360),
@@ -364,7 +364,7 @@ class TestOverlayMethods(unittest.TestCase):
         )
         overlay.setGeometry(100, 200, 240, 40)
 
-        with patch("src.app.main_overlay.sys.platform", "win32"), patch.object(
+        with patch("src.app.controllers.overlay.sys.platform", "win32"), patch.object(
             main.TodayTimeOverlayWindow,
             "_capture_mouse",
         ), patch.object(

@@ -255,7 +255,7 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
   - `src/core`: ドメイン層（`models.py`, `domain.py`, `adapters.py`, `time_utils.py`, `window_state.py`）
   - `src/infra`: 外部連携・保存層（`config_loader.py`, `gspread_service.py`, `log_config.py`, `log_handler.py`, `play_log_analytics.py`, `play_log_backup.py`, `play_log_store.py`, `settings_repository.py`, `sqlite_base_store.py`）
   - `src/ui`: UIレイアウトとダイアログ（`gui_layout.py`, `report_dialog.py`, `report_charts.py`, `report_graph_unit.py`, `report_log_operations.py`, `report_log_table.py`, `report_summary_table.py`, `report_sync_messages.py`, `report_tab_refresh.py`, `report_tab_state.py`, `report_title_filter.py`, `report_trend_selection.py`, `report_date_ranges.py`）
-  - `src/app`: エントリーポイント/UI制御（`main.py`, `controllers/`, `session_state.py`, `main_ui.py`, `main_loop.py`, `main_scan.py`, `main_alerts.py`, `main_bootstrap.py`, `main_dialogs.py`, `tray_controller.py`, `main_context_menu.py`, `window_title_controller.py`, `cover_detector.py`, `main_overlay.py`, `overlay_window.py`, `window_state_controller.py`, `display_modes.py`）
+  - `src/app`: エントリーポイント/UI制御（`main.py`, `controllers/`, `session_state.py`, `cover_detector.py`, `overlay_window.py`, `display_modes.py`）
   - ルートの `main.py` は実行エントリです。実装は `src/` 配下にあります。
 
 ## 開発ガイド
