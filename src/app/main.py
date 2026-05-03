@@ -52,6 +52,7 @@ from src.app.main_constants import (
     POLL_INTERVAL_SECONDS,
     UI_REFRESH_INTERVAL_SECONDS,
 )
+from src.app.main_scan_actions import MainWindowScanActions
 from src.app.main_state_accessors import MainWindowStateAccessors
 from src.app.main_tray_title_actions import MainWindowTrayTitleActions
 from src.app.main_win32 import MainWindowWin32Mixin
@@ -127,6 +128,7 @@ TDependency = TypeVar("TDependency")
 
 class MainWindow(
     QWidget,
+    MainWindowScanActions,
     MainWindowStateAccessors,
     MainWindowTrayTitleActions,
     MainWindowWin32Mixin,
@@ -599,99 +601,6 @@ class MainWindow(
         self._apply_mode_geometry()
         self._set_status(Messages.NO_GAME_PLAYING)
         self._initialize_overlay()
-
-    def _scan_tick(self) -> None:
-        """監視サイクル（1秒間隔）."""
-        self._get_loop_controller().run_scan_tick(self)
-
-    def _scan_games(
-            self,
-            window_titles: List[str],
-            foreground_title: Optional[str]) -> ScanResult:
-        """Return game scan result for the current titles."""
-        return self._get_scan_controller().scan_games(window_titles, foreground_title)
-
-    def _apply_scan_result(self, window_titles: List[str], result: ScanResult) -> None:
-        """Apply scan result to caches and UI."""
-        self._get_scan_controller().apply_scan_result(window_titles, result)
-
-    def _update_scan_status(
-        self,
-        active_games: Sequence[GameEntry],
-        inactive_games: Sequence[GameEntry],
-    ) -> None:
-        """Update the status message for the latest scan result."""
-        self._get_scan_controller().update_scan_status(active_games, inactive_games)
-
-    def _update_active_list(
-            self,
-            active_games: List[GameEntry],
-            inactive_games: List[GameEntry]) -> None:
-        """プレイ中ゲームリストを更新."""
-        self._get_ui_controller().update_active_list(active_games, inactive_games)
-
-    def _all_playing_games(
-            self,
-            active_games: Optional[Sequence[GameEntry]] = None) -> List[GameEntry]:
-        """アクティブ/非アクティブを統合した、現在プレイ中のゲーム一覧を返す."""
-        active = active_games if active_games is not None else self.active_games_cache
-        return self._get_ui_controller().all_playing_games(
-            active,
-            self.inactive_games_cache,
-        )
-
-    def _has_playing_games(self) -> bool:
-        return self._get_scan_controller().has_playing_games()
-
-    def _update_session_times(
-            self,
-            active_games: List[GameEntry],
-            now: datetime) -> None:
-        """現在のセッション時間を更新（最長セッションを表示）.
-
-        active_games と inactive_games_cache を合わせた全プレイ中ゲームから最長を表示。
-        """
-        self._get_ui_controller().update_session_times(
-            active_games,
-            self.inactive_games_cache,
-            now,
-        )
-
-    def _update_today_totals(
-            self,
-            active_games: List[GameEntry],
-            now: datetime) -> float:
-        """今日のプレイ時間（完了+進行中）を更新.
-
-        - 日跨ぎセッションは今日0:00以降のみカウント
-        - 5分未満の進行中セッションは除外
-        - 非アクティブ中のゲームも含む
-        """
-        return self._get_ui_controller().update_today_totals(
-            active_games,
-            self.inactive_games_cache,
-            now,
-        )
-
-    def _update_window_list(self, window_titles: List[str]) -> None:
-        """現在のウィンドウタイトルリストを更新."""
-        self._get_ui_controller().update_window_list(window_titles)
-
-    def _load_today_game_minutes(self) -> Dict[str, float]:
-        """Load today's completed minutes by game from the log handler."""
-        return self._get_scan_controller().load_today_game_minutes()
-
-    def _update_today_games_list(self, now: datetime) -> None:
-        """今日プレイしたゲームの一覧と時間を更新."""
-        self._get_ui_controller().update_today_games_list(
-            self.active_games_cache,
-            self.inactive_games_cache,
-            now,
-        )
-
-    def _load_today_completed_seconds(self) -> float:
-        """Load today's completed play seconds from the log handler."""
-        return self._get_scan_controller().load_today_completed_seconds()
 
     def _save_window_state(self) -> None:
         """ウィンドウ位置・サイズ・表示モードを保存."""
