@@ -8,15 +8,24 @@ from typing import Callable, Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QWidget
 
+from src.app.window_title_state import WindowTitleState
+
 logger = logging.getLogger(__name__)
 
 
 class MainWindowTitleController:
     """Handles title-list copy and game-catalog context actions."""
 
-    def __init__(self, owner: "MainWindow", *, qmenu_cls: Callable[..., object]) -> None:
+    def __init__(
+        self,
+        owner: "MainWindow",
+        *,
+        qmenu_cls: Callable[..., object],
+        state: WindowTitleState,
+    ) -> None:
         self.owner = owner
         self.qmenu_cls = qmenu_cls
+        self.state = state
 
     def get_window_list_widget(self) -> Optional[QWidget]:
         return getattr(self.owner.w, "window_list", None)
@@ -26,25 +35,22 @@ class MainWindowTitleController:
         if window_list is None:
             return
 
-        if not getattr(self.owner, "_window_title_copy_connected", False):
+        if not self.state.copy_connected:
             item_clicked_signal = getattr(window_list, "itemClicked", None)
             if item_clicked_signal is not None:
                 try:
                     item_clicked_signal.connect(self.owner._on_window_title_item_clicked)
-                    self.owner._window_title_copy_connected = True
+                    self.state.copy_connected = True
                 except Exception:
                     logger.debug(
                         "ウィンドウタイトルクリックシグナルの接続に失敗",
                         exc_info=True,
                     )
 
-        if not getattr(self.owner, "_window_title_context_menu_connected", False):
+        if not self.state.context_menu_connected:
             self.owner._initialize_window_title_context_menu(window_list)
 
-        if (
-            getattr(self.owner, "_window_title_copy_connected", False)
-            or getattr(self.owner, "_window_title_context_menu_connected", False)
-        ):
+        if self.state.copy_connected or self.state.context_menu_connected:
             set_tooltip = getattr(window_list, "setToolTip", None)
             if callable(set_tooltip):
                 set_tooltip("\u30af\u30ea\u30c3\u30af\u3067\u30b3\u30d4\u30fc\u3002\u53f3\u30af\u30ea\u30c3\u30af\u3067\u30b2\u30fc\u30e0\u7ba1\u7406\u306b\u8ffd\u52a0")
@@ -74,7 +80,7 @@ class MainWindowTitleController:
         except Exception:
             logger.debug("ウィンドウタイトル右クリックシグナルの接続に失敗", exc_info=True)
             return
-        self.owner._window_title_context_menu_connected = True
+        self.state.context_menu_connected = True
 
     def on_window_title_item_clicked(self, item: object) -> None:
         if item is None:

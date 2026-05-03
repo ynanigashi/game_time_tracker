@@ -767,8 +767,15 @@ class MainWindow(QWidget):
         """Return the current-window-title list controller."""
         return self._resolve_dependency(
             "_window_title_controller",
-            factory=lambda: MainWindowTitleController(self, qmenu_cls=QMenu),
-            validator=lambda controller: controller.owner is self,
+            factory=lambda: MainWindowTitleController(
+                self,
+                qmenu_cls=QMenu,
+                state=self._ensure_window_title_state(),
+            ),
+            validator=lambda controller: (
+                controller.owner is self
+                and controller.state is self._ensure_window_title_state()
+            ),
         )
 
     def _get_cover_detector(self) -> Win32CoverDetector:
