@@ -19,6 +19,7 @@ from src.app.overlay_window import (
     _WinMsg,
     sys,
 )
+from src.app.win32_helpers import get_foreground_hwnd
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +175,8 @@ class MainWindowOverlayController:
         if bool(getattr(self.owner, "isVisible", lambda: False)()):
             if not bool(getattr(self.owner, "_has_playing_games", lambda: False)()):
                 return False, "no_playing_game"
+            if self._is_own_window_foreground():
+                return False, "own_window_foreground"
             cover_state_getter = getattr(
                 self.owner,
                 "_get_today_display_cover_state",
@@ -194,6 +197,18 @@ class MainWindowOverlayController:
         if not bool(getattr(self.owner, "_has_playing_games", lambda: False)()):
             return False, "no_playing_game"
         return True, "tray_overlay_enabled"
+
+    def _is_own_window_foreground(self) -> bool:
+        """Return whether the foreground window belongs to this app."""
+        try:
+            foreground_hwnd = get_foreground_hwnd()
+            is_own_window = getattr(self.owner, "_is_own_window", None)
+            if foreground_hwnd and callable(is_own_window):
+                return bool(is_own_window(foreground_hwnd))
+        except Exception:
+            logger.debug("前面ウィンドウ判定に失敗", exc_info=True)
+
+        return bool(getattr(self.owner, "isActiveWindow", lambda: False)())
 
     def should_show_overlay(self) -> bool:
         """Return whether the tray overlay should be visible."""

@@ -527,11 +527,12 @@ class TestOverlayMethods(unittest.TestCase):
 
         self.assertFalse(result)
 
-    def test_should_show_overlay_returns_true_when_visible_window_is_background(self):
-        """ウィンドウ表示中でも他ウィンドウが前面ならオーバーレイを表示する."""
+    def test_should_show_overlay_returns_false_when_foreground_hwnd_is_own(self):
+        """Win32 foreground が自アプリなら被覆判定がTrueでもオーバーレイを隠す."""
         window = self._create_mock_main_window()
         window.tray_overlay_enabled = True
         window.isVisible = MagicMock(return_value=True)
+        window._is_own_window = MagicMock(return_value=True)
         window._get_today_display_cover_state = MagicMock(
             return_value=(True, "covered_native_points")
         )
@@ -539,7 +540,33 @@ class TestOverlayMethods(unittest.TestCase):
         game.is_playing = True
         window.games = [game]
 
-        result = window._should_show_overlay()
+        with patch(
+            "src.app.controllers.overlay.get_foreground_hwnd",
+            return_value=1234,
+        ):
+            result = window._should_show_overlay()
+
+        self.assertFalse(result)
+        window._get_today_display_cover_state.assert_not_called()
+
+    def test_should_show_overlay_returns_true_when_visible_window_is_background(self):
+        """ウィンドウ表示中でも他ウィンドウが前面ならオーバーレイを表示する."""
+        window = self._create_mock_main_window()
+        window.tray_overlay_enabled = True
+        window.isVisible = MagicMock(return_value=True)
+        window._is_own_window = MagicMock(return_value=False)
+        window._get_today_display_cover_state = MagicMock(
+            return_value=(True, "covered_native_points")
+        )
+        game = models.GameEntry(game_title="TestGame", window_title="TestGame")
+        game.is_playing = True
+        window.games = [game]
+
+        with patch(
+            "src.app.controllers.overlay.get_foreground_hwnd",
+            return_value=1234,
+        ):
+            result = window._should_show_overlay()
 
         self.assertTrue(result)
 
@@ -548,6 +575,7 @@ class TestOverlayMethods(unittest.TestCase):
         window = self._create_mock_main_window()
         window.tray_overlay_enabled = False
         window.isVisible = MagicMock(return_value=True)
+        window._is_own_window = MagicMock(return_value=False)
         window._get_today_display_cover_state = MagicMock(
             return_value=(True, "covered_native_points")
         )
@@ -555,7 +583,11 @@ class TestOverlayMethods(unittest.TestCase):
         game.is_playing = True
         window.games = [game]
 
-        result = window._should_show_overlay()
+        with patch(
+            "src.app.controllers.overlay.get_foreground_hwnd",
+            return_value=1234,
+        ):
+            result = window._should_show_overlay()
 
         self.assertTrue(result)
 
