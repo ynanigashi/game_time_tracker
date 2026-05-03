@@ -200,6 +200,16 @@ class MainWindowOverlayController:
 
     def _is_own_window_foreground(self) -> bool:
         """Return whether the foreground window belongs to this app."""
+        if bool(getattr(self.owner, "isActiveWindow", lambda: False)()):
+            return True
+
+        try:
+            active_window = QApplication.activeWindow()
+            if active_window is self.owner:
+                return True
+        except Exception:
+            logger.debug("Qt active window 判定に失敗", exc_info=True)
+
         try:
             foreground_hwnd = get_foreground_hwnd()
             is_own_window = getattr(self.owner, "_is_own_window", None)
@@ -208,7 +218,7 @@ class MainWindowOverlayController:
         except Exception:
             logger.debug("前面ウィンドウ判定に失敗", exc_info=True)
 
-        return bool(getattr(self.owner, "isActiveWindow", lambda: False)())
+        return False
 
     def should_show_overlay(self) -> bool:
         """Return whether the tray overlay should be visible."""
