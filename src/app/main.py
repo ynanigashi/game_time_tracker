@@ -40,6 +40,19 @@ from src.app.cover_detector import CoverDetectorOps, Win32CoverDetector
 from src.app.dialog_state import DialogRefState
 from src.app.display_state import WindowDisplayState
 from src.app.lifecycle_state import AppLifecycleState
+from src.app.main_constants import (
+    BASE_TITLE,
+    INACTIVE_TIMEOUT_MINUTES,
+    MAX_WIDGET_HEIGHT,
+    MIN_MODE_SAFE_HEIGHT,
+    MIN_MODE_SAFE_WIDTH,
+    OVERLAY_COVERED_POINTS_THRESHOLD,
+    OVERLAY_SAMPLE_RATIOS,
+    OVERTIME_ALERT_THRESHOLDS_MINUTES,
+    POLL_INTERVAL_SECONDS,
+    UI_REFRESH_INTERVAL_SECONDS,
+)
+from src.app.main_win32 import MainWindowWin32Mixin
 from src.app.session_state import GameSessionState
 from src.app.timer_state import TimerState
 from src.app.tray_state import TrayActionState
@@ -47,8 +60,6 @@ from src.app.window_title_state import WindowTitleState
 from src.app.win32_helpers import (
     get_foreground_hwnd,
     global_rect_of_widget,
-    Point,
-    Rect,
     rect_contains_point,
     rects_intersect,
     root_window,
@@ -87,7 +98,6 @@ from src.infra.log_config import (
     configure_logging as configure_app_logging,
 )
 from src.infra.runtime_paths import (
-    default_window_state_file,
     resolve_window_state_file,
 )
 from src.ui.gui_layout import build_main_layout
@@ -110,31 +120,10 @@ def configure_logging() -> None:
     LOG_DIR = DEFAULT_LOGGING_STATE.log_dir
 
 
-# =============================================================================
-# 定数
-# =============================================================================
-POLL_INTERVAL_SECONDS = 1
-INACTIVE_TIMEOUT_MINUTES = 5  # 非アクティブ状態でこの時間経過でセッション分割
-STATE_FILE = default_window_state_file()
-BASE_TITLE = "Game Time Tracker"
-UI_REFRESH_INTERVAL_SECONDS = 0.1
-MAX_WIDGET_HEIGHT = 16777215  # Qt default max height
-MAX_Z_WALK = 32
-MIN_MODE_SAFE_WIDTH = 320
-MIN_MODE_SAFE_HEIGHT = 110
-OVERLAY_SAMPLE_RATIOS: Tuple[Tuple[float, float], ...] = (
-    (0.5, 0.5),
-    (0.25, 0.25),
-    (0.75, 0.25),
-    (0.25, 0.75),
-    (0.75, 0.75),
-)
-OVERLAY_COVERED_POINTS_THRESHOLD = 2
-OVERTIME_ALERT_THRESHOLDS_MINUTES: Tuple[int, ...] = (45, 50, 55, 58, 60)
 TDependency = TypeVar("TDependency")
 
 
-class MainWindow(QWidget):
+class MainWindow(QWidget, MainWindowWin32Mixin):
     """メインウィンドウ."""
 
     def __init__(self) -> None:
@@ -1196,88 +1185,6 @@ class MainWindow(QWidget):
     def _sync_overlay_geometry(self) -> None:
         """オーバーレイを today_time_display の位置とサイズに追従させる."""
         self._get_overlay_controller().sync_overlay_geometry()
-
-    # ----- Win32 ヘルパーへのデリゲーション -----
-
-    @staticmethod
-    def _global_rect_of_widget(widget: QWidget) -> Optional[Rect]:
-        return global_rect_of_widget(widget)
-
-    @staticmethod
-    def _window_rect(hwnd: int) -> Optional[Rect]:
-        return window_rect(hwnd)
-
-    @staticmethod
-    def _rect_contains_point(rect: Rect, x: int, y: int) -> bool:
-        return rect_contains_point(rect, x, y)
-
-    @staticmethod
-    def _rects_intersect(first_rect: Rect, second_rect: Rect) -> bool:
-        return rects_intersect(first_rect, second_rect)
-
-    @staticmethod
-    def _sample_points_from_rect(rect: Rect) -> List[Point]:
-        return sample_points_from_rect(rect, OVERLAY_SAMPLE_RATIOS)
-
-    @staticmethod
-    def _window_at_point(x: int, y: int) -> int:
-        return window_at_point(x, y)
-
-    @staticmethod
-    def _window_below(hwnd: int) -> int:
-        return window_below(hwnd)
-
-    @staticmethod
-    def _root_window(hwnd: int) -> int:
-        return root_window(hwnd)
-
-    @staticmethod
-    def _window_handle_of(widget: Optional[QWidget]) -> int:
-        return window_handle_of(widget)
-
-    def _is_own_window(self, hwnd: int) -> bool:
-        """Return whether HWND belongs to this app or its overlay."""
-        return self._get_cover_detector().is_own_window(hwnd)
-
-    def _native_scale_factor(self) -> float:
-        """Estimate logical-to-native coordinate scaling."""
-        return self._get_cover_detector().native_scale_factor()
-
-    def _to_native_point(self, x: int, y: int) -> Point:
-        """Convert a logical point to Win32 native coordinates."""
-        return self._get_cover_detector().to_native_point(x, y)
-
-    def _to_native_rect(self, rect: Rect) -> Rect:
-        """Convert a logical rectangle to Win32 native coordinates."""
-        return self._get_cover_detector().to_native_rect(rect)
-
-    def _foreground_rect_if_foreign(self) -> Optional[Rect]:
-        """Return the foreground rectangle when it belongs to a foreign window."""
-        return self._get_cover_detector().foreground_rect_if_foreign(
-            get_foreground_hwnd()
-        )
-
-    def _find_covering_foreign_window_at_point(
-        self,
-        x: int,
-        y: int,
-        *,
-        expected_root_hwnd: Optional[int] = None,
-    ) -> int:
-        """Return a foreign HWND that covers a point, if any."""
-        return self._get_cover_detector().find_covering_foreign_window_at_point(
-            x,
-            y,
-            expected_root_hwnd=expected_root_hwnd,
-        )
-
-    def _get_today_display_cover_state(self) -> Tuple[bool, str]:
-        """Return cover state and reason for today_time_display."""
-        return self._get_cover_detector().get_today_display_cover_state()
-
-    def _is_today_display_covered_by_foreground_window(self) -> bool:
-        """Return whether today_time_display is covered by a foreign window."""
-        return self._get_cover_detector().is_today_display_covered()
 
     def _should_show_overlay(self) -> bool:
         """メインウィンドウ背面かつtoday表示部が重なっている時のみオーバーレイ表示."""
