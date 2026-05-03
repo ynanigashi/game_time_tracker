@@ -392,6 +392,9 @@ class ReportDialog(QDialog):
             controller = ReportGraphUnitController(
                 self,
                 self._ensure_graph_unit_state(),
+                self._ensure_report_tab_state(),
+                summary_tab=self._SUMMARY_TAB,
+                trend_tab=self._TREND_TAB,
             )
             self._graph_unit_controller = controller
         return controller

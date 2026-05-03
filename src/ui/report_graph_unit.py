@@ -7,6 +7,7 @@ from time import perf_counter
 
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
+from src.ui.report_tab_state import ReportTabState
 from src.ui.report_graph_unit_state import ReportGraphUnitState
 
 logger = logging.getLogger(__name__)
@@ -15,9 +16,20 @@ logger = logging.getLogger(__name__)
 class ReportGraphUnitController:
     """Manage minute/hour graph unit toggles and chart redraws."""
 
-    def __init__(self, owner: object, state: ReportGraphUnitState) -> None:
+    def __init__(
+        self,
+        owner: object,
+        state: ReportGraphUnitState,
+        tab_state: ReportTabState,
+        *,
+        summary_tab: int,
+        trend_tab: int,
+    ) -> None:
         self.owner = owner
         self.state = state
+        self.tab_state = tab_state
+        self.summary_tab = int(summary_tab)
+        self.trend_tab = int(trend_tab)
 
     def create_unit_toggle(self) -> QWidget:
         container = QWidget(self.owner)
@@ -74,24 +86,23 @@ class ReportGraphUnitController:
         )
         try:
             current_tab = self.owner._current_tab_index()
-            tab_state = self.owner._ensure_report_tab_state()
-            if current_tab == self.owner._SUMMARY_TAB:
-                if tab_state.last_summary is None:
+            if current_tab == self.summary_tab:
+                if self.tab_state.last_summary is None:
                     self.owner.refresh_summary()
                 else:
-                    self.owner._populate_chart(tab_state.last_summary)
-                self.owner._mark_tab_clean(self.owner._SUMMARY_TAB)
-                self.owner._mark_tab_dirty(self.owner._TREND_TAB)
-            elif current_tab == self.owner._TREND_TAB:
-                if tab_state.last_trend_series is None:
+                    self.owner._populate_chart(self.tab_state.last_summary)
+                self.owner._mark_tab_clean(self.summary_tab)
+                self.owner._mark_tab_dirty(self.trend_tab)
+            elif current_tab == self.trend_tab:
+                if self.tab_state.last_trend_series is None:
                     self.owner.refresh_trend_tab()
                 else:
-                    self.owner._populate_trend_chart(tab_state.last_trend_series)
-                self.owner._mark_tab_clean(self.owner._TREND_TAB)
-                self.owner._mark_tab_dirty(self.owner._SUMMARY_TAB)
+                    self.owner._populate_trend_chart(self.tab_state.last_trend_series)
+                self.owner._mark_tab_clean(self.trend_tab)
+                self.owner._mark_tab_dirty(self.summary_tab)
             else:
-                self.owner._mark_tab_dirty(self.owner._SUMMARY_TAB)
-                self.owner._mark_tab_dirty(self.owner._TREND_TAB)
+                self.owner._mark_tab_dirty(self.summary_tab)
+                self.owner._mark_tab_dirty(self.trend_tab)
         except Exception:
             logger.exception("Failed to redraw report charts after unit toggle")
             self.owner._set_debug_message("単位切替中にエラーが発生しました")
