@@ -1,4 +1,4 @@
-"""ビジネスロジック - ゲーム情報ローダー、ウィンドウスキャナー、セッション記録、統計追跡."""
+"""External adapters for game loading, window scanning, and session recording."""
 
 import logging
 from datetime import datetime
@@ -8,19 +8,21 @@ import gspread
 import pygetwindow as gw
 
 from src.core.models import GameEntry, parse_bool
-from src.core.services_domain import (
-    DailyStatsTracker,
-    GameStateTracker,
-    MIN_PLAY_MINUTES,
-    ScanResult,
-)
+from src.core.domain import MIN_PLAY_MINUTES
 from src.core.time_utils import SECONDS_PER_MINUTE, split_by_day
 from src.infra.config_loader import Config
 from src.infra.game_catalog_store import GameCatalogStore
 from src.infra.gspread_service import GspreadService
 from src.infra.log_handler import LogHandler
 
-logger = logging.getLogger("services")
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    "GameInfoLoader",
+    "Messages",
+    "SessionRecorder",
+    "WindowScanner",
+]
 
 
 class Messages:

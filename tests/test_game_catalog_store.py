@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import sqlite3
 from pathlib import Path
 
 from src.core.models import GameEntry
@@ -115,6 +116,17 @@ class TestGameCatalogStore(unittest.TestCase):
             self.store.spreadsheet_records(),
             [["game-1", "Game", "Game Window", "TRUE", "FALSE"]],
         )
+
+    def test_schema_version_is_recorded(self):
+        self.store.load_games()
+
+        conn = sqlite3.connect(self.store.db_path)
+        try:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            conn.close()
+
+        self.assertEqual(version, GameCatalogStore.SCHEMA_VERSION)
 
 
 if __name__ == "__main__":

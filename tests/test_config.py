@@ -1,7 +1,7 @@
 # pyright: reportAttributeAccessIssue=false, reportArgumentType=false
 """config_loader.py のユニットテスト."""
 
-from src.core import services
+from src.core import adapters as services
 from src.infra.config_loader import ConfigLoader
 from src.infra.settings_store import SettingsStore
 from src.app import main

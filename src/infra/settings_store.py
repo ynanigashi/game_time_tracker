@@ -1,39 +1,28 @@
 """SQLite-backed runtime settings store."""
 
 import configparser
-from contextlib import contextmanager
 import json
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Dict, Iterator, Optional
+from typing import Dict, Optional
 
 from src.infra.runtime_paths import default_settings_db_file
+from src.infra.sqlite_base_store import SQLiteBaseStore
 
 logger = logging.getLogger(__name__)
 
 
-class SettingsStore:
+class SettingsStore(SQLiteBaseStore):
     """Persist application settings and small state documents in SQLite."""
 
+    SCHEMA_VERSION = 1
+
     def __init__(self, db_path: Optional[Path] = None) -> None:
-        self.db_path = db_path or default_settings_db_file()
+        super().__init__(db_path or default_settings_db_file())
 
-    def _connect(self) -> sqlite3.Connection:
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
+    def _configure_connection(self, conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA foreign_keys = ON")
-        self._ensure_schema(conn)
-        return conn
-
-    @contextmanager
-    def _connection(self) -> Iterator[sqlite3.Connection]:
-        conn = self._connect()
-        try:
-            yield conn
-            conn.commit()
-        finally:
-            conn.close()
 
     @staticmethod
     def _ensure_schema(conn: sqlite3.Connection) -> None:

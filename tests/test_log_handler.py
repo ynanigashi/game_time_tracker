@@ -2,7 +2,7 @@
 # reportCallIssue=false
 """log_handler.py / gspread_service.py のユニットテスト."""
 
-from src.core import services
+from src.core import adapters as services
 from src.core import models
 from src.infra.gspread_service import GspreadService
 from src.infra.log_handler import LogHandler

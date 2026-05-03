@@ -1,5 +1,6 @@
 import configparser
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -63,6 +64,17 @@ class TestSettingsStore(unittest.TestCase):
         self.assertIsNotNone(loaded)
         self.assertEqual(loaded["x"], 10)
         self.assertFalse(state_file.exists())
+
+    def test_schema_version_is_recorded(self):
+        self.store.load_config()
+
+        conn = sqlite3.connect(self.store.db_path)
+        try:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            conn.close()
+
+        self.assertEqual(version, SettingsStore.SCHEMA_VERSION)
 
 
 if __name__ == "__main__":

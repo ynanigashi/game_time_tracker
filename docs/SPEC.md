@@ -69,13 +69,32 @@ classDiagram
         }
     }
 
-    namespace services_py {
+    namespace domain_py {
         class ScanResult {
             <<dataclass>>
             +active_games: List~GameEntry~
             +inactive_games: List~GameEntry~
             +recorded_seconds: float
         }
+        class DailyStatsTracker {
+            +today_completed_seconds: float
+            +today_game_minutes_cache: Dict
+            +check_day_change() bool
+            +add_completed_seconds()
+            +update_game_minutes_cache()
+        }
+        class GameStateTracker {
+            +active_games: List~GameEntry~
+            +inactive_games: List~GameEntry~
+            +add_active()
+            +remove_active()
+            +add_inactive()
+            +remove_inactive()
+            +clear_all()
+        }
+    }
+
+    namespace adapters_py {
         class Messages {
             <<constants>>
             GAME_RECORDED
@@ -98,22 +117,6 @@ classDiagram
             +record() Optional~float~
             +record_with_times() Optional~float~
             -_save_to_spreadsheet() bool
-        }
-        class DailyStatsTracker {
-            +today_completed_seconds: float
-            +today_game_minutes_cache: Dict
-            +check_day_change() bool
-            +add_completed_seconds()
-            +update_game_minutes_cache()
-        }
-        class GameStateTracker {
-            +active_games: List~GameEntry~
-            +inactive_games: List~GameEntry~
-            +add_active()
-            +remove_active()
-            +add_inactive()
-            +remove_inactive()
-            +clear_all()
         }
     }
 
@@ -264,6 +267,25 @@ classDiagram
         }
     }
 
+    namespace play_log_analytics_py {
+        class PlayLogAnalytics {
+            +get_today_stats() Tuple
+            +get_report_stats() ReportSummary
+            +get_trend_stats() List~TrendPoint~
+            +get_trend_stats_by_title() List~TrendSeries~
+        }
+    }
+
+    namespace play_log_backup_py {
+        class PlayLogBackupMixin {
+            -_connect_backup_service()
+            -_fetch_backup_records()
+            -_sync_backup_records()
+            -_back_up_pending_records()
+            -_write_edited_record_to_backup()
+        }
+    }
+
     namespace game_catalog_store_py {
         class GameCatalogStore {
             +load_games() List~GameEntry~
@@ -286,13 +308,17 @@ classDiagram
     }
 
     models_py ..> time_utils_py : uses
-    services_py ..> time_utils_py : uses
-    services_py ..> game_catalog_store_py : loads games
-    services_py ..> log_handler_py : uses
+    domain_py ..> time_utils_py : uses
+    adapters_py ..> time_utils_py : uses
+    adapters_py ..> game_catalog_store_py : loads games
+    adapters_py ..> log_handler_py : uses
     log_handler_py ..> gspread_service_py : backs up
     log_handler_py ..> play_log_store_py : primary store
+    log_handler_py ..> play_log_analytics_py : aggregates
+    log_handler_py ..> play_log_backup_py : spreadsheet sync
     main_py ..> models_py : uses
-    main_py ..> services_py : uses
+    main_py ..> domain_py : uses
+    main_py ..> adapters_py : uses
     main_py ..> time_utils_py : uses
     main_py ..> window_state_py : uses
     main_py ..> gui_layout_py : uses
@@ -443,7 +469,7 @@ sequenceDiagram
 
 ---
 
-### services.py
+### domain.py / adapters.py
 
 #### `ScanResult` (dataclass)
 ゲームスキャン結果を保持するデータクラス。
@@ -454,7 +480,7 @@ sequenceDiagram
 | `inactive_games` | 非アクティブなゲームのリスト |
 | `recorded_seconds` | この周期で記録された秒数 |
 
-#### `GameInfoLoader`
+#### `GameInfoLoader` (`adapters.py`)
 ローカルDBからゲーム情報を読み込む。`data/game_catalog.sqlite3` が空の場合のみ、`GspreadService`でゲーム情報シートへ接続し、既存行をローカルDBへ初回取り込みする。
 
 | メソッド | 説明 | 呼び出し元 |
@@ -463,7 +489,7 @@ sequenceDiagram
 | `load()` | ローカルDBのゲーム情報リストを取得。DBが空の場合のみ`GspreadService(cert_file_path, sheet_key, sheet_gid)`で初回取り込み | `MainWindow._init_components()` |
 | `_record_to_entry(record)` | スプレッドシートのレコードをGameEntryに変換（`models.parse_bool()`を使用） | `load()` 内部 |
 
-#### `WindowScanner`
+#### `WindowScanner` (`adapters.py`)
 アクティブなウィンドウタイトルを取得する。
 
 | メソッド | 説明 | 呼び出し元 |
@@ -472,7 +498,7 @@ sequenceDiagram
 | `get_titles()` | 除外リストを考慮してウィンドウタイトル一覧を取得 | `MainWindow._scan_tick()` |
 | `get_foreground_title()` | フォアグラウンド（最前面）ウィンドウのタイトルを取得 | `MainWindow._scan_tick()` |
 
-#### `SessionRecorder`
+#### `SessionRecorder` (`adapters.py`)
 ゲームセッションを `LogHandler` 経由で記録する。
 
 | メソッド | 説明 | 呼び出し元 |
@@ -483,7 +509,7 @@ sequenceDiagram
 | `_split_by_day(start, end)` | セッションを日付境界で分割 | `record()` / `record_with_times()` 内部 |
 | `_save_to_spreadsheet(game, start_time, end_time)` | 互換名の保存メソッド。ローカルDBに1件保存し、スプレッドシートへバックアップする。**ローカル保存成功時True、失敗時Falseを返す** | `record()` / `record_with_times()` 内部 |
 
-#### `DailyStatsTracker`
+#### `DailyStatsTracker` (`domain.py`)
 日付ごとの統計を追跡し、日付変更時にリセットする。
 
 | メソッド | 説明 | 呼び出し元 |
@@ -610,14 +636,42 @@ GUI版メインウィンドウ。
 
 #### `MainWindow` 内部コントローラー
 
+`src/app/controllers/` は MainWindow controller 群の公開 import 面として機能する。実装ファイルは既存の `main_*.py` / `*_controller.py` に残し、`main.py` やテストは `src.app.controllers` 経由で参照する。
+
+`GameSessionState` (`session_state.py`) はスキャン由来の mutable state (`games`, `active_games_cache`, `inactive_games_cache`, `latest_window_titles`) を保持する。既存の呼び出し互換性のため `MainWindow` には同名プロパティを残し、controller からの一括更新は `update_scan_result()` に集約する。
+
 | クラス | 役割 | 主要メソッド |
 |--------|------|--------------|
-| `MainWindowUiController` | `active/session/today/windows` のUI更新を担当 | `update_session_times()`, `update_today_totals()`, `update_today_games_list()` |
-| `MainWindowDisplayController` | `min/mid/max` 表示モードの可視性・サイズ制約・ジオメトリ適用を担当 | `apply_display_mode()`, `apply_mode_geometry()`, `next_display_mode()` |
-| `MainWindowStateController` | ウィンドウ状態、起動時表示設定、トレイ用オーバーレイ設定/位置の読み書きとリサイズ記録を担当 | `load_all()`, `load_startup_window_visible()`, `load_tray_overlay_enabled()`, `load_overlay_position()`, `save()`, `record_resize()` |
-| `MainWindowLoopController` | タイマー生成と `scan_tick/ui_tick` 実行フローを担当 | `start_timer()`, `run_scan_tick()`, `run_ui_tick()` |
-| `MainWindowBootstrapper` | 初期化依存構築と初期統計ロードを担当（失敗時は `MainWindowBootstrapError`） | `bootstrap()` |
-| `MainWindowOverlayController` | 今日のプレイ時間オーバーレイの初期化、表示条件判定、位置/可視同期、ドラッグ後の保存を担当 | `initialize_overlay()`, `should_show_overlay()`, `sync_overlay()`, `sync_overlay_geometry()`, `sync_overlay_visibility()` |
+| `GameSessionState` (`session_state.py`) | ゲーム一覧、active/inactive キャッシュ、最新ウィンドウタイトルの実行時状態を保持 | `update_scan_result()` |
+| `MainWindowUiController` (`main_ui.py`) | `active/session/today/windows` のUI更新を担当 | `update_session_times()`, `update_today_totals()`, `update_today_games_list()` |
+| `MainWindowDisplayController` (`main_ui.py`) | `min/mid/max` 表示モードの可視性・サイズ制約・ジオメトリ適用を担当 | `apply_display_mode()`, `apply_mode_geometry()`, `next_display_mode()` |
+| `MainWindowStateController` (`window_state_controller.py`) | ウィンドウ状態、起動時表示設定、トレイ用オーバーレイ設定/位置の読み書きとリサイズ記録を担当 | `load_all()`, `load_startup_window_visible()`, `load_tray_overlay_enabled()`, `load_overlay_position()`, `save()`, `record_resize()` |
+| `MainWindowLoopController` (`main_loop.py`) | タイマー生成と `scan_tick/ui_tick` 実行フローを担当 | `start_timer()`, `run_scan_tick()`, `run_ui_tick()` |
+| `MainWindowScanController` (`main_scan.py`) | ゲーム状態スキャン、スキャン結果のキャッシュ/UI反映、今日統計ロードを担当 | `scan_games()`, `apply_scan_result()`, `update_scan_status()`, `load_today_game_minutes()` |
+| `MainWindowOvertimeAlertController` / `OvertimeAlertTracker` (`main_alerts.py`) | 時間超過アラートの進捗管理、トグル接続、閾値到達通知を担当 | `initialize_toggle()`, `on_toggled()`, `update_alert()`, `prime_progress()` |
+| `MainWindowBootstrapper` (`main_bootstrap.py`) | 初期化依存構築と初期統計ロードを担当（失敗時は `MainWindowBootstrapError`） | `bootstrap()` |
+| `BootstrapDependencies` (`main_bootstrap.py`) | Bootstrapper が生成する依存クラス群をまとめ、長い個別クラス注入を避ける | `MainWindowBootstrapper.__init__()` |
+| `MainWindowDialogController` (`main_dialogs.py`) | レポート、手入力、設定、ゲーム管理ダイアログの生成/再利用と保存後リフレッシュを担当 | `open_report_dialog()`, `open_manual_record_dialog()`, `save_manual_record()`, `open_game_catalog_dialog()` |
+| `MainWindowTrayController` (`tray_controller.py`) | タスクトレイアイコン/メニュー、ウィンドウ表示切替、起動時表示設定、完全終了を担当 | `initialize_tray_icon()`, `build_tray_menu()`, `show_main_window_from_tray()`, `quit_application()` |
+| `MainWindowContextMenuController` (`main_context_menu.py`) | メインウィンドウ右クリックメニューの生成と選択処理を担当 | `show_context_menu()`, `add_display_mode_menu()`, `handle_context_menu_selection()` |
+| `MainWindowTitleController` (`window_title_controller.py`) | 現在のウィンドウタイトル一覧のコピー、右クリックからのゲーム管理追加を担当 | `initialize_window_title_copy()`, `show_window_title_context_menu()`, `copy_text_to_clipboard()` |
+| `Win32CoverDetector` (`cover_detector.py`) | `today_time_display` が他プロセスのウィンドウに覆われているかを Win32 座標で判定 | `get_today_display_cover_state()`, `find_covering_foreign_window_at_point()`, `to_native_point()` |
+| `MainWindowOverlayController` (`main_overlay.py`) | 今日のプレイ時間オーバーレイの初期化、表示条件判定、位置/可視同期、ドラッグ後の保存を担当 | `initialize_overlay()`, `should_show_overlay()`, `sync_overlay()`, `sync_overlay_geometry()`, `sync_overlay_visibility()` |
+| `TodayTimeOverlayWindow` (`overlay_window.py`) | 今日のプレイ時間オーバーレイの描画、ドラッグハンドル、Win32 native event によるクリック透過/ドラッグ処理を担当 | `set_today_text()`, `set_overlay_geometry()`, `start_handle_drag()`, `continue_drag_from_global_cursor()` |
+
+---
+
+#### `ReportTabState`
+
+`ReportTabState` (`report_tab_state.py`) は `ReportDialog` のタブ更新状態とレポートキャッシュを保持する。`ReportDialog` には互換用の `_loaded_tabs` / `_dirty_tabs` / `_last_summary` などのプロパティを残すが、controller 側の更新は `ReportTabState` に寄せる。
+
+| フィールド/メソッド | 説明 |
+|--------------------|------|
+| `loaded_tabs` / `dirty_tabs` | 遅延ロード済みタブと再読み込み対象タブ |
+| `title_filter_dirty` | タイトルフィルタ用サマリーの再取得要否 |
+| `last_summary` / `title_filter_summary` / `last_trend_series` | 再描画用の集計キャッシュ |
+| `mark_tab_dirty()` / `mark_tab_clean()` / `mark_all_dirty()` | タブ更新状態の変更 |
+| `reset_cached_report_data()` | ログ変更時に集計キャッシュを破棄 |
 
 ---
 
@@ -767,6 +821,40 @@ SQLite で小さな実行時設定を保存する。DB ファイルは `data/set
 
 ---
 
+### sqlite_base_store.py
+
+SQLite store 共通の接続・トランザクション管理とスキーマバージョン記録を提供する。
+各 store は `SQLiteBaseStore` を継承し、`_ensure_schema(conn)` で現行スキーマを作成する。スキーマ世代を持つ store は `SCHEMA_VERSION` と `_migrate(conn, from_version, to_version)` を実装する。
+
+| クラス/メソッド | 説明 |
+|----------------|------|
+| `SQLiteBaseStore(db_path)` | DB パスを保持する基底クラス |
+| `SCHEMA_VERSION` | store ごとの現行スキーマバージョン。`PRAGMA user_version` に記録する |
+| `_connect()` | 親ディレクトリ作成、SQLite 接続、`row_factory` 設定、接続設定、排他トランザクション内でのスキーマ初期化とバージョン更新を行う |
+| `_connection()` | commit/close 付きのコンテキストマネージャ |
+| `_configure_connection(conn)` | store ごとの追加設定フック。`SettingsStore` はここで `PRAGMA foreign_keys = ON` を設定する |
+| `_ensure_schema(conn)` | store ごとの現行スキーマ作成処理 |
+| `_migrate_schema_version(conn)` | `PRAGMA user_version` を読み、必要なら `_migrate()` を呼んで `SCHEMA_VERSION` へ更新する |
+| `_migrate(conn, from_version, to_version)` | store ごとの後方互換マイグレーションフック |
+
+`user_version=0` の既存 DB は初期導入済みスキーマとして扱う。`PlayLogStore` は現行の後付け列追加と device_id 補完をこの migration パスで吸収し、完了後に `user_version=3` を記録する。`GameCatalogStore` と `SettingsStore` は `SCHEMA_VERSION=1` を記録する。
+
+---
+
+### settings_repository.py
+
+#### `SettingsConfigRepository`
+ランタイム設定の保存元は SQLite (`SettingsStore`) とし、`config/config.ini` は初回移行・明示 import/export 用として扱う境界を担当する。`ConfigLoader` はこの repository から `ConfigParser` を受け取り、必須項目検証と typed dataclass 化に集中する。
+
+---
+
+### log_config.py
+
+#### `LoggingConfigState` / `configure_logging()`
+アプリ起動時の root logger 初期化、ログファイル解決、RotatingFileHandler 設定を担当する。`src/app/main.py` には互換 wrapper の `configure_logging()` を残し、logging の mutable state は `infra/log_config.py` 側へ集約する。
+
+---
+
 ### gspread_service.py
 
 #### `GspreadService`
@@ -787,7 +875,7 @@ Google Spreadsheet操作を抽象化するサービスクラス。
 ### log_handler.py
 
 #### `LogHandler`
-プレイログの読み書きを担当する。ローカル SQLite を主保存先とし、Google スプレッドシートはバックアップと初回取り込み元として扱う。起動時にローカルDBの全レコードをメモリにキャッシュし、UI更新時のDB/API呼び出しを避ける。
+プレイログの読み書き窓口を担当する。ローカル SQLite を主保存先とし、Google スプレッドシートはバックアップと初回取り込み元として扱う。起動時にローカルDBの全レコードをメモリにキャッシュし、UI更新時のDB/API呼び出しを避ける。集計処理は `PlayLogAnalytics`、スプレッドシート同期・バックアップ処理は `PlayLogBackupMixin` に委譲する。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
@@ -801,6 +889,61 @@ Google Spreadsheet操作を抽象化するサービスクラス。
 | `update_record(record_id, values)` | 指定ログをローカルDBで更新し、バックアップ有効時はスプレッドシートの既存行を更新または追記する | `ReportDialog._start_log_edit()` |
 | `delete_record(record_id)` | 指定ログをローカルDBから削除し、バックアップ有効時はスプレッドシートの既存行を削除する。未反映の削除は次回同期で再試行する | `ReportDialog._start_log_delete()` |
 | `sync_with_spreadsheet()` | 手動同期用。スプレッドシート側のプレイログを1回取得し、取り込みと未バックアップ送信判定に使ってキャッシュを更新する。取得失敗時は送信せず次回再試行に残す。戻り値には取得件数、取込件数、取込スキップ件数、未送信件数、バックアップ件数、失敗件数、上書き/別ID採番件数、エラー原因を含める | `ReportDialog._sync_from_spreadsheet()` |
+
+---
+
+### play_log_analytics.py
+
+#### `PlayLogAnalytics`
+`LogHandler.records` 相当のキャッシュ済みレコードを受け取り、今日統計・期間レポート・推移グラフ用データを計算する。DB/APIへはアクセスせず、`core.reporting` の集計関数を呼び出す薄いサービスとして扱う。
+
+| メソッド | 説明 | 呼び出し元 |
+|----------|------|------------|
+| `get_today_stats()` | 今日のゲーム別プレイ時間と合計秒数をキャッシュから計算 | `LogHandler.get_today_stats()` |
+| `get_report_stats(start, end, title_filter)` | 期間・タイトル条件に応じたレポートサマリーを計算 | `LogHandler.get_report_stats()` |
+| `get_trend_stats(period, start, end, title_filter)` | 日別/月別などの推移データを計算 | `LogHandler.get_trend_stats()` |
+| `get_trend_stats_by_title(period, start, end, title_filter)` | タイトル別の推移系列を計算 | `LogHandler.get_trend_stats_by_title()` |
+
+---
+
+### play_log_backup.py
+
+#### `PlayLogBackupMixin`
+Google スプレッドシート接続、既存バックアップ行の取得、未バックアップ行の送信、編集・削除済みレコードの反映を担当する `LogHandler` 用 mixin。ローカルDBへの保存・キャッシュ更新は `LogHandler` 側に残し、外部バックアップに関する副作用をこの module に集約する。
+
+---
+
+### report_charts.py / report_graph_unit.py / report_log_operations.py / report_log_table.py / report_summary_table.py / report_sync_messages.py / report_tab_refresh.py / report_title_filter.py / report_trend_selection.py / report_date_ranges.py
+
+#### `ReportChartBuilder`
+レポート画面の棒グラフ、円グラフ、推移折れ線グラフを生成する。QtCharts の import 可否、空データ時の空チャート、タイトルごとの色決定、グラフ単位（分/時間）の換算を `ReportDialog` から分離する。`ReportDialog` 側には `_populate_chart()` / `_build_line_chart()` などの互換 wrapper を残す。
+
+#### `ReportGraphUnitController`
+グラフ単位（分/時間）のトグル生成、選択状態同期、単位変更時のチャート再描画と未表示タブ dirty 管理を担当する。`ReportDialog` 側には `_set_graph_unit()` / `_seconds_to_graph_value()` などの互換 wrapper を残す。
+
+#### `ReportLogOperationController`
+ログ編集・削除の非同期実行、完了 polling、ボタン無効化/復帰、成功/失敗メッセージを管理する。`ReportDialog` 側には `_start_log_edit()` / `_finish_log_delete()` などの互換 wrapper を残す。
+
+#### `ReportLogTableController`
+ログタブの生ログテーブル生成、選択行の検出、編集フォームへの反映を担当する。`ReportDialog` 側には `_populate_log_table()` / `_log_table_text()` などの互換 wrapper を残す。
+
+#### `ReportSummaryTableController`
+ゲーム別タブの集計ラベルと集計テーブルを生成する。`ReportDialog` 側には `_populate_table()` などの互換 wrapper を残す。
+
+#### `report_sync_messages.sync_result_message()`
+スプレッドシート同期結果の件数・失敗理由を1行ステータスメッセージに整形する。`ReportDialog._sync_result_message()` はこの関数へ委譲する。
+
+#### `ReportTabRefreshController`
+`ReportDialog` の表示中タブだけを更新する遅延ロード、dirty フラグ、タイトルフィルタ更新状態を管理する。`ReportDialog` は `_refresh_tab()` などの公開済み内部メソッドを維持しつつ、この controller へ委譲する。
+
+#### `ReportTitleFilterController`
+推移タブのタイトル別表示で使うタイトル選択テーブル、全選択/全解除ボタン、タイトル一覧用サマリーキャッシュを管理する。`ReportDialog` は `_selected_titles()` / `_sync_title_filter()` などの既存内部メソッドを維持しつつ、この controller へ委譲する。
+
+#### `ReportTrendSelectionController`
+推移グラフのドラッグ範囲から対象 index を計算し、選択範囲だけの集計テーブルとサマリーを更新する。選択解除時のチャート zoom reset も担当する。
+
+#### `report_date_ranges.date_range_for_period()`
+レポート期間プリセット（今週・今月・直近日数など）から開始日・終了日を計算する。ダイアログ本体から分離し、日付計算だけを単体で扱えるようにする。
 
 ---
 
@@ -1249,15 +1392,16 @@ game_time_tracker.bat
   - ローカルDBへ自動保存し、Google スプレッドシートへバックアップ
 
 ## 開発
-- テスト: `python -m unittest`（`tests/` 配下を検出）
+- テスト: `python -m pytest -q`（`tests/` 配下を検出）
   - `tests/test_stubs.py` - 共通テストスタブ（PySide6/gspread/pygetwindowのフェイク、FakeLogHandler）
-  - `tests/test_main.py` - MainWindow/GUI関連テスト
+  - `tests/test_main_*.py` - MainWindow/GUI関連テスト（起動、表示、スキャン、イベント、オーバーレイ、手入力など機能別に分割）
+  - `tests/helpers/main_test_imports.py` - MainWindow系テストの共通 import とスタブ設定
   - `tests/test_models.py` - models.pyのテスト
-  - `tests/test_services.py` - services.pyのテスト
+  - `tests/test_services.py` - domain.py / adapters.py のテスト
   - `tests/test_time_utils.py` - time_utils.pyのテスト
   - `tests/test_config.py` - config_loader.pyのテスト
   - `tests/test_log_handler.py` - log_handler.py/gspread_service.pyのテスト
   - `tests/test_window_state.py` - window_state.pyのテスト
   - `tests/test_gui.py` - DailyStatsTracker/format_hmsのテスト
-- ポーリング間隔・最小記録時間: `src/app/main.py` の `POLL_INTERVAL_SECONDS` と `src/core/services_domain.py` の `MIN_PLAY_MINUTES` で調整。
+- ポーリング間隔・最小記録時間: `src/app/main.py` の `POLL_INTERVAL_SECONDS` と `src/core/domain.py` の `MIN_PLAY_MINUTES` で調整。
 - 対応ブラウザ・除外ウィンドウ: `config/config.ini` の `[WINDOW_SCAN]` または `config_loader.DEFAULT_BROWSERS/DEFAULT_EXCLUDED_TITLES` で設定。

@@ -1,0 +1,157 @@
+"""Async log edit/delete controller for the report dialog."""
+
+from __future__ import annotations
+
+import logging
+from typing import Callable, List
+
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QMessageBox
+
+logger = logging.getLogger(__name__)
+
+
+class ReportLogOperationController:
+    """Run play-log edit/delete operations without blocking the dialog."""
+
+    def __init__(self, owner: object) -> None:
+        self.owner = owner
+
+    def start_log_edit(self, record_id: str, values: List[object]) -> None:
+        update_record = getattr(self.owner.log_handler, "update_record", None)
+        if not callable(update_record):
+            QMessageBox.warning(
+                self.owner,
+                "ログ編集エラー",
+                "このログハンドラは編集に対応していません",
+            )
+            return
+
+        self.start_log_operation(
+            busy_message="ログ編集を保存中...",
+            worker=lambda: update_record(record_id, values),
+            finish_callback=self.owner._finish_log_edit,
+        )
+
+    def start_log_delete(self, record_id: str) -> None:
+        delete_record = getattr(self.owner.log_handler, "delete_record", None)
+        if not callable(delete_record):
+            QMessageBox.warning(
+                self.owner,
+                "ログ削除エラー",
+                "このログハンドラは削除に対応していません",
+            )
+            return
+
+        self.start_log_operation(
+            busy_message="ログを削除中...",
+            worker=lambda: delete_record(record_id),
+            finish_callback=self.owner._finish_log_delete,
+        )
+
+    def start_log_operation(
+        self,
+        *,
+        busy_message: str,
+        worker: Callable[[], object],
+        finish_callback: Callable[[object], None],
+    ) -> None:
+        future = self.owner._log_edit_future
+        if future is not None and not future.done():
+            self.owner._set_debug_message("ログ操作中です。完了まで待ってください")
+            return
+
+        self.owner.log_edit_button.setEnabled(False)
+        self.owner.log_delete_button.setEnabled(False)
+        self.owner._set_debug_message(busy_message, process_events=True)
+        self.owner._log_edit_finish_callback = finish_callback
+        self.owner._log_edit_future = self.owner._log_edit_executor.submit(worker)
+        self.owner._log_edit_timer = QTimer(self.owner)
+        self.owner._log_edit_timer.setInterval(100)
+        self.owner._log_edit_timer.timeout.connect(self.owner._check_log_edit_result)
+        self.owner._log_edit_timer.start()
+
+    def check_log_edit_result(self) -> None:
+        future = self.owner._log_edit_future
+        if future is None or not future.done():
+            return
+
+        if self.owner._log_edit_timer is not None:
+            self.owner._log_edit_timer.stop()
+            self.owner._log_edit_timer.deleteLater()
+            self.owner._log_edit_timer = None
+        self.owner._log_edit_future = None
+        self.owner.log_edit_button.setEnabled(True)
+        self.owner.log_delete_button.setEnabled(True)
+
+        try:
+            result = future.result()
+        except Exception as exc:
+            self.owner._log_edit_finish_callback = None
+            logger.exception("Failed to complete play log operation")
+            QMessageBox.warning(self.owner, "ログ編集エラー", str(exc))
+            return
+
+        finish_callback = self.owner._log_edit_finish_callback
+        self.owner._log_edit_finish_callback = None
+        if finish_callback is not None:
+            finish_callback(result)
+
+    def finish_log_edit(self, result: object) -> None:
+        if not getattr(result, "local_updated", False):
+            QMessageBox.warning(
+                self.owner,
+                "ログ編集エラー",
+                str(getattr(result, "error_message", "") or "ローカルDBの更新に失敗しました"),
+            )
+            return
+
+        self.owner._mark_report_data_changed()
+        self.owner.refresh_logs()
+        self.owner._mark_tab_clean(self.owner._LOG_TAB)
+        if getattr(result, "spreadsheet_updated", False):
+            self.owner._set_debug_message("ログを編集し、スプシにも反映しました")
+            return
+
+        error_message = str(getattr(result, "error_message", "") or "")
+        if error_message:
+            self.owner._set_debug_message(
+                f"ログを編集しました。スプシ反映は失敗しました: {error_message}"
+            )
+        else:
+            self.owner._set_debug_message(
+                "ログを編集しました。スプシ設定がないためローカルのみ更新しました"
+            )
+
+    def finish_log_delete(self, result: object) -> None:
+        if not getattr(result, "local_deleted", False):
+            QMessageBox.warning(
+                self.owner,
+                "ログ削除エラー",
+                str(getattr(result, "error_message", "") or "ローカルDBの削除に失敗しました"),
+            )
+            return
+
+        self.owner._mark_report_data_changed()
+        self.owner.refresh_logs()
+        self.owner._mark_tab_clean(self.owner._LOG_TAB)
+        if getattr(result, "spreadsheet_deleted", False):
+            self.owner._set_debug_message("ログを削除し、スプシにも反映しました")
+            return
+
+        error_message = str(getattr(result, "error_message", "") or "")
+        if error_message:
+            self.owner._set_debug_message(
+                f"ログを削除しました。スプシ反映は失敗しました: {error_message}"
+            )
+        else:
+            self.owner._set_debug_message(
+                "ログを削除しました。スプシ設定がないためローカルのみ削除しました"
+            )
+
+    def close(self) -> None:
+        if self.owner._log_edit_timer is not None:
+            self.owner._log_edit_timer.stop()
+            self.owner._log_edit_timer = None
+        self.owner._log_edit_finish_callback = None
+        self.owner._log_edit_executor.shutdown(wait=False, cancel_futures=True)

@@ -1,24 +1,22 @@
 # pyright: reportAttributeAccessIssue=false, reportArgumentType=false,
 # reportCallIssue=false, reportOptionalMemberAccess=false
-"""services.py のユニットテスト."""
+"""domain.py / adapters.py のユニットテスト."""
 
 from tests.test_stubs import fake_gspread, FakeLogHandler
 
 import pygetwindow
 from src.core.text_utils import normalize_title
-from src.core.services import (
-    DailyStatsTracker,
-    GameInfoLoader,
-    GameStateTracker,
-    Messages,
-    ScanResult,
-    SessionRecorder,
-    WindowScanner,
-    MIN_PLAY_MINUTES,
-    SECONDS_PER_MINUTE,
-)
-from src.core import services
+from src.core.adapters import GameInfoLoader, Messages, SessionRecorder, WindowScanner
+from src.core import adapters as services
+from src.core import domain
 from src.core import models
+from src.core.domain import (
+    DailyStatsTracker,
+    GameStateTracker,
+    MIN_PLAY_MINUTES,
+    ScanResult,
+)
+from src.core.time_utils import SECONDS_PER_MINUTE
 from src.app import main
 import sys
 import unittest
@@ -119,14 +117,14 @@ class TestDailyStatsTracker(unittest.TestCase):
 
     def test_initial_state(self):
         """初期状態の確認."""
-        tracker = services.DailyStatsTracker()
+        tracker = domain.DailyStatsTracker()
         self.assertEqual(tracker.today_completed_seconds, 0.0)
         self.assertEqual(tracker.today_game_minutes_cache, {})
         self.assertEqual(tracker.last_today_games_content, "")
 
     def test_add_completed_seconds(self):
         """完了秒数の追加."""
-        tracker = services.DailyStatsTracker()
+        tracker = domain.DailyStatsTracker()
         tracker.add_completed_seconds(300)
         self.assertEqual(tracker.today_completed_seconds, 300)
         tracker.add_completed_seconds(150)
@@ -134,7 +132,7 @@ class TestDailyStatsTracker(unittest.TestCase):
 
     def test_update_game_minutes_cache(self):
         """ゲーム時間キャッシュの更新."""
-        tracker = services.DailyStatsTracker()
+        tracker = domain.DailyStatsTracker()
         cache = {"Game1": 30.0, "Game2": 60.0}
         tracker.update_game_minutes_cache(cache)
         self.assertEqual(tracker.today_game_minutes_cache, cache)
@@ -142,7 +140,7 @@ class TestDailyStatsTracker(unittest.TestCase):
     def test_check_day_change_same_day(self):
         """同日ではリセットされない."""
         current_date = datetime(2026, 1, 18).date()
-        tracker = services.DailyStatsTracker(get_current_date=lambda: current_date)
+        tracker = domain.DailyStatsTracker(get_current_date=lambda: current_date)
         tracker.add_completed_seconds(300)
         tracker.update_game_minutes_cache({"Game1": 30.0})
 
@@ -158,7 +156,7 @@ class TestDailyStatsTracker(unittest.TestCase):
         day2 = datetime(2026, 1, 19).date()
         current_date = [day1]  # mutableにして変更可能にする
 
-        tracker = services.DailyStatsTracker(get_current_date=lambda: current_date[0])
+        tracker = domain.DailyStatsTracker(get_current_date=lambda: current_date[0])
         tracker.add_completed_seconds(300)
         tracker.update_game_minutes_cache({"Game1": 30.0})
         tracker.last_today_games_content = "Game1: 30分"
@@ -178,7 +176,7 @@ class TestDailyStatsTracker(unittest.TestCase):
         day2 = datetime(2026, 1, 19).date()
         current_date = [day1]
 
-        tracker = services.DailyStatsTracker(get_current_date=lambda: current_date[0])
+        tracker = domain.DailyStatsTracker(get_current_date=lambda: current_date[0])
 
         # 日付変更
         current_date[0] = day2
@@ -462,7 +460,7 @@ class TestUpdateGameStates(unittest.TestCase):
         self.handler = FakeLogHandler()
         self.recorder = services.SessionRecorder(
             log_handler=self.handler, min_play_minutes=5)
-        self.daily_stats = services.DailyStatsTracker()
+        self.daily_stats = domain.DailyStatsTracker()
 
     def test_window_disappear_triggers_record(self):
         """ウィンドウ消失時にrecord()が呼ばれる."""
@@ -571,7 +569,7 @@ class TestUpdateGameStatesIntegration(unittest.TestCase):
         self.handler = FakeLogHandler()
         self.recorder = services.SessionRecorder(
             log_handler=self.handler, min_play_minutes=5)
-        self.daily_stats = services.DailyStatsTracker()
+        self.daily_stats = domain.DailyStatsTracker()
         self.browsers = ['Chrome', 'Firefox']
 
     def _run_update_game_states(self, games, window_titles, foreground_title):
@@ -910,7 +908,7 @@ class TestGameInfoLoaderRecordToEntry(unittest.TestCase):
             'is_browser_game': 'FALSE',
         }
 
-        with self.assertLogs('services', level='WARNING') as captured:
+        with self.assertLogs('src.core.adapters', level='WARNING') as captured:
             entry = services.GameInfoLoader._record_to_entry(record)
 
         self.assertEqual(entry.window_title, '   ')
@@ -1001,11 +999,8 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
 
     def test_initialization_with_dependencies(self):
         """依存関係を持って初期化できる."""
-        from src.core.services import (
-            DailyStatsTracker,
-            GameStateTracker,
-            SessionRecorder,
-        )
+        from src.core.adapters import SessionRecorder
+        from src.core.domain import DailyStatsTracker, GameStateTracker
 
         mock_recorder = MagicMock(spec=SessionRecorder)
         mock_daily_stats = MagicMock(spec=DailyStatsTracker)
@@ -1026,11 +1021,8 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
 
     def test_normalize_scan_inputs(self):
         """scan入力の正規化が1箇所で行われる."""
-        from src.core.services import (
-            DailyStatsTracker,
-            GameStateTracker,
-            SessionRecorder,
-        )
+        from src.core.adapters import SessionRecorder
+        from src.core.domain import DailyStatsTracker, GameStateTracker
 
         mock_recorder = MagicMock(spec=SessionRecorder)
         mock_daily_stats = MagicMock(spec=DailyStatsTracker)
@@ -1054,11 +1046,8 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
 
     def test_set_browsers_updates_normalized_cache(self):
         """set_browsers()で正規化キャッシュが同期更新される."""
-        from src.core.services import (
-            DailyStatsTracker,
-            GameStateTracker,
-            SessionRecorder,
-        )
+        from src.core.adapters import SessionRecorder
+        from src.core.domain import DailyStatsTracker, GameStateTracker
 
         mock_recorder = MagicMock(spec=SessionRecorder)
         mock_daily_stats = MagicMock(spec=DailyStatsTracker)
@@ -1077,11 +1066,8 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
 
     def test_set_browsers_skips_empty_normalized_values(self):
         """set_browsers()は正規化後に空になる値をキャッシュから除外する."""
-        from src.core.services import (
-            DailyStatsTracker,
-            GameStateTracker,
-            SessionRecorder,
-        )
+        from src.core.adapters import SessionRecorder
+        from src.core.domain import DailyStatsTracker, GameStateTracker
 
         mock_recorder = MagicMock(spec=SessionRecorder)
         mock_daily_stats = MagicMock(spec=DailyStatsTracker)
@@ -1099,11 +1085,8 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
 
     def test_browsers_property_returns_copy(self):
         """browsersプロパティの外部変更は内部状態に影響しない."""
-        from src.core.services import (
-            DailyStatsTracker,
-            GameStateTracker,
-            SessionRecorder,
-        )
+        from src.core.adapters import SessionRecorder
+        from src.core.domain import DailyStatsTracker, GameStateTracker
 
         mock_recorder = MagicMock(spec=SessionRecorder)
         mock_daily_stats = MagicMock(spec=DailyStatsTracker)
@@ -1122,7 +1105,7 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
 
     def test_scan_result_dataclass(self):
         """ScanResultデータクラスが正しく動作する."""
-        from src.core.services import ScanResult
+        from src.core.domain import ScanResult
 
         game1 = models.GameEntry(game_title="Test1", window_title="Test1")
         game2 = models.GameEntry(game_title="Test2", window_title="Test2")
@@ -1141,11 +1124,8 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
 
     def test_scan_with_no_games(self):
         """ゲームがない場合は空の結果を返す."""
-        from src.core.services import (
-            DailyStatsTracker,
-            GameStateTracker,
-            SessionRecorder,
-        )
+        from src.core.adapters import SessionRecorder
+        from src.core.domain import DailyStatsTracker, GameStateTracker
 
         mock_recorder = MagicMock(spec=SessionRecorder)
         mock_daily_stats = MagicMock(spec=DailyStatsTracker)

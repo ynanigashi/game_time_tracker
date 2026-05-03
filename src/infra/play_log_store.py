@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from dataclasses import dataclass
 import logging
 import os
 import platform
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from src.infra.runtime_paths import default_play_log_db_file
+from src.infra.sqlite_base_store import SQLiteBaseStore
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +25,10 @@ class PlayLogImportResult:
     skipped: int
 
 
-class PlayLogStore:
+class PlayLogStore(SQLiteBaseStore):
     """Persist play session logs locally in SQLite."""
 
+    SCHEMA_VERSION = 3
     _INDEX_KEYS = ("index", "record_index", "No", "no")
     _FRIENDS_KEYS = ("play_with_friends", "with_friends")
 
@@ -37,7 +38,7 @@ class PlayLogStore:
         *,
         device_id: Optional[str] = None,
     ) -> None:
-        self.db_path = db_path or default_play_log_db_file()
+        super().__init__(db_path or default_play_log_db_file())
         self.device_id = device_id or self._default_device_id()
 
     @staticmethod
@@ -48,24 +49,7 @@ class PlayLogStore:
             or "unknown-device"
         )
 
-    def _connect(self) -> sqlite3.Connection:
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        self._ensure_schema(conn)
-        return conn
-
-    @contextmanager
-    def _connection(self) -> Iterator[sqlite3.Connection]:
-        conn = self._connect()
-        try:
-            yield conn
-            conn.commit()
-        finally:
-            conn.close()
-
-    @staticmethod
-    def _ensure_schema(conn: sqlite3.Connection) -> None:
+    def _ensure_schema(self, conn: sqlite3.Connection) -> None:
         existing = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='play_records'"
         ).fetchone()
@@ -75,7 +59,7 @@ class PlayLogStore:
                 for row in conn.execute("PRAGMA table_info(play_records)").fetchall()
             }
             if "record_id" not in columns:
-                PlayLogStore._migrate_legacy_schema(conn)
+                self._migrate_legacy_schema(conn)
                 return
             if "sync_action" not in columns:
                 conn.execute(
@@ -116,9 +100,8 @@ class PlayLogStore:
             """
         )
 
-    @staticmethod
-    def _migrate_legacy_schema(conn: sqlite3.Connection) -> None:
-        device_id = PlayLogStore._default_device_id()
+    def _migrate_legacy_schema(self, conn: sqlite3.Connection) -> None:
+        device_id = self.device_id
         conn.execute(
             """
             CREATE TABLE play_records_new (

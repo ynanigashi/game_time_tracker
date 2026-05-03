@@ -1,42 +1,45 @@
 """Game Time Tracker - PySide6 GUI."""
 
-import atexit
 import logging
 import sys
-from dataclasses import dataclass
 from datetime import datetime
-from logging.handlers import RotatingFileHandler
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
 
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtGui import QCloseEvent, QIcon, QMouseEvent, QResizeEvent
+from PySide6.QtGui import QCloseEvent, QMouseEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QApplication,
     QLabel,
     QMenu,
     QMessageBox,
     QPushButton,
-    QStyle,
-    QSystemTrayIcon,
     QWidget,
 )
 
-from src.app import main_components as components
-from src.app.main_components import (
+from src.app.controllers import (
+    BootstrapDependencies,
     MainWindowBootstrapError,
     MainWindowBootstrapResult,
     MainWindowBootstrapper,
+    MainWindowContextMenuController,
+    MainWindowDialogController,
     MainWindowDisplayController,
     MainWindowLoopController,
     MainWindowOverlayController,
+    MainWindowOvertimeAlertController,
+    MainWindowScanController,
     MainWindowStateController,
+    MainWindowTitleController,
+    MainWindowTrayController,
     MainWindowUiController,
+    OvertimeAlertTracker,
     TodayTimeOverlayWindow,
 )
+from src.app.cover_detector import Win32CoverDetector
+from src.app.session_state import GameSessionState
 from src.app.win32_helpers import (
     get_foreground_hwnd,
     global_rect_of_widget,
-    is_own_process_window,
     Point,
     Rect,
     rect_contains_point,
@@ -49,21 +52,15 @@ from src.app.win32_helpers import (
     window_rect,
 )
 from src.core.models import GameEntry
-from src.core.services import (
-    DailyStatsTracker,
+from src.core.adapters import (
     GameInfoLoader,
-    GameStateTracker,
     Messages,
     MIN_PLAY_MINUTES,
-    ScanResult,
     SessionRecorder,
     WindowScanner,
 )
-from src.core.time_utils import (
-    calc_today_elapsed_seconds,
-    format_hms,
-    SECONDS_PER_MINUTE,
-)
+from src.core.domain import DailyStatsTracker, GameStateTracker, ScanResult
+from src.core.time_utils import SECONDS_PER_MINUTE
 from src.core.window_state import (
     DEFAULT_OVERTIME_ALERT_ENABLED,
     DISPLAY_MODES,
@@ -76,11 +73,14 @@ from src.infra.config_loader import (
     DEFAULT_EXCLUDED_TITLES,
 )
 from src.infra.log_handler import LogHandler
+from src.infra.log_config import (
+    DEFAULT_LOGGING_STATE,
+    LOG_BACKUP_COUNT,
+    LOG_MAX_BYTES,
+    configure_logging as configure_app_logging,
+)
 from src.infra.runtime_paths import (
-    default_log_file,
     default_window_state_file,
-    resolve_log_file,
-    runtime_path,
     resolve_window_state_file,
 )
 from src.ui.gui_layout import build_main_layout
@@ -91,43 +91,16 @@ from src.ui.settings_dialog import SettingsDialog
 
 logger = logging.getLogger(__name__)
 
-_LOGGING_CONFIGURED = False
-LOG_FILE_PATH = default_log_file()
-LOG_DIR = LOG_FILE_PATH.parent
-LOG_MAX_BYTES = 1 * 1024 * 1024
-LOG_BACKUP_COUNT = 3
+LOG_FILE_PATH = DEFAULT_LOGGING_STATE.log_file_path
+LOG_DIR = DEFAULT_LOGGING_STATE.log_dir
 
 
 def configure_logging() -> None:
     """アプリ起動時にロギングを初期化する（import時は実行しない）。"""
-    global _LOGGING_CONFIGURED, LOG_DIR, LOG_FILE_PATH
-    if _LOGGING_CONFIGURED:
-        return
-
-    root_logger = logging.getLogger()
-    if root_logger.handlers:
-        _LOGGING_CONFIGURED = True
-        return
-
-    LOG_FILE_PATH = resolve_log_file()
-    LOG_DIR = LOG_FILE_PATH.parent
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    file_handler = RotatingFileHandler(
-        LOG_FILE_PATH,
-        maxBytes=LOG_MAX_BYTES,
-        backupCount=LOG_BACKUP_COUNT,
-        encoding='utf-8',
-    )
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(),
-            file_handler,
-        ],
-    )
-    atexit.register(logging.shutdown)
-    _LOGGING_CONFIGURED = True
+    global LOG_DIR, LOG_FILE_PATH
+    configure_app_logging(DEFAULT_LOGGING_STATE)
+    LOG_FILE_PATH = DEFAULT_LOGGING_STATE.log_file_path
+    LOG_DIR = DEFAULT_LOGGING_STATE.log_dir
 
 
 # =============================================================================
@@ -152,49 +125,6 @@ OVERLAY_SAMPLE_RATIOS: Tuple[Tuple[float, float], ...] = (
 OVERLAY_COVERED_POINTS_THRESHOLD = 2
 OVERTIME_ALERT_THRESHOLDS_MINUTES: Tuple[int, ...] = (45, 50, 55, 58, 60)
 TDependency = TypeVar("TDependency")
-
-
-@dataclass
-class OvertimeAlertTracker:
-    """時間超過防止アラートの進捗状態を管理する。"""
-
-    thresholds_minutes: Tuple[int, ...]
-    alerted_threshold_minutes: set[int]
-    last_checked_seconds: float = 0.0
-    initialized: bool = False
-
-    def prime(self, total_seconds: float) -> None:
-        """現在値を基準に進捗を初期化し、遡及通知を抑止する。"""
-        self.last_checked_seconds = max(0.0, float(total_seconds))
-        self.alerted_threshold_minutes = {
-            minute
-            for minute in self.thresholds_minutes
-            if self.last_checked_seconds >= minute * SECONDS_PER_MINUTE
-        }
-        self.initialized = True
-
-    def update(self, total_seconds: float, *, alerts_enabled: bool) -> List[int]:
-        """閾値跨ぎを更新し、今回通知すべき閾値（分）を返す。"""
-        if not self.initialized:
-            self.prime(total_seconds)
-            return []
-
-        previous_seconds = self.last_checked_seconds
-        current_seconds = max(0.0, float(total_seconds))
-        self.last_checked_seconds = current_seconds
-
-        if not alerts_enabled:
-            return []
-
-        triggered: List[int] = []
-        for minute in self.thresholds_minutes:
-            if minute in self.alerted_threshold_minutes:
-                continue
-            threshold_seconds = minute * SECONDS_PER_MINUTE
-            if previous_seconds < threshold_seconds <= current_seconds:
-                self.alerted_threshold_minutes.add(minute)
-                triggered.append(minute)
-        return triggered
 
 
 class MainWindow(QWidget):
@@ -230,16 +160,13 @@ class MainWindow(QWidget):
 
     def _initialize_runtime_state(self) -> None:
         """実行時状態の初期値を設定する."""
-        self.games: List[GameEntry] = []
+        self.session_state = GameSessionState()
         self.browsers: Sequence[str] = DEFAULT_BROWSERS
         self.scanner: WindowScanner
         self.recorder: SessionRecorder
         self.daily_stats = DailyStatsTracker()
-        self.active_games_cache: List[GameEntry] = []
-        self.inactive_games_cache: List[GameEntry] = []
-        self.latest_window_titles: List[str] = []
         self.overlay_window: Optional[TodayTimeOverlayWindow] = None
-        self.tray_icon: Optional[QSystemTrayIcon] = None
+        self.tray_icon: Optional[object] = None
         self.tray_menu: Optional[QMenu] = None
         self._is_quitting = False
         self._force_startup_window_visible = False
@@ -266,319 +193,109 @@ class MainWindow(QWidget):
         self._window_title_copy_connected = False
         self._window_title_context_menu_connected = False
 
+    def _ensure_session_state(self) -> GameSessionState:
+        state = getattr(self, "session_state", None)
+        if state is None:
+            state = GameSessionState()
+            self.session_state = state
+        return state
+
+    @property
+    def games(self) -> List[GameEntry]:
+        return self._ensure_session_state().games
+
+    @games.setter
+    def games(self, value: Sequence[GameEntry]) -> None:
+        self._ensure_session_state().games = list(value)
+
+    @property
+    def active_games_cache(self) -> List[GameEntry]:
+        return self._ensure_session_state().active_games_cache
+
+    @active_games_cache.setter
+    def active_games_cache(self, value: Sequence[GameEntry]) -> None:
+        self._ensure_session_state().active_games_cache = list(value)
+
+    @property
+    def inactive_games_cache(self) -> List[GameEntry]:
+        return self._ensure_session_state().inactive_games_cache
+
+    @inactive_games_cache.setter
+    def inactive_games_cache(self, value: Sequence[GameEntry]) -> None:
+        self._ensure_session_state().inactive_games_cache = list(value)
+
+    @property
+    def latest_window_titles(self) -> List[str]:
+        return self._ensure_session_state().latest_window_titles
+
+    @latest_window_titles.setter
+    def latest_window_titles(self, value: Sequence[str]) -> None:
+        self._ensure_session_state().latest_window_titles = list(value)
+
     def _initialize_tray_icon(self) -> None:
         """Create the tray icon and context menu used as the app's home."""
-        if not QSystemTrayIcon.isSystemTrayAvailable():
-            logger.warning("system tray is not available")
-            self._force_startup_window_visible = True
-            return
-
-        tray_icon = QSystemTrayIcon(self._create_tray_icon(), self)
-        tray_icon.setToolTip(BASE_TITLE)
-        tray_icon.setContextMenu(self._build_tray_menu())
-        tray_icon.show()
-        self.tray_icon = tray_icon
-
-    def _create_tray_icon(self) -> QIcon:
-        icon_path = runtime_path("assets", "tray_icon.ico")
-        if icon_path.exists():
-            return QIcon(str(icon_path))
-
-        try:
-            style = QApplication.style()
-            standard_pixmap = getattr(
-                getattr(QStyle, "StandardPixmap", object),
-                "SP_ComputerIcon",
-                None,
-            )
-            if standard_pixmap is not None:
-                return style.standardIcon(standard_pixmap)
-        except Exception:
-            logger.debug("failed to create standard tray icon", exc_info=True)
-        return QIcon()
+        self._get_tray_controller().initialize_tray_icon()
 
     def _build_tray_menu(self) -> QMenu:
-        menu = QMenu(self)
-        show_action = menu.addAction("\u30a6\u30a3\u30f3\u30c9\u30a6\u3092\u8868\u793a")
-        hide_action = menu.addAction("\u30a6\u30a3\u30f3\u30c9\u30a6\u3092\u975e\u8868\u793a")
-        overlay_action = menu.addAction("\u30aa\u30fc\u30d0\u30fc\u30ec\u30a4\u8868\u793a")
-        overlay_action.setCheckable(True)
-        overlay_action.setChecked(bool(getattr(self, "tray_overlay_enabled", False)))
-
-        startup_menu = menu.addMenu("\u8d77\u52d5\u6642")
-        startup_show_action = startup_menu.addAction("\u30a6\u30a3\u30f3\u30c9\u30a6\u3092\u8868\u793a")
-        startup_hide_action = startup_menu.addAction("\u30a6\u30a3\u30f3\u30c9\u30a6\u3092\u975e\u8868\u793a")
-        for action in (startup_show_action, startup_hide_action):
-            action.setCheckable(True)
-        startup_show_action.setChecked(bool(getattr(self, "startup_window_visible", False)))
-        startup_hide_action.setChecked(not bool(getattr(self, "startup_window_visible", False)))
-
-        manual_record_action = menu.addAction("\u624b\u5165\u529b\u3067\u8a18\u9332")
-        report_action = menu.addAction("\u30ec\u30dd\u30fc\u30c8")
-        game_catalog_action = menu.addAction("\u30b2\u30fc\u30e0\u7ba1\u7406")
-        settings_action = menu.addAction("\u8a2d\u5b9a")
-        exit_action = menu.addAction("\u7d42\u4e86")
-
-        show_action.triggered.connect(lambda _checked=False: self._show_main_window_from_tray())
-        hide_action.triggered.connect(lambda _checked=False: self._hide_main_window_to_tray())
-        overlay_action.toggled.connect(self._set_tray_overlay_enabled)
-        startup_show_action.triggered.connect(lambda _checked=False: self._set_startup_window_visible(True))
-        startup_hide_action.triggered.connect(lambda _checked=False: self._set_startup_window_visible(False))
-        manual_record_action.triggered.connect(lambda _checked=False: self._open_manual_record_dialog())
-        report_action.triggered.connect(lambda _checked=False: self._open_report_dialog())
-        game_catalog_action.triggered.connect(lambda _checked=False: self._open_game_catalog_dialog())
-        settings_action.triggered.connect(lambda _checked=False: self._open_settings_dialog())
-        exit_action.triggered.connect(lambda _checked=False: self._quit_application())
-
-        self._tray_show_action = show_action
-        self._tray_hide_action = hide_action
-        self._tray_startup_show_action = startup_show_action
-        self._tray_startup_hide_action = startup_hide_action
-        self._tray_overlay_action = overlay_action
-        self.tray_menu = menu
-        self._sync_tray_window_actions()
-
-        about_to_show = getattr(menu, "aboutToShow", None)
-        if about_to_show is not None:
-            try:
-                about_to_show.connect(self._sync_tray_window_actions)
-            except Exception:
-                logger.debug("failed to connect tray menu refresh", exc_info=True)
-        return menu
+        return self._get_tray_controller().build_tray_menu()
 
     def _show_main_window_from_tray(self) -> None:
-        self.show()
-        self._process_pending_ui_events()
-        self._align_today_display_to_overlay_position()
-        self._process_pending_ui_events()
-        self._align_today_display_to_overlay_position()
-        self.raise_()
-        self.activateWindow()
-        self._sync_tray_window_actions()
-        self._sync_overlay()
+        self._get_tray_controller().show_main_window_from_tray()
 
     @staticmethod
     def _process_pending_ui_events() -> None:
-        try:
-            QApplication.processEvents()
-        except Exception:
-            logger.debug("failed to process pending UI events", exc_info=True)
+        MainWindowTrayController.process_pending_ui_events()
 
     def _align_today_display_to_overlay_position(self) -> None:
-        overlay_position = getattr(self, "overlay_position", None)
-        if overlay_position is None:
-            return
-        target = self._get_today_time_display()
-        if target is None:
-            return
-        try:
-            top_left = target.mapToGlobal(target.rect().topLeft())
-            geometry = self.geometry()
-            self.move(
-                int(geometry.x()) + int(overlay_position[0]) - int(top_left.x()),
-                int(geometry.y()) + int(overlay_position[1]) - int(top_left.y()),
-            )
-        except Exception:
-            logger.debug("failed to align main window to overlay position", exc_info=True)
+        self._get_tray_controller().align_today_display_to_overlay_position()
 
     def _hide_main_window_to_tray(self) -> None:
-        self._save_window_state()
-        self.hide()
-        self._sync_tray_window_actions()
-        self._sync_overlay()
+        self._get_tray_controller().hide_main_window_to_tray()
 
     def _sync_tray_window_actions(self) -> None:
-        is_window_visible = bool(getattr(self, "isVisible", lambda: False)())
-        show_action = getattr(self, "_tray_show_action", None)
-        hide_action = getattr(self, "_tray_hide_action", None)
-        if show_action is not None:
-            set_visible = getattr(show_action, "setVisible", None)
-            if callable(set_visible):
-                set_visible(not is_window_visible)
-        if hide_action is not None:
-            set_visible = getattr(hide_action, "setVisible", None)
-            if callable(set_visible):
-                set_visible(is_window_visible)
+        self._get_tray_controller().sync_tray_window_actions()
 
     def _set_startup_window_visible(self, visible: bool) -> None:
-        self.startup_window_visible = bool(visible)
-        show_action = getattr(self, "_tray_startup_show_action", None)
-        hide_action = getattr(self, "_tray_startup_hide_action", None)
-        if show_action is not None:
-            show_action.setChecked(self.startup_window_visible)
-        if hide_action is not None:
-            hide_action.setChecked(not self.startup_window_visible)
-        self._save_window_state()
+        self._get_tray_controller().set_startup_window_visible(visible)
 
     def _set_tray_overlay_enabled(self, enabled: bool) -> None:
-        self.tray_overlay_enabled = bool(enabled)
-        self._save_window_state()
-        self._sync_overlay()
+        self._get_tray_controller().set_tray_overlay_enabled(enabled)
 
     def _quit_application(self) -> None:
-        self._is_quitting = True
-        self._record_playing_games_before_close()
-        self._save_window_state()
-        self._close_overlay()
-        tray_icon = getattr(self, "tray_icon", None)
-        if tray_icon is not None:
-            tray_icon.hide()
-        app = QApplication.instance()
-        if app is not None:
-            app.quit()
+        self._get_tray_controller().quit_application()
 
     def should_show_window_on_startup(self) -> bool:
-        return bool(
-            getattr(self, "_force_startup_window_visible", False)
-            or getattr(self, "startup_window_visible", False)
-        )
+        return self._get_tray_controller().should_show_window_on_startup()
 
     def _get_window_list_widget(self) -> Optional[QWidget]:
-        """ウィンドウタイトル一覧ウィジェットを取得する。"""
-        return getattr(self.w, "window_list", None)
+        """Return the current window-title list widget."""
+        return self._get_window_title_controller().get_window_list_widget()
 
     def _initialize_window_title_copy(self) -> None:
-        """現在のウィンドウタイトル一覧のクリックコピーを初期化する。"""
-        window_list = self._get_window_list_widget()
-        if window_list is None:
-            return
-
-        if not getattr(self, "_window_title_copy_connected", False):
-            item_clicked_signal = getattr(window_list, "itemClicked", None)
-            if item_clicked_signal is not None:
-                try:
-                    item_clicked_signal.connect(self._on_window_title_item_clicked)
-                    self._window_title_copy_connected = True
-                except Exception:
-                    logger.debug(
-                        "ウィンドウタイトルクリックシグナルの接続に失敗",
-                        exc_info=True,
-                    )
-
-        if not getattr(self, "_window_title_context_menu_connected", False):
-            self._initialize_window_title_context_menu(window_list)
-
-        if (
-            getattr(self, "_window_title_copy_connected", False)
-            or getattr(self, "_window_title_context_menu_connected", False)
-        ):
-            set_tooltip = getattr(window_list, "setToolTip", None)
-            if callable(set_tooltip):
-                set_tooltip("クリックでコピー。右クリックでゲーム管理に追加")
+        """Initialize click-copy and context-menu handling for window titles."""
+        self._get_window_title_controller().initialize_window_title_copy()
 
     def _initialize_window_title_context_menu(self, window_list: QWidget) -> None:
-        signal = getattr(window_list, "customContextMenuRequested", None)
-        if signal is None:
-            return
-
-        context_menu_policy = getattr(
-            getattr(Qt, "ContextMenuPolicy", object),
-            "CustomContextMenu",
-            None,
-        )
-        if context_menu_policy is None:
-            context_menu_policy = getattr(Qt, "CustomContextMenu", None)
-
-        set_policy = getattr(window_list, "setContextMenuPolicy", None)
-        if callable(set_policy) and context_menu_policy is not None:
-            try:
-                set_policy(context_menu_policy)
-            except Exception:
-                logger.debug("ウィンドウタイトル右クリック設定に失敗", exc_info=True)
-
-        try:
-            signal.connect(self._show_window_title_context_menu)
-        except Exception:
-            logger.debug("ウィンドウタイトル右クリックシグナルの接続に失敗", exc_info=True)
-            return
-        self._window_title_context_menu_connected = True
+        self._get_window_title_controller().initialize_window_title_context_menu(window_list)
 
     def _on_window_title_item_clicked(self, item: object) -> None:
-        """現在のウィンドウタイトル一覧の行クリック時に文字列をコピーする。"""
-        if item is None:
-            return
-
-        text_getter = getattr(item, "text", None)
-        if not callable(text_getter):
-            return
-
-        try:
-            text = str(text_getter())
-        except Exception:
-            logger.debug("ウィンドウタイトルテキストの取得に失敗", exc_info=True)
-            return
-
-        self._copy_text_to_clipboard(text)
+        """Copy a clicked window title to the clipboard."""
+        self._get_window_title_controller().on_window_title_item_clicked(item)
 
     def _show_window_title_context_menu(self, position: object) -> None:
-        window_list = self._get_window_list_widget()
-        if window_list is None:
-            return
-
-        item = self._window_title_item_at(window_list, position)
-        title = self._text_from_window_title_item(item)
-        if not title:
-            return
-
-        menu = QMenu(window_list)
-        add_action = menu.addAction("ゲーム一覧に追加")
-
-        map_to_global = getattr(window_list, "mapToGlobal", None)
-        global_position = map_to_global(position) if callable(map_to_global) else position
-        selected_action = menu.exec(global_position)
-        if selected_action is add_action:
-            self._open_game_catalog_dialog(initial_window_title=title)
+        self._get_window_title_controller().show_window_title_context_menu(position)
 
     @staticmethod
     def _window_title_item_at(window_list: QWidget, position: object) -> object:
-        item_at = getattr(window_list, "itemAt", None)
-        if callable(item_at):
-            return item_at(position)
-        current_item = getattr(window_list, "currentItem", None)
-        if callable(current_item):
-            return current_item()
-        return None
+        return MainWindowTitleController.window_title_item_at(window_list, position)
 
     @staticmethod
     def _text_from_window_title_item(item: object) -> str:
-        if item is None:
-            return ""
-        text_getter = getattr(item, "text", None)
-        if not callable(text_getter):
-            return ""
-        try:
-            return str(text_getter()).strip()
-        except Exception:
-            logger.debug("ウィンドウタイトルテキストの取得に失敗", exc_info=True)
-            return ""
+        return MainWindowTitleController.text_from_window_title_item(item)
 
     def _copy_text_to_clipboard(self, text: str) -> None:
-        """指定テキストをクリップボードへコピーする。"""
-        if not text or not text.strip():
-            return
-
-        clipboard_getter = getattr(QApplication, "clipboard", None)
-        if not callable(clipboard_getter):
-            return
-
-        try:
-            clipboard = clipboard_getter()
-        except Exception:
-            logger.debug("クリップボードの取得に失敗", exc_info=True)
-            return
-        if clipboard is None:
-            return
-
-        set_text = getattr(clipboard, "setText", None)
-        if not callable(set_text):
-            return
-
-        try:
-            set_text(text)
-        except Exception:
-            logger.debug("クリップボードへのコピーに失敗", exc_info=True)
-            return
-        self._set_status("ウィンドウタイトルをコピーしました")
+        """Copy text to the clipboard."""
+        self._get_window_title_controller().copy_text_to_clipboard(text)
 
     def _warmup_dependencies(self) -> None:
         """起動直後に使う依存を事前生成する."""
@@ -671,12 +388,14 @@ class MainWindow(QWidget):
                 min_play_minutes=MIN_PLAY_MINUTES,
                 inactive_timeout_minutes=INACTIVE_TIMEOUT_MINUTES,
                 daily_stats=daily_stats,
-                config_loader_cls=ConfigLoader,
-                game_info_loader_cls=GameInfoLoader,
-                window_scanner_cls=WindowScanner,
-                log_handler_cls=LogHandler,
-                session_recorder_cls=SessionRecorder,
-                game_state_tracker_cls=GameStateTracker,
+                dependencies=BootstrapDependencies(
+                    config_loader_cls=ConfigLoader,
+                    game_info_loader_cls=GameInfoLoader,
+                    window_scanner_cls=WindowScanner,
+                    log_handler_cls=LogHandler,
+                    session_recorder_cls=SessionRecorder,
+                    game_state_tracker_cls=GameStateTracker,
+                ),
             ),
             validator=lambda bootstrapper: bootstrapper.daily_stats is daily_stats,
         )
@@ -732,6 +451,75 @@ class MainWindow(QWidget):
             validator=lambda controller: controller.owner is self,
         )
 
+    def _get_tray_controller(self) -> MainWindowTrayController:
+        """Return the task-tray controller."""
+        return self._resolve_dependency(
+            "_tray_controller",
+            factory=lambda: MainWindowTrayController(self, base_title=BASE_TITLE),
+            validator=lambda controller: controller.owner is self,
+        )
+
+    def _get_dialog_controller(self) -> MainWindowDialogController:
+        """Return the dialog orchestration controller."""
+        return self._resolve_dependency(
+            "_dialog_controller",
+            factory=lambda: MainWindowDialogController(
+                self,
+                report_dialog_cls=ReportDialog,
+                manual_record_dialog_cls=ManualRecordDialog,
+                game_catalog_dialog_cls=GameCatalogDialog,
+                settings_dialog_cls=SettingsDialog,
+            ),
+            validator=lambda controller: controller.owner is self,
+        )
+
+    def _get_context_menu_controller(self) -> MainWindowContextMenuController:
+        """Return the right-click context-menu controller."""
+        return self._resolve_dependency(
+            "_context_menu_controller",
+            factory=lambda: MainWindowContextMenuController(
+                self,
+                display_modes=DISPLAY_MODES,
+            ),
+            validator=lambda controller: controller.owner is self,
+        )
+
+    def _get_window_title_controller(self) -> MainWindowTitleController:
+        """Return the current-window-title list controller."""
+        return self._resolve_dependency(
+            "_window_title_controller",
+            factory=lambda: MainWindowTitleController(self, qmenu_cls=QMenu),
+            validator=lambda controller: controller.owner is self,
+        )
+
+    def _get_cover_detector(self) -> Win32CoverDetector:
+        """Return the today-time display cover detector."""
+        return self._resolve_dependency(
+            "_cover_detector",
+            factory=lambda: Win32CoverDetector(
+                self,
+                sample_ratios=OVERLAY_SAMPLE_RATIOS,
+                covered_points_threshold=OVERLAY_COVERED_POINTS_THRESHOLD,
+            ),
+            validator=lambda detector: detector.owner is self,
+        )
+
+    def _get_scan_controller(self) -> MainWindowScanController:
+        """Return the game scan controller."""
+        return self._resolve_dependency(
+            "_scan_controller",
+            factory=lambda: MainWindowScanController(self),
+            validator=lambda controller: controller.owner is self,
+        )
+
+    def _get_overtime_alert_controller(self) -> MainWindowOvertimeAlertController:
+        """Return the overtime-alert controller."""
+        return self._resolve_dependency(
+            "_overtime_alert_controller",
+            factory=lambda: MainWindowOvertimeAlertController(self),
+            validator=lambda controller: controller.owner is self,
+        )
+
     def _init_components(self) -> None:
         """設定を読み込みコンポーネントを初期化."""
         try:
@@ -777,33 +565,20 @@ class MainWindow(QWidget):
             self,
             window_titles: List[str],
             foreground_title: Optional[str]) -> ScanResult:
-        """GameStateTracker にゲーム状態スキャンを委譲."""
-        return self.state_tracker.scan(
-            games=self.games,
-            window_titles=window_titles,
-            foreground_title=foreground_title,
-            load_today_game_minutes_callback=self._load_today_game_minutes,
-        )
+        """Return game scan result for the current titles."""
+        return self._get_scan_controller().scan_games(window_titles, foreground_title)
 
     def _apply_scan_result(self, window_titles: List[str], result: ScanResult) -> None:
-        """スキャン結果をキャッシュと UI に反映."""
-        self.latest_window_titles = window_titles
-        self.active_games_cache = result.active_games
-        self.inactive_games_cache = result.inactive_games
-        self._update_active_list(result.active_games, result.inactive_games)
-        self._update_window_list(window_titles)
-        self._update_scan_status(result.active_games, result.inactive_games)
+        """Apply scan result to caches and UI."""
+        self._get_scan_controller().apply_scan_result(window_titles, result)
 
     def _update_scan_status(
         self,
         active_games: Sequence[GameEntry],
         inactive_games: Sequence[GameEntry],
     ) -> None:
-        """スキャン結果に応じてステータスメッセージを更新."""
-        if active_games or inactive_games:
-            self._set_status('プレイ時間計測中')
-        else:
-            self._set_status(Messages.NO_GAME_PLAYING)
+        """Update the status message for the latest scan result."""
+        self._get_scan_controller().update_scan_status(active_games, inactive_games)
 
     def _update_active_list(
             self,
@@ -823,10 +598,7 @@ class MainWindow(QWidget):
         )
 
     def _has_playing_games(self) -> bool:
-        return any(
-            bool(getattr(game, "is_playing", False))
-            for game in getattr(self, "games", [])
-        )
+        return self._get_scan_controller().has_playing_games()
 
     def _update_session_times(
             self,
@@ -863,13 +635,8 @@ class MainWindow(QWidget):
         self._get_ui_controller().update_window_list(window_titles)
 
     def _load_today_game_minutes(self) -> Dict[str, float]:
-        """キャッシュから今日プレイしたゲームごとの分数を集計."""
-        try:
-            game_minutes, _ = self.recorder.log_handler.get_today_stats()
-            return game_minutes
-        except Exception as e:
-            logger.error('今日のゲーム時間の集計中にエラーが発生しました: %s', e)
-            return {}
+        """Load today's completed minutes by game from the log handler."""
+        return self._get_scan_controller().load_today_game_minutes()
 
     def _update_today_games_list(self, now: datetime) -> None:
         """今日プレイしたゲームの一覧と時間を更新."""
@@ -880,13 +647,8 @@ class MainWindow(QWidget):
         )
 
     def _load_today_completed_seconds(self) -> float:
-        """起動時に今日分の完了プレイ時間をロード（キャッシュ使用）."""
-        try:
-            _, completed_seconds = self.recorder.log_handler.get_today_stats()
-            return completed_seconds
-        except Exception as e:
-            logger.error('今日の完了プレイ時間のロード中にエラーが発生しました: %s', e)
-            return 0.0
+        """Load today's completed play seconds from the log handler."""
+        return self._get_scan_controller().load_today_completed_seconds()
 
     def _save_window_state(self) -> None:
         """ウィンドウ位置・サイズ・表示モードを保存."""
@@ -912,20 +674,16 @@ class MainWindow(QWidget):
         self._get_overlay_controller().initialize_overlay()
 
     def _is_overtime_alert_enabled(self) -> bool:
-        """時間超過防止アラートの有効/無効を返す。"""
-        return bool(
-            getattr(
-                self,
-                "overtime_alert_enabled",
-                DEFAULT_OVERTIME_ALERT_ENABLED))
+        """Return whether overtime alerts are enabled."""
+        return self._get_overtime_alert_controller().is_enabled()
 
     def _set_overtime_alert_enabled(self, enabled: bool) -> None:
-        """時間超過防止アラートの有効/無効を設定する。"""
-        self.overtime_alert_enabled = bool(enabled)
+        """Set whether overtime alerts are enabled."""
+        self._get_overtime_alert_controller().set_enabled(enabled)
 
     def _get_overtime_alert_tracker(self) -> OvertimeAlertTracker:
-        """時間超過防止アラート進捗トラッカーを返す。"""
-        return self._overtime_alert_tracker
+        """Return the overtime alert progress tracker."""
+        return self._get_overtime_alert_controller().get_tracker()
 
     def _get_overtime_alert_toggle(self) -> Optional[QPushButton]:
         """時間超過防止アラートのトグルを取得する。"""
@@ -940,202 +698,77 @@ class MainWindow(QWidget):
         return getattr(self.w, "manual_record_button", None)
 
     def _initialize_overtime_alert_toggle(self) -> None:
-        """時間超過防止アラートトグルを初期化する。"""
-        toggle = self._get_overtime_alert_toggle()
-        if toggle is None:
-            return
-
-        toggle.blockSignals(True)
-        toggle.setChecked(self._is_overtime_alert_enabled())
-        toggle.blockSignals(False)
-
-        if self._overtime_alert_toggle_connected:
-            try:
-                toggle.toggled.disconnect(self._on_overtime_alert_toggled)
-            except (TypeError, RuntimeError):
-                pass
-        toggle.toggled.connect(self._on_overtime_alert_toggled)
-        self._overtime_alert_toggle_connected = True
+        """Initialize the overtime-alert toggle."""
+        self._get_overtime_alert_controller().initialize_toggle()
 
     def _initialize_report_button(self) -> None:
         """Connect the report button to the report dialog."""
-        button = self._get_report_button()
-        if button is None:
-            return
-
-        if getattr(self, "_report_button_connected", False):
-            try:
-                button.clicked.disconnect(self._open_report_dialog)
-            except (TypeError, RuntimeError):
-                pass
-        button.clicked.connect(self._open_report_dialog)
-        self._report_button_connected = True
+        self._get_dialog_controller().initialize_report_button()
 
     def _initialize_manual_record_button(self) -> None:
         """Connect the manual record button to the manual entry dialog."""
-        button = self._get_manual_record_button()
-        if button is None:
-            return
-
-        if getattr(self, "_manual_record_button_connected", False):
-            try:
-                button.clicked.disconnect(self._open_manual_record_dialog)
-            except (TypeError, RuntimeError):
-                pass
-        button.clicked.connect(self._open_manual_record_dialog)
-        self._manual_record_button_connected = True
+        self._get_dialog_controller().initialize_manual_record_button()
 
     def _open_report_dialog(self) -> None:
         """Open a non-modal report dialog backed by the cached log handler."""
-        if not hasattr(self, "recorder"):
-            return
-
-        dialog = getattr(self, "_report_dialog", None)
-        if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
-            dialog = ReportDialog(self.recorder.log_handler, self)
-            self._report_dialog = dialog
-
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
+        self._get_dialog_controller().open_report_dialog()
 
     def _open_manual_record_dialog(self) -> None:
         """Open a non-modal dialog for manually entering play time."""
-        if not hasattr(self, "recorder"):
-            return
-
-        dialog = self._get_or_create_manual_record_dialog()
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
+        self._get_dialog_controller().open_manual_record_dialog()
 
     def _get_or_create_manual_record_dialog(self) -> ManualRecordDialog:
         """Return a manual record dialog refreshed with the current game list."""
-        dialog = getattr(self, "_manual_record_dialog", None)
-        if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
-            dialog = ManualRecordDialog(
-                self,
-                on_save=self._save_manual_record,
-                games=self.games,
-            )
-            self._manual_record_dialog = dialog
-        else:
-            dialog.set_games(self.games)
-        return dialog
+        return cast(
+            ManualRecordDialog,
+            self._get_dialog_controller().get_or_create_manual_record_dialog(),
+        )
 
     def _save_manual_record(self, record: ManualPlayRecord) -> bool:
         """Persist a manually entered session and refresh today's totals."""
-        recorded_seconds = self.recorder.record_with_times(
-            record.game,
-            record.start_time,
-            record.end_time,
-        )
-        if recorded_seconds is None:
-            self._set_status(
-                f"{record.game.game_title}の手入力記録を保存できませんでした"
-            )
-            return False
-
-        self._refresh_after_manual_record()
-        self._set_status(f"{record.game.game_title}のプレイ時間を手入力で記録しました")
-        return True
+        return self._get_dialog_controller().save_manual_record(record)
 
     def _refresh_after_manual_record(self) -> None:
         """Refresh cached stats, visible tables, alert progress, and overlay."""
-        self._reload_today_stats()
-        now = datetime.now()
-        total_seconds = self._update_today_totals(self.active_games_cache, now)
-        self._update_today_games_list(now)
-        self._update_overtime_alert(total_seconds)
-        self._sync_overlay()
+        self._get_dialog_controller().refresh_after_manual_record()
 
     def _reload_today_stats(self) -> None:
         """Refresh cached completed play time from the log handler."""
-        game_minutes, completed_seconds = self.recorder.log_handler.get_today_stats()
-        self.daily_stats.today_game_minutes_cache = game_minutes
-        self.daily_stats.today_completed_seconds = completed_seconds
-        self.daily_stats.last_today_games_content = ""
+        self._get_dialog_controller().reload_today_stats()
 
     def _open_settings_dialog(self) -> None:
         """Open a non-modal settings dialog."""
-        dialog = getattr(self, "_settings_dialog", None)
-        if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
-            dialog = SettingsDialog(self, on_saved=self._on_settings_saved)
-            self._settings_dialog = dialog
-
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
+        self._get_dialog_controller().open_settings_dialog()
 
     def _open_game_catalog_dialog(self, *, initial_window_title: str = "") -> None:
         """Open a non-modal game catalog dialog."""
-        dialog = getattr(self, "_game_catalog_dialog", None)
-        created_dialog = False
-        if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
-            dialog = GameCatalogDialog(self, on_saved=self._on_game_catalog_saved)
-            self._game_catalog_dialog = dialog
-            created_dialog = True
-
-        dialog.show()
-
-        if created_dialog:
-            sync_on_open = getattr(dialog, "sync_on_open", None)
-            if callable(sync_on_open):
-                sync_on_open()
-
-        if initial_window_title:
-            prepare = getattr(dialog, "prepare_new_game", None)
-            if callable(prepare):
-                prepare(window_title=initial_window_title)
-
-        dialog.raise_()
-        dialog.activateWindow()
+        self._get_dialog_controller().open_game_catalog_dialog(
+            initial_window_title=initial_window_title
+        )
 
     def _on_game_catalog_saved(self) -> None:
         """Reload runtime services after the game catalog changes."""
-        self._set_status("ゲーム情報を保存しました。")
-        self._init_components()
+        self._get_dialog_controller().on_game_catalog_saved()
 
     def _on_settings_saved(self) -> None:
         """Reload runtime services after settings are saved."""
-        self.setDisabled(False)
-        self._set_status("設定を保存しました。")
-        self._init_components()
+        self._get_dialog_controller().on_settings_saved()
 
     def _on_overtime_alert_toggled(self, checked: bool) -> None:
-        """時間超過防止アラートトグル変更時の処理。"""
-        self._set_overtime_alert_enabled(checked)
-
-        now = datetime.now()
-        total_seconds = self._get_ui_controller().calculate_today_total_seconds(
-            self.active_games_cache,
-            self.inactive_games_cache,
-            now,
-        )
-        self._prime_overtime_alert_progress(total_seconds)
-        self._sync_overlay()
+        """Handle overtime-alert toggle changes."""
+        self._get_overtime_alert_controller().on_toggled(checked)
 
     def _prime_overtime_alert_progress(self, total_seconds: float) -> None:
-        """現在値を基準にアラート進捗を初期化し、遡及通知を抑止する。"""
-        self._get_overtime_alert_tracker().prime(total_seconds)
+        """Prime overtime-alert progress without emitting past thresholds."""
+        self._get_overtime_alert_controller().prime_progress(total_seconds)
 
     def _emit_overtime_alert(self, threshold_minutes: int) -> None:
-        """閾値到達アラートを通知する。"""
-        try:
-            QApplication.beep()
-        except Exception:
-            logger.debug("ビープ音の再生に失敗", exc_info=True)
-        logger.info("プレイ時間アラート: %s分に到達しました", threshold_minutes)
+        """Emit an overtime-alert notification."""
+        self._get_overtime_alert_controller().emit_alert(threshold_minutes)
 
     def _update_overtime_alert(self, total_seconds: float) -> None:
-        """閾値跨ぎを検知して時間超過防止アラートを鳴らす。"""
-        tracker = self._get_overtime_alert_tracker()
-        triggered_minutes = tracker.update(
-            total_seconds,
-            alerts_enabled=self._is_overtime_alert_enabled(),
-        )
-        for minute in triggered_minutes:
-            self._emit_overtime_alert(minute)
+        """Check overtime thresholds and emit newly crossed alerts."""
+        self._get_overtime_alert_controller().update_alert(total_seconds)
 
     def _get_overlay_window(self) -> Optional[TodayTimeOverlayWindow]:
         """現在のオーバーレイウィンドウを返す。"""
@@ -1192,56 +825,26 @@ class MainWindow(QWidget):
         return window_handle_of(widget)
 
     def _is_own_window(self, hwnd: int) -> bool:
-        """指定HWNDがMainWindowまたはオーバーレイ自身か判定する."""
-        if hwnd == 0:
-            return False
-        if is_own_process_window(hwnd):
-            return True
-        hwnd_root = root_window(hwnd)
-        main_hwnd = root_window(window_handle_of(self))
-        overlay_hwnd = root_window(window_handle_of(self.overlay_window))
-        return hwnd_root in {main_hwnd, overlay_hwnd}
+        """Return whether HWND belongs to this app or its overlay."""
+        return self._get_cover_detector().is_own_window(hwnd)
 
     def _native_scale_factor(self) -> float:
-        """Qt論理座標 -> Win32物理解像度座標へのスケールを推定する."""
-        hwnd = window_handle_of(self)
-        rect = window_rect(hwnd)
-        logical_w = self.width()
-        logical_h = self.height()
-        if rect is None or logical_w <= 0 or logical_h <= 0:
-            return 1.0
-
-        native_w = max(1, rect[2] - rect[0])
-        native_h = max(1, rect[3] - rect[1])
-        scale_x = native_w / logical_w
-        scale_y = native_h / logical_h
-        scale = (scale_x + scale_y) / 2.0
-        if 0.75 <= scale <= 3.0:
-            return scale
-        return 1.0
+        """Estimate logical-to-native coordinate scaling."""
+        return self._get_cover_detector().native_scale_factor()
 
     def _to_native_point(self, x: int, y: int) -> Point:
-        """Qt論理座標の点をWin32 API用の物理解像度座標へ変換する."""
-        scale = self._native_scale_factor()
-        return int(round(x * scale)), int(round(y * scale))
+        """Convert a logical point to Win32 native coordinates."""
+        return self._get_cover_detector().to_native_point(x, y)
 
     def _to_native_rect(self, rect: Rect) -> Rect:
-        """Qt論理座標の矩形をWin32 API用の物理解像度座標へ変換する."""
-        left_top = self._to_native_point(rect[0], rect[1])
-        right_bottom = self._to_native_point(rect[2], rect[3])
-        return (
-            min(left_top[0], right_bottom[0]),
-            min(left_top[1], right_bottom[1]),
-            max(left_top[0], right_bottom[0]),
-            max(left_top[1], right_bottom[1]),
-        )
+        """Convert a logical rectangle to Win32 native coordinates."""
+        return self._get_cover_detector().to_native_rect(rect)
 
     def _foreground_rect_if_foreign(self) -> Optional[Rect]:
-        """前面ウィンドウが他ウィンドウの場合のみ、その矩形を返す."""
-        foreground_hwnd = get_foreground_hwnd()
-        if foreground_hwnd == 0 or self._is_own_window(foreground_hwnd):
-            return None
-        return self._window_rect(foreground_hwnd)
+        """Return the foreground rectangle when it belongs to a foreign window."""
+        return self._get_cover_detector().foreground_rect_if_foreign(
+            get_foreground_hwnd()
+        )
 
     def _find_covering_foreign_window_at_point(
         self,
@@ -1250,74 +853,20 @@ class MainWindow(QWidget):
         *,
         expected_root_hwnd: Optional[int] = None,
     ) -> int:
-        """点を覆う「自ウィンドウ以外」のHWNDを探索して返す。"""
-        hwnd = self._window_at_point(x, y)
-        if hwnd == 0:
-            return 0
-
-        # 判定時点で自ウィンドウが最前面なら、その点は露出しているとみなす。
-        if self._is_own_window(hwnd):
-            return 0
-
-        walk_count = 0
-
-        while hwnd and walk_count < MAX_Z_WALK:
-            if not self._is_own_window(hwnd):
-                hwnd_rect = self._window_rect(hwnd)
-                if hwnd_rect is not None and self._rect_contains_point(hwnd_rect, x, y):
-                    if expected_root_hwnd is not None:
-                        candidate_root = self._root_window(hwnd)
-                        if candidate_root != expected_root_hwnd:
-                            hwnd = self._window_below(hwnd)
-                            walk_count += 1
-                            continue
-                    return hwnd
-            hwnd = self._window_below(hwnd)
-            walk_count += 1
-
-        if walk_count >= MAX_Z_WALK:
-            logger.debug("overlay z-order walk reached MAX_Z_WALK=%s", MAX_Z_WALK)
-        return 0
+        """Return a foreign HWND that covers a point, if any."""
+        return self._get_cover_detector().find_covering_foreign_window_at_point(
+            x,
+            y,
+            expected_root_hwnd=expected_root_hwnd,
+        )
 
     def _get_today_display_cover_state(self) -> Tuple[bool, str]:
-        """today_time_displayの被覆判定結果と理由を返す."""
-        target = self._get_today_time_display()
-        if target is None:
-            return False, "target_missing"
-
-        target_rect = self._global_rect_of_widget(target)
-        if target_rect is None:
-            return False, "target_rect_missing"
-
-        sample_points = self._sample_points_from_rect(target_rect)
-
-        def count_covering_foreign_points(*, use_native_points: bool) -> int:
-            return sum(
-                1
-                for x, y in sample_points
-                if self._find_covering_foreign_window_at_point(
-                    *(self._to_native_point(x, y) if use_native_points else (x, y))
-                ) != 0
-            )
-
-        covered_points = count_covering_foreign_points(use_native_points=True)
-        if covered_points >= OVERLAY_COVERED_POINTS_THRESHOLD:
-            return True, "covered_native_points"
-        if covered_points > 0:
-            return False, "covered_native_points_below_threshold"
-
-        covered_points = count_covering_foreign_points(use_native_points=False)
-        if covered_points >= OVERLAY_COVERED_POINTS_THRESHOLD:
-            return True, "covered_logical_points"
-        if covered_points > 0:
-            return False, "covered_logical_points_below_threshold"
-
-        return False, "no_cover_detected"
+        """Return cover state and reason for today_time_display."""
+        return self._get_cover_detector().get_today_display_cover_state()
 
     def _is_today_display_covered_by_foreground_window(self) -> bool:
-        """today_time_displayのサンプル点が他ウィンドウに覆われているか判定する."""
-        covered, _ = self._get_today_display_cover_state()
-        return covered
+        """Return whether today_time_display is covered by a foreign window."""
+        return self._get_cover_detector().is_today_display_covered()
 
     def _should_show_overlay(self) -> bool:
         """メインウィンドウ背面かつtoday表示部が重なっている時のみオーバーレイ表示."""
@@ -1392,45 +941,10 @@ class MainWindow(QWidget):
         return event.button() == Qt.MouseButton.RightButton
 
     def _show_context_menu(self, event: QMouseEvent) -> None:
-        menu = QMenu(self)
-        mode_actions = self._add_display_mode_menu(menu)
-        manual_record_action = menu.addAction("手入力で記録")
-        report_action = menu.addAction("レポート")
-        game_catalog_action = menu.addAction("ゲーム管理")
-        settings_action = menu.addAction("設定")
-        exit_action = menu.addAction("終了")
-
-        position_getter = getattr(event, "globalPosition", None)
-        if callable(position_getter):
-            position = position_getter().toPoint()
-        else:
-            position = event.globalPos()
-
-        selected_action = menu.exec(position)
-        self._handle_context_menu_selection(
-            selected_action,
-            manual_record_action=manual_record_action,
-            report_action=report_action,
-            game_catalog_action=game_catalog_action,
-            settings_action=settings_action,
-            exit_action=exit_action,
-            mode_actions=mode_actions,
-        )
+        self._get_context_menu_controller().show_context_menu(event)
 
     def _add_display_mode_menu(self, menu: QMenu) -> Dict[str, object]:
-        size_menu = menu.addMenu("サイズ")
-        mode_actions: Dict[str, object] = {}
-        current_mode = getattr(self, "display_mode", "")
-        for mode in DISPLAY_MODES:
-            action = size_menu.addAction(mode)
-            set_checkable = getattr(action, "setCheckable", None)
-            if callable(set_checkable):
-                set_checkable(True)
-            set_checked = getattr(action, "setChecked", None)
-            if callable(set_checked):
-                set_checked(mode == current_mode)
-            mode_actions[mode] = action
-        return mode_actions
+        return self._get_context_menu_controller().add_display_mode_menu(menu)
 
     def _handle_context_menu_selection(
         self,
@@ -1443,21 +957,15 @@ class MainWindow(QWidget):
         mode_actions: Optional[Dict[str, object]] = None,
         manual_record_action: object = None,
     ) -> None:
-        if mode_actions:
-            for mode, action in mode_actions.items():
-                if selected_action is action:
-                    self._set_display_mode(mode)
-                    return
-        if selected_action is manual_record_action:
-            self._open_manual_record_dialog()
-        elif selected_action is report_action:
-            self._open_report_dialog()
-        elif selected_action is game_catalog_action:
-            self._open_game_catalog_dialog()
-        elif selected_action is settings_action:
-            self._open_settings_dialog()
-        elif selected_action is exit_action:
-            self._quit_application()
+        self._get_context_menu_controller().handle_context_menu_selection(
+            selected_action,
+            report_action=report_action,
+            settings_action=settings_action,
+            exit_action=exit_action,
+            game_catalog_action=game_catalog_action,
+            mode_actions=mode_actions,
+            manual_record_action=manual_record_action,
+        )
 
     def _set_display_mode(self, display_mode: str) -> None:
         if display_mode not in DISPLAY_MODES:

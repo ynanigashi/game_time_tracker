@@ -2,7 +2,7 @@
 """time_utils.py のユニットテスト."""
 
 from tests.test_stubs import FakeLogHandler
-from src.core import services
+from src.core import adapters as services
 from src.core import models
 from src.core.time_utils import (
     GSS_DATETIME_FORMAT,

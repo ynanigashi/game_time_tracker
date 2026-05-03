@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import Future, ThreadPoolExecutor
-from hashlib import sha1
 from datetime import date, datetime, timedelta
 from time import perf_counter
 from typing import Callable, List, Optional, Tuple
@@ -25,7 +24,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QTableWidget,
-    QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -41,83 +39,36 @@ from src.core.reporting import (
 )
 from src.core.time_utils import GSS_DATETIME_FORMAT
 from src.core.time_utils import format_hms
+from src.ui.report_charts import (
+    CHARTS_AVAILABLE,
+    CHARTS_IMPORT_ERROR,
+    GAME_COLORS,
+    ReportChartBuilder,
+    color_for_title,
+    color_name_for_title,
+    create_chart_views,
+    create_color_swatch,
+    top_rows_with_other,
+)
+from src.ui.report_date_ranges import RECENT_PERIOD_DAYS, date_range_for_period
+from src.ui.report_graph_unit import ReportGraphUnitController
+from src.ui.report_log_operations import ReportLogOperationController
+from src.ui.report_log_table import ReportLogTableController, bool_text
+from src.ui.report_summary_table import (
+    ReportSummaryTableController,
+    summary_label_text,
+)
+from src.ui.report_sync_messages import sync_result_message
+from src.ui.report_tab_refresh import ReportTabRefreshController
+from src.ui.report_tab_state import ReportTabState
+from src.ui.report_title_filter import ReportTitleFilterController
+from src.ui.report_trend_selection import (
+    ReportTrendSelectionController,
+    filter_trend_series_by_indices,
+    trend_selection_label,
+)
 
 logger = logging.getLogger(__name__)
-
-try:
-    from PySide6.QtCharts import (  # type: ignore
-        QBarCategoryAxis,
-        QBarSet,
-        QCategoryAxis,
-        QChart,
-        QChartView,
-        QLineSeries,
-        QPieSeries,
-        QStackedBarSeries,
-        QValueAxis,
-    )
-    from PySide6.QtGui import QColor, QPainter
-
-    CHARTS_AVAILABLE = True
-    CHARTS_IMPORT_ERROR = ""
-except Exception as exc:
-    QBarCategoryAxis = None  # type: ignore
-    QBarSet = None  # type: ignore
-    QCategoryAxis = None  # type: ignore
-    QChart = None  # type: ignore
-    QChartView = None  # type: ignore
-    QLineSeries = None  # type: ignore
-    QPieSeries = None  # type: ignore
-    QStackedBarSeries = None  # type: ignore
-    QValueAxis = None  # type: ignore
-    QColor = None  # type: ignore
-    QPainter = None  # type: ignore
-    CHARTS_AVAILABLE = False
-    CHARTS_IMPORT_ERROR = str(exc)
-
-
-if CHARTS_AVAILABLE and QChartView is not None:
-
-    class _SelectableTrendChartView(QChartView):  # type: ignore[misc]
-        """Chart view that reports a horizontal drag selection in view pixels."""
-
-        def __init__(self, on_selected: object, parent: Optional[QWidget] = None) -> None:
-            super().__init__(parent)
-            self._on_selected = on_selected
-            self._selection_start_x: Optional[float] = None
-            rubber_band = getattr(QChartView, "RubberBand", None)
-            if rubber_band is not None:
-                self.setRubberBand(rubber_band.HorizontalRubberBand)
-
-        @staticmethod
-        def _event_x(event: object) -> Optional[float]:
-            position = None
-            if hasattr(event, "position"):
-                position = event.position()
-            elif hasattr(event, "pos"):
-                position = event.pos()
-            if position is None or not hasattr(position, "x"):
-                return None
-            return float(position.x())
-
-        def mousePressEvent(self, event: object) -> None:
-            if event.button() == Qt.MouseButton.LeftButton:
-                self._selection_start_x = self._event_x(event)
-            super().mousePressEvent(event)
-
-        def mouseReleaseEvent(self, event: object) -> None:
-            start_x = self._selection_start_x
-            end_x = self._event_x(event)
-            self._selection_start_x = None
-            super().mouseReleaseEvent(event)
-            if start_x is None or end_x is None or abs(end_x - start_x) < 8:
-                return
-            callback = self._on_selected
-            if callable(callback):
-                callback(min(start_x, end_x), max(start_x, end_x))
-
-else:
-    _SelectableTrendChartView = None  # type: ignore[assignment]
 
 
 class ReportDialog(QDialog):
@@ -142,14 +93,7 @@ class ReportDialog(QDialog):
         ("直近1年", "last_365_days"),
         ("すべて", "all"),
     )
-    _RECENT_PERIOD_DAYS = {
-        "last_7_days": 7,
-        "last_30_days": 30,
-        "last_60_days": 60,
-        "last_120_days": 120,
-        "last_180_days": 180,
-        "last_365_days": 365,
-    }
+    _RECENT_PERIOD_DAYS = RECENT_PERIOD_DAYS
     _TREND_GRANULARITIES: Tuple[Tuple[str, str], ...] = (
         ("週別", "week"),
         ("月別", "month"),
@@ -161,20 +105,7 @@ class ReportDialog(QDialog):
         ("合計", "total"),
         ("タイトル別", "by_title"),
     )
-    _GAME_COLORS: Tuple[str, ...] = (
-        "#3B82F6",
-        "#EF4444",
-        "#10B981",
-        "#F59E0B",
-        "#8B5CF6",
-        "#14B8A6",
-        "#F97316",
-        "#EC4899",
-        "#6366F1",
-        "#84CC16",
-        "#06B6D4",
-        "#A855F7",
-    )
+    _GAME_COLORS = GAME_COLORS
     _UNIT_TOGGLE_STYLE = """
         QPushButton {
             padding: 4px 12px;
@@ -203,13 +134,13 @@ class ReportDialog(QDialog):
     def __init__(self, log_handler: object, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.log_handler = log_handler
-        self._loaded_tabs: set[int] = set()
-        self._dirty_tabs: set[int] = {
-            self._SUMMARY_TAB,
-            self._TREND_TAB,
-            self._LOG_TAB,
-        }
-        self._title_filter_dirty = True
+        self._tab_state = ReportTabState(
+            dirty_tabs={
+                self._SUMMARY_TAB,
+                self._TREND_TAB,
+                self._LOG_TAB,
+            }
+        )
         self._log_edit_executor = ThreadPoolExecutor(
             max_workers=1,
             thread_name_prefix="play-log-edit",
@@ -250,9 +181,6 @@ class ReportDialog(QDialog):
 
         self._graph_unit_hours = False
         self._updating_unit_toggles = False
-        self._last_summary: Optional[ReportSummary] = None
-        self._title_filter_summary: Optional[ReportSummary] = None
-        self._last_trend_series: Optional[List[TrendSeries]] = None
         self._trend_selected_indices: Optional[Tuple[int, int]] = None
         self._unit_minute_buttons: List[QPushButton] = []
         self._unit_hour_buttons: List[QPushButton] = []
@@ -323,15 +251,11 @@ class ReportDialog(QDialog):
         self.chart_view = None
         self.trend_chart_view = None
         self.chart_fallback_label = None
-        if CHARTS_AVAILABLE and QChartView is not None:
-            self.chart_view = QChartView(self)
-            self.trend_chart_view = _SelectableTrendChartView(
-                self._select_trend_range_from_chart,
+        if CHARTS_AVAILABLE:
+            self.chart_view, self.trend_chart_view = create_chart_views(
                 self,
+                self._select_trend_range_from_chart,
             )
-            if QPainter is not None:
-                self.chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
-                self.trend_chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
         else:
             self.chart_fallback_label = QLabel(
                 self._chart_fallback_message(),
@@ -341,6 +265,61 @@ class ReportDialog(QDialog):
 
         self._build_layout()
         self.refresh()
+
+    def _ensure_report_tab_state(self) -> ReportTabState:
+        state = getattr(self, "_tab_state", None)
+        if state is None:
+            state = ReportTabState()
+            self._tab_state = state
+        return state
+
+    @property
+    def _loaded_tabs(self) -> set[int]:
+        return self._ensure_report_tab_state().loaded_tabs
+
+    @_loaded_tabs.setter
+    def _loaded_tabs(self, value: set[int]) -> None:
+        self._ensure_report_tab_state().loaded_tabs = set(value)
+
+    @property
+    def _dirty_tabs(self) -> set[int]:
+        return self._ensure_report_tab_state().dirty_tabs
+
+    @_dirty_tabs.setter
+    def _dirty_tabs(self, value: set[int]) -> None:
+        self._ensure_report_tab_state().dirty_tabs = set(value)
+
+    @property
+    def _title_filter_dirty(self) -> bool:
+        return self._ensure_report_tab_state().title_filter_dirty
+
+    @_title_filter_dirty.setter
+    def _title_filter_dirty(self, value: bool) -> None:
+        self._ensure_report_tab_state().title_filter_dirty = bool(value)
+
+    @property
+    def _last_summary(self) -> Optional[ReportSummary]:
+        return self._ensure_report_tab_state().last_summary
+
+    @_last_summary.setter
+    def _last_summary(self, value: Optional[ReportSummary]) -> None:
+        self._ensure_report_tab_state().last_summary = value
+
+    @property
+    def _title_filter_summary(self) -> Optional[ReportSummary]:
+        return self._ensure_report_tab_state().title_filter_summary
+
+    @_title_filter_summary.setter
+    def _title_filter_summary(self, value: Optional[ReportSummary]) -> None:
+        self._ensure_report_tab_state().title_filter_summary = value
+
+    @property
+    def _last_trend_series(self) -> Optional[List[TrendSeries]]:
+        return self._ensure_report_tab_state().last_trend_series
+
+    @_last_trend_series.setter
+    def _last_trend_series(self, value: Optional[List[TrendSeries]]) -> None:
+        self._ensure_report_tab_state().last_trend_series = value
 
     @staticmethod
     def _chart_fallback_message() -> str:
@@ -370,29 +349,15 @@ class ReportDialog(QDialog):
             table.horizontalHeader().setSectionResizeMode(column, mode)
         return table
 
+    def _get_graph_unit_controller(self) -> ReportGraphUnitController:
+        controller = getattr(self, "_graph_unit_controller", None)
+        if controller is None:
+            controller = ReportGraphUnitController(self)
+            self._graph_unit_controller = controller
+        return controller
+
     def _create_unit_toggle(self) -> QWidget:
-        container = QWidget(self)
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        minute_button = QPushButton("分", container)
-        hour_button = QPushButton("時間", container)
-        minute_button.setObjectName("unitMinute")
-        hour_button.setObjectName("unitHour")
-        for button in (minute_button, hour_button):
-            button.setCheckable(True)
-            button.setMinimumWidth(54)
-            button.setStyleSheet(self._UNIT_TOGGLE_STYLE)
-
-        minute_button.clicked.connect(lambda _checked=False: self._set_graph_unit(False))
-        hour_button.clicked.connect(lambda _checked=False: self._set_graph_unit(True))
-
-        layout.addWidget(minute_button)
-        layout.addWidget(hour_button)
-        self._unit_minute_buttons.append(minute_button)
-        self._unit_hour_buttons.append(hour_button)
-        return container
+        return self._get_graph_unit_controller().create_unit_toggle()
 
     def _build_layout(self) -> None:
         tabs = QTabWidget(self)
@@ -510,28 +475,7 @@ class ReportDialog(QDialog):
         today: date,
     ) -> Tuple[Optional[date], Optional[date]]:
         """Return inclusive start/end dates for a report period key."""
-        if period_key == "all":
-            return None, None
-        if period_key == "today":
-            return today, today
-        if period_key == "this_week":
-            return today - timedelta(days=today.weekday()), today
-        if period_key == "this_month":
-            return today.replace(day=1), today
-        if period_key == "this_quarter":
-            quarter_start_month = ((today.month - 1) // 3) * 3 + 1
-            return date(today.year, quarter_start_month, 1), today
-        if period_key == "this_half":
-            half_start_month = 1 if today.month <= 6 else 7
-            return date(today.year, half_start_month, 1), today
-        if period_key == "this_year":
-            return date(today.year, 1, 1), today
-        if period_key in ReportDialog._RECENT_PERIOD_DAYS:
-            days = ReportDialog._RECENT_PERIOD_DAYS[period_key]
-            return today - timedelta(days=days - 1), today
-
-        logger.warning("Unknown report period: %s", period_key)
-        return None, None
+        return date_range_for_period(period_key, today)
 
     def _selected_date_range(self) -> Tuple[Optional[date], Optional[date]]:
         index = self.period_combo.currentIndex()
@@ -619,121 +563,33 @@ class ReportDialog(QDialog):
     def _trend_series_label(self) -> str:
         return "タイトル" if self._is_title_trend_mode() else "系列"
 
+    def _get_title_filter_controller(self) -> ReportTitleFilterController:
+        controller = getattr(self, "_title_filter_controller", None)
+        if controller is None:
+            controller = ReportTitleFilterController(self)
+            self._title_filter_controller = controller
+        return controller
+
     def _selected_titles(self) -> List[str]:
-        titles: List[str] = []
-        for row in range(self.title_filter_table.rowCount()):
-            item = self.title_filter_table.item(row, 0)
-            if item is None:
-                continue
-            if item.checkState() == Qt.CheckState.Checked:
-                titles.append(item.text())
-        return titles
+        return self._get_title_filter_controller().selected_titles()
 
     def _load_title_filter_summary(self) -> ReportSummary:
-        if self._title_filter_summary is not None and not self._title_filter_dirty:
-            return self._title_filter_summary
-
-        get_report_stats = getattr(self.log_handler, "get_report_stats", None)
-        if callable(get_report_stats):
-            summary = get_report_stats(start_date=None, end_date=None)
-        else:
-            summary = build_game_report(self._cached_records())
-        self._title_filter_summary = summary
-        return summary
+        return self._get_title_filter_controller().load_title_filter_summary()
 
     def _sync_title_filter(self, summary: ReportSummary) -> None:
-        checked_titles = (
-            set(self._selected_titles())
-            if self._title_filter_initialized
-            else {row.game_title for row in summary.rows}
-        )
-        self._updating_title_filter = True
-        self.title_filter_table.blockSignals(True)
-        try:
-            self.title_filter_table.setRowCount(len(summary.rows))
-            for row_index, row in enumerate(summary.rows):
-                item = QTableWidgetItem(row.game_title)
-                item.setCheckState(
-                    Qt.CheckState.Checked
-                    if row.game_title in checked_titles
-                    else Qt.CheckState.Unchecked
-                )
-                self.title_filter_table.setItem(row_index, 0, item)
-        finally:
-            self.title_filter_table.blockSignals(False)
-            self._updating_title_filter = False
-            self._title_filter_initialized = True
-            self._update_title_filter_action_states()
+        self._get_title_filter_controller().sync_title_filter(summary)
 
     def _on_title_filter_changed(self, *_args: object) -> None:
-        if self._updating_title_filter:
-            return
-        if not self._is_title_trend_mode():
-            self._update_title_filter_action_states()
-            return
-        self.refresh_trend()
-        self._update_title_filter_action_states()
+        self._get_title_filter_controller().on_title_filter_changed(*_args)
 
     def _title_filter_counts(self) -> Tuple[int, int]:
-        total_count = self.title_filter_table.rowCount()
-        checked_count = 0
-        for row in range(total_count):
-            item = self.title_filter_table.item(row, 0)
-            if item is not None and item.checkState() == Qt.CheckState.Checked:
-                checked_count += 1
-        return total_count, checked_count
+        return self._get_title_filter_controller().title_filter_counts()
 
     def _update_title_filter_action_states(self) -> None:
-        title_mode = self._is_title_trend_mode()
-        self.title_filter_label.setEnabled(title_mode)
-        self.title_filter_table.setEnabled(title_mode)
-        total_count, checked_count = self._title_filter_counts()
-        self.select_all_titles_button.setEnabled(
-            title_mode and total_count > 0 and checked_count < total_count
-        )
-        self.clear_all_titles_button.setEnabled(title_mode and checked_count > 0)
+        self._get_title_filter_controller().update_action_states()
 
     def _set_all_title_filters(self, checked: bool) -> None:
-        started_at = perf_counter()
-        if not self._is_title_trend_mode():
-            self._set_debug_message("合計表示ではタイトル選択は使用しません")
-            self._update_title_filter_action_states()
-            return
-        total_count, checked_count = self._title_filter_counts()
-        if total_count == 0:
-            self._set_debug_message("タイトルがありません")
-            self._update_title_filter_action_states()
-            return
-        if checked and checked_count == total_count:
-            self._set_debug_message("タイトルはすでに全選択済みです")
-            self._update_title_filter_action_states()
-            return
-        if not checked and checked_count == 0:
-            self._set_debug_message("タイトルはすでに全解除済みです")
-            self._update_title_filter_action_states()
-            return
-
-        self._updating_title_filter = True
-        self.title_filter_table.blockSignals(True)
-        try:
-            for row in range(self.title_filter_table.rowCount()):
-                item = self.title_filter_table.item(row, 0)
-                if item is not None:
-                    item.setCheckState(
-                        Qt.CheckState.Checked
-                        if checked
-                        else Qt.CheckState.Unchecked
-                    )
-        finally:
-            self.title_filter_table.blockSignals(False)
-            self._updating_title_filter = False
-
-        self._update_title_filter_action_states()
-        self.refresh_trend()
-        self._mark_tab_clean(self._TREND_TAB)
-        elapsed_ms = (perf_counter() - started_at) * 1000
-        action = "全選択" if checked else "全解除"
-        self._set_debug_message(f"タイトルを{action} ({elapsed_ms:.0f} ms)")
+        self._get_title_filter_controller().set_all_title_filters(checked)
 
     def _set_debug_message(self, message: str, *, process_events: bool = False) -> None:
         logger.debug("ReportDialog: %s", message)
@@ -742,66 +598,16 @@ class ReportDialog(QDialog):
             QApplication.processEvents()
 
     def _sync_unit_controls(self) -> None:
-        self._updating_unit_toggles = True
-        try:
-            for button in self._unit_minute_buttons:
-                button.setChecked(not self._graph_unit_hours)
-            for button in self._unit_hour_buttons:
-                button.setChecked(self._graph_unit_hours)
-        finally:
-            self._updating_unit_toggles = False
+        self._get_graph_unit_controller().sync_unit_controls()
 
     def _set_graph_unit(self, hours: bool) -> None:
-        if self._updating_unit_toggles:
-            return
-        if self._graph_unit_hours == hours:
-            self._sync_unit_controls()
-            return
-
-        started_at = perf_counter()
-        self._graph_unit_hours = hours
-        self._sync_unit_controls()
-
-        self._set_debug_message(
-            f"グラフ単位を{self._graph_unit_label()}に切替中...",
-            process_events=True,
-        )
-        try:
-            current_tab = self._current_tab_index()
-            if current_tab == self._SUMMARY_TAB:
-                if self._last_summary is None:
-                    self.refresh_summary()
-                else:
-                    self._populate_chart(self._last_summary)
-                self._mark_tab_clean(self._SUMMARY_TAB)
-                self._mark_tab_dirty(self._TREND_TAB)
-            elif current_tab == self._TREND_TAB:
-                if self._last_trend_series is None:
-                    self.refresh_trend_tab()
-                else:
-                    self._populate_trend_chart(self._last_trend_series)
-                self._mark_tab_clean(self._TREND_TAB)
-                self._mark_tab_dirty(self._SUMMARY_TAB)
-            else:
-                self._mark_tab_dirty(self._SUMMARY_TAB)
-                self._mark_tab_dirty(self._TREND_TAB)
-        except Exception:
-            logger.exception("Failed to redraw report charts after unit toggle")
-            self._set_debug_message("単位切替中にエラーが発生しました")
-            return
-
-        elapsed_ms = (perf_counter() - started_at) * 1000
-        self._set_debug_message(
-            f"グラフ単位を{self._graph_unit_label()}に切替 "
-            f"({elapsed_ms:.0f} ms)"
-        )
+        self._get_graph_unit_controller().set_graph_unit(hours)
 
     def _graph_unit_label(self) -> str:
-        return "時間" if self._graph_unit_hours else "分"
+        return self._get_graph_unit_controller().graph_unit_label()
 
     def _seconds_to_graph_value(self, seconds: float) -> float:
-        divisor = 3600.0 if self._graph_unit_hours else 60.0
-        return seconds / divisor
+        return self._get_graph_unit_controller().seconds_to_graph_value(seconds)
 
     @staticmethod
     def _total_points_to_series(points: List[TrendPoint]) -> List[TrendSeries]:
@@ -856,71 +662,43 @@ class ReportDialog(QDialog):
             end_date=end_date,
         )
 
+    def _get_tab_refresh_controller(self) -> ReportTabRefreshController:
+        controller = getattr(self, "_tab_refresh_controller", None)
+        if controller is None:
+            controller = ReportTabRefreshController(self)
+            self._tab_refresh_controller = controller
+        return controller
+
     def refresh(self, *_args: object) -> None:
         """Mark every report tab dirty and refresh only the visible tab."""
-        self._mark_all_tabs_dirty()
-        self._refresh_current_tab(force=True)
+        self._get_tab_refresh_controller().refresh(force=True)
 
     def _current_tab_index(self) -> int:
-        tabs = getattr(self, "tabs", None)
-        current_index = getattr(tabs, "currentIndex", None)
-        if callable(current_index):
-            return int(current_index())
-        return self._SUMMARY_TAB
+        return self._get_tab_refresh_controller().current_tab_index()
 
     def _mark_tab_dirty(self, tab_index: int) -> None:
-        self._ensure_refresh_state()
-        self._dirty_tabs.add(tab_index)
+        self._get_tab_refresh_controller().mark_tab_dirty(tab_index)
 
     def _mark_tab_clean(self, tab_index: int) -> None:
-        self._ensure_refresh_state()
-        self._loaded_tabs.add(tab_index)
-        self._dirty_tabs.discard(tab_index)
-        if tab_index == self._TREND_TAB:
-            self._title_filter_dirty = False
+        self._get_tab_refresh_controller().mark_tab_clean(tab_index)
 
     def _mark_all_tabs_dirty(self) -> None:
-        self._ensure_refresh_state()
-        self._dirty_tabs.update({self._SUMMARY_TAB, self._TREND_TAB, self._LOG_TAB})
-        self._title_filter_dirty = True
+        self._get_tab_refresh_controller().mark_all_tabs_dirty()
 
     def _mark_report_data_changed(self) -> None:
-        self._mark_all_tabs_dirty()
-        self._last_summary = None
-        self._title_filter_summary = None
-        self._last_trend_series = None
+        self._get_tab_refresh_controller().mark_report_data_changed()
 
     def _ensure_refresh_state(self) -> None:
-        if not hasattr(self, "_loaded_tabs"):
-            self._loaded_tabs = set()
-        if not hasattr(self, "_dirty_tabs"):
-            self._dirty_tabs = set()
-        if not hasattr(self, "_title_filter_dirty"):
-            self._title_filter_dirty = True
+        self._get_tab_refresh_controller().ensure_refresh_state()
 
     def _refresh_current_tab(self, *, force: bool = False) -> None:
-        self._refresh_tab(self._current_tab_index(), force=force)
+        self._get_tab_refresh_controller().refresh_current_tab(force=force)
 
     def _refresh_tab(self, tab_index: int, *, force: bool = False) -> None:
-        if (
-            not force
-            and tab_index in self._loaded_tabs
-            and tab_index not in self._dirty_tabs
-        ):
-            return
-
-        if tab_index == self._SUMMARY_TAB:
-            self.refresh_summary()
-        elif tab_index == self._TREND_TAB:
-            self.refresh_trend_tab()
-        elif tab_index == self._LOG_TAB:
-            self.refresh_logs()
-        else:
-            return
-        self._mark_tab_clean(tab_index)
+        self._get_tab_refresh_controller().refresh_tab(tab_index, force=force)
 
     def _on_tab_changed(self, tab_index: int) -> None:
-        self._refresh_tab(tab_index)
+        self._get_tab_refresh_controller().on_tab_changed(tab_index)
 
     def _request_summary_refresh(self, *_args: object) -> None:
         self._mark_tab_dirty(self._SUMMARY_TAB)
@@ -934,10 +712,11 @@ class ReportDialog(QDialog):
 
     def refresh_trend_tab(self, *_args: object) -> None:
         """Refresh trend controls and chart when the trend tab is visible."""
-        if self._title_filter_dirty or not self._title_filter_initialized:
+        tab_state = self._ensure_report_tab_state()
+        if tab_state.title_filter_dirty or not self._title_filter_initialized:
             try:
                 self._sync_title_filter(self._load_title_filter_summary())
-                self._title_filter_dirty = False
+                tab_state.title_filter_dirty = False
             except Exception:
                 logger.exception("Failed to load title filter")
         self.refresh_trend()
@@ -964,29 +743,7 @@ class ReportDialog(QDialog):
         self._set_debug_message(self._sync_result_message(result))
 
     def _sync_result_message(self, result: object) -> str:
-        error_message = str(getattr(result, "error_message", "") or "")
-        parts = [
-            "スプシ同期一部失敗" if error_message else "スプシ同期完了",
-            f"取得 {getattr(result, 'remote_count', 0)} 件",
-            f"取込 {getattr(result, 'imported', 0)} 件",
-            f"取込スキップ {getattr(result, 'import_skipped', 0)} 件",
-            f"未送信 {getattr(result, 'pending_count', 0)} 件",
-            f"バックアップ {getattr(result, 'backed_up', 0)} 件",
-        ]
-        backup_failed = getattr(result, "backup_failed", 0)
-        if backup_failed:
-            parts.append(f"バックアップ失敗 {backup_failed} 件")
-        overwritten = getattr(result, "overwritten", 0)
-        if overwritten:
-            parts.append(f"上書き {overwritten} 件")
-        reissued = getattr(result, "reissued", 0)
-        if reissued:
-            parts.append(f"別ID {reissued} 件")
-        parts.append(f"合計 {getattr(result, 'total', len(self._cached_records()))} 件")
-
-        if error_message:
-            parts.append(f"注意: {error_message}")
-        return " / ".join(parts)
+        return sync_result_message(result, lambda: len(self._cached_records()))
 
     def refresh_summary(self, *_args: object) -> None:
         """Refresh the game summary table and chart."""
@@ -996,13 +753,9 @@ class ReportDialog(QDialog):
         except Exception:
             logger.exception("Failed to load report stats")
             summary = ReportSummary(rows=[], total_seconds=0.0, session_count=0)
-        self._last_summary = summary
+        self._ensure_report_tab_state().last_summary = summary
 
-        self.summary_label.setText(
-            f"合計 {format_hms(summary.total_seconds)} / "
-            f"{summary.session_count} 回 / {len(summary.rows)} ゲーム"
-        )
-        self._populate_table(summary)
+        self._populate_summary(summary)
         self._populate_chart(summary)
         elapsed_ms = (perf_counter() - started_at) * 1000
         self._set_debug_message(
@@ -1019,7 +772,7 @@ class ReportDialog(QDialog):
         except Exception:
             logger.exception("Failed to load trend stats")
             series_list = []
-        self._last_trend_series = series_list
+        self._ensure_report_tab_state().last_trend_series = series_list
 
         self._populate_trend_selection(series_list)
         self._populate_trend_chart(series_list)
@@ -1039,47 +792,31 @@ class ReportDialog(QDialog):
         self._populate_log_table(records)
         self._apply_selected_log_row()
 
-    def _populate_table(self, summary: ReportSummary) -> None:
-        self.table.setRowCount(len(summary.rows))
-        for row_index, row in enumerate(summary.rows):
-            last_played = (
-                row.last_played.strftime("%Y/%m/%d %H:%M")
-                if row.last_played is not None
-                else "-"
-            )
-            self.table.setItem(row_index, 0, QTableWidgetItem(""))
-            self.table.setCellWidget(
-                row_index,
-                0,
-                self._create_color_swatch(row.game_title),
-            )
+    def _get_summary_table_controller(self) -> ReportSummaryTableController:
+        controller = getattr(self, "_summary_table_controller", None)
+        if controller is None:
+            controller = ReportSummaryTableController(self)
+            self._summary_table_controller = controller
+        return controller
 
-            values = [
-                row.game_title,
-                format_hms(row.total_seconds),
-                str(row.session_count),
-                format_hms(row.average_seconds),
-                last_played,
-            ]
-            for column, value in enumerate(values):
-                self.table.setItem(row_index, column + 1, QTableWidgetItem(value))
+    def _summary_label_text(self, summary: ReportSummary) -> str:
+        return summary_label_text(summary)
+
+    def _populate_summary(self, summary: ReportSummary) -> None:
+        self._get_summary_table_controller().populate_summary(summary)
+
+    def _populate_table(self, summary: ReportSummary) -> None:
+        self._get_summary_table_controller().populate_table(summary)
+
+    def _get_trend_selection_controller(self) -> ReportTrendSelectionController:
+        controller = getattr(self, "_trend_selection_controller", None)
+        if controller is None:
+            controller = ReportTrendSelectionController(self)
+            self._trend_selection_controller = controller
+        return controller
 
     def _populate_trend_table(self, series_list: List[TrendSeries]) -> None:
-        rows = [
-            (series.title, point)
-            for series in series_list
-            for point in series.points
-        ]
-        self.trend_table.setRowCount(len(rows))
-        for row_index, (title, point) in enumerate(rows):
-            values = [
-                title,
-                point.label,
-                format_hms(point.total_seconds),
-                f"{point.start_date:%Y/%m/%d} - {point.end_date:%Y/%m/%d}",
-            ]
-            for column, value in enumerate(values):
-                self.trend_table.setItem(row_index, column, QTableWidgetItem(value))
+        self._get_trend_selection_controller().populate_trend_table(series_list)
 
     @staticmethod
     def _filter_trend_series_by_indices(
@@ -1087,151 +824,51 @@ class ReportDialog(QDialog):
         start_index: int,
         end_index: int,
     ) -> List[TrendSeries]:
-        if not series_list:
-            return []
-        lower = max(0, min(start_index, end_index))
-        upper = min(max(start_index, end_index), len(series_list[0].points) - 1)
-        if lower > upper:
-            return []
-
-        filtered: List[TrendSeries] = []
-        for series in series_list:
-            points = series.points[lower : upper + 1]
-            if points:
-                filtered.append(TrendSeries(title=series.title, points=points))
-        return filtered
+        return filter_trend_series_by_indices(series_list, start_index, end_index)
 
     def _trend_selection_label(self, series_list: List[TrendSeries]) -> str:
-        if not series_list:
-            return ""
-        first_point = series_list[0].points[0]
-        last_point = series_list[0].points[-1]
-        return f"{first_point.start_date:%Y/%m/%d} - {last_point.end_date:%Y/%m/%d}"
+        return trend_selection_label(series_list)
 
     def _populate_trend_selection(self, series_list: List[TrendSeries]) -> None:
-        display_series = series_list
-        selection_label = ""
-        if self._trend_selected_indices is not None:
-            start_index, end_index = self._trend_selected_indices
-            display_series = self._filter_trend_series_by_indices(
-                series_list,
-                start_index,
-                end_index,
-            )
-            selection_label = self._trend_selection_label(display_series)
-
-        total_seconds = sum(
-            point.total_seconds
-            for series in display_series
-            for point in series.points
-        )
-        period_count = len(display_series[0].points) if display_series else 0
-        prefix = f"選択範囲 {selection_label} / " if selection_label else ""
-        self.trend_summary_label.setText(
-            f"{prefix}合計 {format_hms(total_seconds)} / "
-            f"{period_count} 期間 / {len(display_series)} {self._trend_series_label()}"
-        )
-        self._populate_trend_table(display_series)
+        self._get_trend_selection_controller().populate_trend_selection(series_list)
 
     def _select_trend_range_from_chart(self, start_x: float, end_x: float) -> None:
-        if self.trend_chart_view is None or self._last_trend_series is None:
-            return
-        if not self._last_trend_series or not self._last_trend_series[0].points:
-            return
-
-        chart = self.trend_chart_view.chart()
-        plot_area = chart.plotArea()
-        left = float(plot_area.left())
-        right = float(plot_area.right())
-        width = max(1.0, right - left)
-        point_count = len(self._last_trend_series[0].points)
-        if point_count <= 1:
-            return
-
-        def index_for_x(value: float) -> int:
-            clamped = max(left, min(right, value))
-            ratio = (clamped - left) / width
-            return max(0, min(point_count - 1, round(ratio * (point_count - 1))))
-
-        start_index = index_for_x(start_x)
-        end_index = index_for_x(end_x)
-        if start_index == end_index:
-            return
-
-        self._trend_selected_indices = (
-            min(start_index, end_index),
-            max(start_index, end_index),
+        self._get_trend_selection_controller().select_trend_range_from_chart(
+            start_x,
+            end_x,
         )
-        self._populate_trend_selection(self._last_trend_series)
-        self._update_trend_selection_action_states()
-        self._set_debug_message("推移グラフの選択範囲で集計しました")
 
     def _clear_trend_selection(self, *_args: object) -> None:
-        had_selection = self._trend_selected_indices is not None
-        self._trend_selected_indices = None
-        self._reset_trend_chart_zoom()
-        self._populate_trend_selection(self._last_trend_series or [])
-        self._update_trend_selection_action_states()
-        if had_selection:
-            self._set_debug_message("推移グラフの選択範囲を解除しました")
+        self._get_trend_selection_controller().clear_trend_selection(*_args)
 
     def _reset_trend_chart_zoom(self) -> None:
-        if self.trend_chart_view is None:
-            return
-        chart = self.trend_chart_view.chart()
-        zoom_reset = getattr(chart, "zoomReset", None)
-        if callable(zoom_reset):
-            zoom_reset()
+        self._get_trend_selection_controller().reset_trend_chart_zoom()
 
     def _update_trend_selection_action_states(self) -> None:
-        self.clear_trend_selection_button.setEnabled(
-            self._trend_selected_indices is not None
-        )
+        self._get_trend_selection_controller().update_action_states()
+
+    def _get_log_table_controller(self) -> ReportLogTableController:
+        controller = getattr(self, "_log_table_controller", None)
+        if controller is None:
+            controller = ReportLogTableController(self)
+            self._log_table_controller = controller
+        return controller
 
     def _populate_log_table(self, records: List[dict]) -> None:
-        rows = sorted(
-            records,
-            key=lambda record: int(record.get("index") or 0),
-            reverse=True,
-        )
-        self.log_table.setRowCount(len(rows))
-        for row_index, record in enumerate(rows):
-            values = [
-                str(record.get("record_id", "")),
-                str(record.get("device_id", "")),
-                str(record.get("index", "")),
-                str(record.get("start_time", "")),
-                str(record.get("end_time", "")),
-                str(record.get("title", "")),
-                self._bool_text(record.get("play_with_friends", False)),
-            ]
-            for column, value in enumerate(values):
-                self.log_table.setItem(row_index, column, QTableWidgetItem(value))
+        self._get_log_table_controller().populate_log_table(records)
 
     @staticmethod
     def _bool_text(value: object) -> str:
-        return "TRUE" if value is True or str(value).upper() == "TRUE" else "FALSE"
+        return bool_text(value)
 
     def _selected_log_row(self) -> int:
-        row = self.log_table.currentRow()
-        return row if 0 <= row < self.log_table.rowCount() else -1
+        return self._get_log_table_controller().selected_log_row()
 
     def _log_table_text(self, row: int, column: int) -> str:
-        item = self.log_table.item(row, column)
-        return item.text() if item is not None else ""
+        return self._get_log_table_controller().log_table_text(row, column)
 
     def _apply_selected_log_row(self) -> None:
-        row = self._selected_log_row()
-        if row < 0:
-            self.log_start_time_edit.setText("")
-            self.log_end_time_edit.setText("")
-            self.log_title_edit.setText("")
-            self.log_friends_check.setChecked(False)
-            return
-        self.log_start_time_edit.setText(self._log_table_text(row, 3))
-        self.log_end_time_edit.setText(self._log_table_text(row, 4))
-        self.log_title_edit.setText(self._log_table_text(row, 5))
-        self.log_friends_check.setChecked(self._log_table_text(row, 6) == "TRUE")
+        self._get_log_table_controller().apply_selected_log_row()
 
     def _edit_selected_log_record(self, *_args: object) -> None:
         row = self._selected_log_row()
@@ -1314,29 +951,18 @@ class ReportDialog(QDialog):
         )
         return selected == yes
 
-    def _start_log_edit(self, record_id: str, values: List[object]) -> None:
-        update_record = getattr(self.log_handler, "update_record", None)
-        if not callable(update_record):
-            QMessageBox.warning(self, "ログ編集エラー", "このログハンドラは編集に対応していません")
-            return
+    def _get_log_operation_controller(self) -> ReportLogOperationController:
+        controller = getattr(self, "_log_operation_controller", None)
+        if controller is None:
+            controller = ReportLogOperationController(self)
+            self._log_operation_controller = controller
+        return controller
 
-        self._start_log_operation(
-            busy_message="ログ編集を保存中...",
-            worker=lambda: update_record(record_id, values),
-            finish_callback=self._finish_log_edit,
-        )
+    def _start_log_edit(self, record_id: str, values: List[object]) -> None:
+        self._get_log_operation_controller().start_log_edit(record_id, values)
 
     def _start_log_delete(self, record_id: str) -> None:
-        delete_record = getattr(self.log_handler, "delete_record", None)
-        if not callable(delete_record):
-            QMessageBox.warning(self, "ログ削除エラー", "このログハンドラは削除に対応していません")
-            return
-
-        self._start_log_operation(
-            busy_message="ログを削除中...",
-            worker=lambda: delete_record(record_id),
-            finish_callback=self._finish_log_delete,
-        )
+        self._get_log_operation_controller().start_log_delete(record_id)
 
     def _start_log_operation(
         self,
@@ -1345,254 +971,74 @@ class ReportDialog(QDialog):
         worker: Callable[[], object],
         finish_callback: Callable[[object], None],
     ) -> None:
-        if self._log_edit_future is not None and not self._log_edit_future.done():
-            self._set_debug_message("ログ操作中です。完了まで待ってください")
-            return
-
-        self.log_edit_button.setEnabled(False)
-        self.log_delete_button.setEnabled(False)
-        self._set_debug_message(busy_message, process_events=True)
-        self._log_edit_finish_callback = finish_callback
-        self._log_edit_future = self._log_edit_executor.submit(worker)
-        self._log_edit_timer = QTimer(self)
-        self._log_edit_timer.setInterval(100)
-        self._log_edit_timer.timeout.connect(self._check_log_edit_result)
-        self._log_edit_timer.start()
+        self._get_log_operation_controller().start_log_operation(
+            busy_message=busy_message,
+            worker=worker,
+            finish_callback=finish_callback,
+        )
 
     def _check_log_edit_result(self) -> None:
-        future = self._log_edit_future
-        if future is None or not future.done():
-            return
-
-        if self._log_edit_timer is not None:
-            self._log_edit_timer.stop()
-            self._log_edit_timer.deleteLater()
-            self._log_edit_timer = None
-        self._log_edit_future = None
-        self.log_edit_button.setEnabled(True)
-        self.log_delete_button.setEnabled(True)
-
-        try:
-            result = future.result()
-        except Exception as exc:
-            self._log_edit_finish_callback = None
-            logger.exception("Failed to complete play log operation")
-            QMessageBox.warning(self, "ログ編集エラー", str(exc))
-            return
-
-        finish_callback = self._log_edit_finish_callback
-        self._log_edit_finish_callback = None
-        if finish_callback is not None:
-            finish_callback(result)
+        self._get_log_operation_controller().check_log_edit_result()
 
     def _finish_log_edit(self, result: object) -> None:
-        if not getattr(result, "local_updated", False):
-            QMessageBox.warning(
-                self,
-                "ログ編集エラー",
-                str(getattr(result, "error_message", "") or "ローカルDBの更新に失敗しました"),
-            )
-            return
-
-        self._mark_report_data_changed()
-        self.refresh_logs()
-        self._mark_tab_clean(self._LOG_TAB)
-        if getattr(result, "spreadsheet_updated", False):
-            self._set_debug_message("ログを編集し、スプシにも反映しました")
-            return
-
-        error_message = str(getattr(result, "error_message", "") or "")
-        if error_message:
-            self._set_debug_message(f"ログを編集しました。スプシ反映は失敗しました: {error_message}")
-        else:
-            self._set_debug_message("ログを編集しました。スプシ設定がないためローカルのみ更新しました")
+        self._get_log_operation_controller().finish_log_edit(result)
 
     def _finish_log_delete(self, result: object) -> None:
-        if not getattr(result, "local_deleted", False):
-            QMessageBox.warning(
-                self,
-                "ログ削除エラー",
-                str(getattr(result, "error_message", "") or "ローカルDBの削除に失敗しました"),
-            )
-            return
-
-        self._mark_report_data_changed()
-        self.refresh_logs()
-        self._mark_tab_clean(self._LOG_TAB)
-        if getattr(result, "spreadsheet_deleted", False):
-            self._set_debug_message("ログを削除し、スプシにも反映しました")
-            return
-
-        error_message = str(getattr(result, "error_message", "") or "")
-        if error_message:
-            self._set_debug_message(f"ログを削除しました。スプシ反映は失敗しました: {error_message}")
-        else:
-            self._set_debug_message("ログを削除しました。スプシ設定がないためローカルのみ削除しました")
+        self._get_log_operation_controller().finish_log_delete(result)
 
     def closeEvent(self, event: object) -> None:
-        if self._log_edit_timer is not None:
-            self._log_edit_timer.stop()
-            self._log_edit_timer = None
-        self._log_edit_finish_callback = None
-        self._log_edit_executor.shutdown(wait=False, cancel_futures=True)
+        self._get_log_operation_controller().close()
         close_event = getattr(super(), "closeEvent", None)
         if callable(close_event):
             close_event(event)
 
+    def _get_chart_builder(self) -> ReportChartBuilder:
+        builder = getattr(self, "_chart_builder", None)
+        if builder is None:
+            builder = ReportChartBuilder(
+                self._seconds_to_graph_value,
+                self._graph_unit_label,
+            )
+            self._chart_builder = builder
+        return builder
+
     def _populate_chart(self, summary: ReportSummary) -> None:
-        if self.chart_view is None or not CHARTS_AVAILABLE:
-            return
-        if not summary.rows:
-            self.chart_view.setChart(QChart())
-            return
-
         chart_type = self.chart_type_combo.currentData()
-        if chart_type == "pie":
-            self.chart_view.setChart(self._build_pie_chart(summary))
-            return
-
-        self.chart_view.setChart(self._build_bar_chart(summary))
+        self._get_chart_builder().populate_summary_chart(
+            self.chart_view,
+            summary,
+            chart_type,
+        )
 
     @staticmethod
     def _top_rows_with_other(
         summary: ReportSummary,
         limit: int = 10,
     ) -> Tuple[list, float]:
-        top_rows = summary.rows[:limit]
-        other_seconds = sum(row.total_seconds for row in summary.rows[limit:])
-        return top_rows, other_seconds
+        return top_rows_with_other(summary, limit=limit)
 
     @classmethod
     def _color_for_title(cls, title: str) -> object:
-        digest = sha1(title.encode("utf-8")).digest()
-        color_index = int.from_bytes(digest[:2], "big") % len(cls._GAME_COLORS)
-        if QColor is None:
-            return cls._GAME_COLORS[color_index]
-        return QColor(cls._GAME_COLORS[color_index])
+        return color_for_title(title)
 
     @classmethod
     def _color_name_for_title(cls, title: str) -> str:
-        color = cls._color_for_title(title)
-        if hasattr(color, "name"):
-            return str(color.name())
-        return str(color)
+        return color_name_for_title(title)
 
     def _create_color_swatch(self, title: str) -> QWidget:
-        container = QWidget(self.table)
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(10, 4, 10, 4)
-
-        swatch = QWidget(container)
-        swatch.setFixedSize(28, 14)
-        swatch.setStyleSheet(
-            "QWidget {"
-            f"background-color: {self._color_name_for_title(title)};"
-            "border: 1px solid rgba(0, 0, 0, 70);"
-            "border-radius: 3px;"
-            "}"
-        )
-        layout.addWidget(swatch)
-        layout.addStretch()
-        return container
+        return create_color_swatch(self.table, title)
 
     def _build_bar_chart(self, summary: ReportSummary) -> object:
-        top_rows = summary.rows[:10]
-        values = [self._seconds_to_graph_value(row.total_seconds) for row in top_rows]
-        categories = [row.game_title for row in top_rows]
-
-        series = QStackedBarSeries()
-        for row_index, row in enumerate(top_rows):
-            bar_set = QBarSet(row.game_title)
-            bar_set.setColor(self._color_for_title(row.game_title))
-            for value_index, value in enumerate(values):
-                bar_set.append(value if value_index == row_index else 0.0)
-            series.append(bar_set)
-
-        chart = QChart()
-        chart.addSeries(series)
-        chart.setTitle("プレイ時間 上位")
-        chart.legend().setVisible(False)
-
-        axis_x = QBarCategoryAxis()
-        axis_x.append(categories)
-        chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
-        series.attachAxis(axis_x)
-
-        axis_y = QValueAxis()
-        axis_y.setTitleText(self._graph_unit_label())
-        axis_y.setRange(0, max(values) * 1.15 if values else 1)
-        chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
-        series.attachAxis(axis_y)
-
-        return chart
+        return self._get_chart_builder().build_bar_chart(summary)
 
     def _build_pie_chart(self, summary: ReportSummary) -> object:
-        top_rows, other_seconds = self._top_rows_with_other(summary, limit=8)
-
-        series = QPieSeries()
-        for row in top_rows:
-            pie_slice = series.append(row.game_title, row.total_seconds)
-            pie_slice.setColor(self._color_for_title(row.game_title))
-        if other_seconds > 0:
-            other_slice = series.append("その他", other_seconds)
-            if QColor is not None:
-                other_slice.setColor(QColor("#94A3B8"))
-
-        for pie_slice in series.slices():
-            percentage = pie_slice.percentage() * 100
-            pie_slice.setLabel(f"{pie_slice.label()} {percentage:.1f}%")
-            pie_slice.setLabelVisible(percentage >= 4.0)
-
-        chart = QChart()
-        chart.addSeries(series)
-        chart.setTitle("プレイ時間の割合")
-        chart.legend().setVisible(True)
-        return chart
+        return self._get_chart_builder().build_pie_chart(summary)
 
     def _populate_trend_chart(self, series_list: List[TrendSeries]) -> None:
-        if self.trend_chart_view is None or not CHARTS_AVAILABLE:
-            return
-        if not series_list:
-            self.trend_chart_view.setChart(QChart())
-            return
-
-        self.trend_chart_view.setChart(self._build_line_chart(series_list))
+        self._get_chart_builder().populate_trend_chart(
+            self.trend_chart_view,
+            series_list,
+        )
 
     def _build_line_chart(self, series_list: List[TrendSeries]) -> object:
-        reference_points = series_list[0].points
-        max_value = 0.0
-
-        chart = QChart()
-        line_series = []
-        for trend_series in series_list:
-            series = QLineSeries()
-            series.setName(trend_series.title)
-            for index, point in enumerate(trend_series.points):
-                value = self._seconds_to_graph_value(point.total_seconds)
-                max_value = max(max_value, value)
-                series.append(float(index), value)
-            chart.addSeries(series)
-            line_series.append(series)
-
-        chart.setTitle("プレイ時間の推移")
-        chart.legend().setVisible(len(line_series) > 1)
-
-        axis_x = QCategoryAxis()
-        axis_x.setLabelsPosition(QCategoryAxis.AxisLabelsPositionOnValue)
-        label_step = max(1, len(reference_points) // 8)
-        for index, point in enumerate(reference_points):
-            if index % label_step == 0 or index == len(reference_points) - 1:
-                axis_x.append(point.label, float(index))
-        axis_x.setRange(0.0, float(max(0, len(reference_points) - 1)))
-        chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
-
-        axis_y = QValueAxis()
-        axis_y.setTitleText(self._graph_unit_label())
-        axis_y.setRange(0, max_value * 1.15 if max_value else 1)
-        chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
-
-        for series in line_series:
-            series.attachAxis(axis_x)
-            series.attachAxis(axis_y)
-
-        return chart
+        return self._get_chart_builder().build_line_chart(series_list)

@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import sqlite3
 from pathlib import Path
 
 from src.infra.play_log_store import PlayLogStore
@@ -166,6 +167,64 @@ class TestPlayLogStore(unittest.TestCase):
 
         self.assertEqual(self.store.load_records(), [])
         self.assertEqual(self.store.load_pending_backup_records(), [])
+
+    def test_schema_version_is_recorded(self):
+        self.store.load_records()
+
+        conn = sqlite3.connect(self.store.db_path)
+        try:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            conn.close()
+
+        self.assertEqual(version, PlayLogStore.SCHEMA_VERSION)
+
+    def test_legacy_schema_migrates_and_records_schema_version(self):
+        legacy_db = Path(self.temp_dir.name) / "legacy_play_logs.sqlite3"
+        conn = sqlite3.connect(legacy_db)
+        try:
+            conn.execute(
+                """
+                CREATE TABLE play_records (
+                    record_index INTEGER NOT NULL,
+                    start_time TEXT NOT NULL,
+                    end_time TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    play_with_friends TEXT NOT NULL,
+                    backed_up INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO play_records(
+                    record_index,
+                    start_time,
+                    end_time,
+                    title,
+                    play_with_friends,
+                    backed_up
+                )
+                VALUES (1, '2026/04/26 10:00:00', '2026/04/26 10:30:00', 'Legacy', 'TRUE', 1)
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        migrated_store = PlayLogStore(legacy_db, device_id="device")
+        records = migrated_store.load_records()
+
+        self.assertEqual(records[0]["record_id"], "device:1")
+        self.assertEqual(records[0]["title"], "Legacy")
+        conn = sqlite3.connect(legacy_db)
+        try:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(version, PlayLogStore.SCHEMA_VERSION)
 
 
 if __name__ == "__main__":

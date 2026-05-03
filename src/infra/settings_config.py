@@ -15,6 +15,7 @@ from src.infra.config_loader import (
     PLAY_LOG_SYNC_CONFLICT_POLICIES,
 )
 from src.infra.runtime_paths import resolve_config_file
+from src.infra.settings_repository import SettingsConfigRepository
 from src.infra.settings_store import SettingsStore
 
 
@@ -126,9 +127,9 @@ def save_editable_config(
 ) -> Path:
     """Save settings to SQLite only."""
     parser = editable_config_to_parser(config)
-    store = settings_store or SettingsStore()
-    store.save_config(parser)
-    return store.db_path
+    return SettingsConfigRepository(settings_store=settings_store).save_runtime_config(
+        parser
+    )
 
 
 def export_editable_config(
@@ -153,6 +154,8 @@ def import_editable_config(
     """Import an INI file into SQLite and return the imported values."""
     loader = ConfigLoader(config_file_path=config_file_path)
     editable_config = _typed_config_to_editable(loader)
-    store = settings_store or SettingsStore()
-    store.save_config(editable_config_to_parser(editable_config))
+    SettingsConfigRepository(
+        config_file_path=config_file_path,
+        settings_store=settings_store,
+    ).save_runtime_config(editable_config_to_parser(editable_config))
     return editable_config

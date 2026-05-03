@@ -4,7 +4,8 @@ from typing import Dict, List, Optional, Tuple
 from unittest.mock import MagicMock, patch
 
 from src.app import main
-from src.core import services
+from src.core import adapters as services
+from src.core import domain
 from tests.test_stubs import FakeLogHandler
 
 
@@ -72,7 +73,7 @@ def create_mock_main_window(
     elif display_mode is not None:
         window.mode_sizes = dict(DEFAULT_MODE_SIZES)
 
-    window.daily_stats = services.DailyStatsTracker()
+    window.daily_stats = domain.DailyStatsTracker()
     window.overlay_window = None
     window.tray_icon = None
     window.tray_menu = None
@@ -92,7 +93,7 @@ def create_mock_main_window(
     )
 
     if include_state_tracker:
-        window.state_tracker = services.GameStateTracker(
+        window.state_tracker = domain.GameStateTracker(
             recorder=window.recorder,
             daily_stats=window.daily_stats,
             browsers=list(window.browsers),

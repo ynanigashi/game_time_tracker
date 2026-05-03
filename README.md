@@ -164,17 +164,35 @@ Windows PC で起動しているアプリケーションのウィンドウタイ
 ## ファイル構成
 
 ### アプリケーションコード
-- [src/app/main.py](src/app/main.py) : PySide6 GUI（`MainWindow` クラス）。イベント処理とUI更新のみを担当。
+- [src/app/main.py](src/app/main.py) : PySide6 GUI（`MainWindow` クラス）。イベント処理と各 controller への委譲を担当。
 - [src/core/models.py](src/core/models.py) : データモデル（`GameEntry`, `ParsedRecord`）とパース関数。
-- [src/core/services.py](src/core/services.py) : ビジネスロジック（`GameInfoLoader`, `WindowScanner`, `SessionRecorder`, `DailyStatsTracker`）。
+- [src/core/domain.py](src/core/domain.py) : UIや外部I/Oに依存しないドメインロジック（`GameStateTracker`, `DailyStatsTracker`, `ScanResult`）。
+- [src/core/adapters.py](src/core/adapters.py) : 外部I/Oに触れるアダプター（`GameInfoLoader`, `WindowScanner`, `SessionRecorder`）。
 - [src/core/window_state.py](src/core/window_state.py) : ウィンドウ状態の保存/読み込み（`WindowState`）。
 - [src/ui/gui_layout.py](src/ui/gui_layout.py) : UIレイアウト構築。
 - [src/ui/game_catalog_dialog.py](src/ui/game_catalog_dialog.py) : ローカルゲーム情報の追加・編集・削除画面。
+- [src/ui/report_dialog.py](src/ui/report_dialog.py) : プレイログの集計・グラフ・ログ編集ダイアログ。
+- [src/ui/report_charts.py](src/ui/report_charts.py) : レポート用 QtCharts の生成、色決定、チャートビュー生成。
+- [src/ui/report_graph_unit.py](src/ui/report_graph_unit.py) : レポートグラフの分/時間切替と再描画制御。
+- [src/ui/report_log_operations.py](src/ui/report_log_operations.py) : レポートログ編集・削除の非同期実行と完了処理。
+- [src/ui/report_log_table.py](src/ui/report_log_table.py) : レポートログテーブルの表示・選択行の編集フォーム反映。
+- [src/ui/report_summary_table.py](src/ui/report_summary_table.py) : ゲーム別集計ラベル・テーブル表示。
+- [src/ui/report_sync_messages.py](src/ui/report_sync_messages.py) : スプレッドシート同期結果のステータスメッセージ整形。
+- [src/ui/report_tab_refresh.py](src/ui/report_tab_refresh.py) : レポートダイアログのタブ遅延更新・dirty 状態管理。
+- [src/ui/report_tab_state.py](src/ui/report_tab_state.py) : レポートタブの loaded/dirty 状態と集計キャッシュ。
+- [src/ui/report_title_filter.py](src/ui/report_title_filter.py) : レポート推移タブのタイトル選択・一括選択状態管理。
+- [src/ui/report_trend_selection.py](src/ui/report_trend_selection.py) : 推移グラフの範囲選択・選択範囲テーブル更新。
+- [src/ui/report_date_ranges.py](src/ui/report_date_ranges.py) : レポート期間プリセットの日付範囲計算。
 - [src/infra/log_handler.py](src/infra/log_handler.py) : プレイログの読み書き窓口。ローカルDBを主保存先にし、スプレッドシートへのバックアップとキャッシュ更新を担当。
+- [src/infra/play_log_analytics.py](src/infra/play_log_analytics.py) : キャッシュ済みプレイログから今日統計・レポート・推移データを計算。
+- [src/infra/play_log_backup.py](src/infra/play_log_backup.py) : スプレッドシートバックアップ、未送信キュー、手動同期の内部処理。
 - [src/infra/play_log_store.py](src/infra/play_log_store.py) : `data/play_logs.sqlite3` へのプレイログ保存・読み込み・バックアップ状態管理。
 - [src/infra/game_catalog_store.py](src/infra/game_catalog_store.py) : `data/game_catalog.sqlite3` へのゲーム情報保存・読み込み・論理削除。
+- [src/infra/sqlite_base_store.py](src/infra/sqlite_base_store.py) : SQLite store 共通の接続・トランザクション管理、`PRAGMA user_version` によるスキーマバージョン記録。
 - [src/infra/config_loader.py](src/infra/config_loader.py) : SQLite 設定の読み込みと `config/config.ini` 初回移行。ブラウザ判定/除外タイトルはここで定義。
+- [src/infra/settings_repository.py](src/infra/settings_repository.py) : SQLite をランタイム設定の正とし、INI 初回移行・明示 import/export との境界を管理。
 - [src/infra/settings_store.py](src/infra/settings_store.py) : `data/settings.sqlite3` への設定値・ウィンドウ状態の保存。
+- [src/infra/log_config.py](src/infra/log_config.py) : アプリ起動時のロギング初期化とログファイル設定。
 
 ### 設定・その他
 - [game_time_tracker.bat](game_time_tracker.bat) : 開発者向けのWindowsバッチファイル。仮想環境を有効化して main.py を実行。
@@ -227,31 +245,31 @@ exclude_titles = Program Manager, Settings, 設定, NVIDIA GeForce Overlay, Wind
 - `sheet_gid` は整数値で指定してください（例: `sheet_gid = 1198224769`）。
 
 ## 開発向け
-- テスト実行: `python -m unittest`
+- テスト実行: `python -m pytest -q`
 - 監視間隔は `src/app/main.py` 冒頭の定数で変更できます：
   - `POLL_INTERVAL_SECONDS = 1`（デフォルト: 1秒）
-- 最小記録時間は `src/core/services_domain.py` の定数で変更できます：
+- 最小記録時間は `src/core/domain.py` の定数で変更できます：
   - `MIN_PLAY_MINUTES = 5`（デフォルト: 5分）
 - 監視対象ブラウザ・除外ウィンドウは設定画面で変更できます（未設定時は `config_loader.py` のデフォルト値）。
 - モジュール構成:
-  - `src/core`: ドメイン層（`models.py`, `services.py`, `services_domain.py`, `time_utils.py`, `window_state.py`）
-  - `src/infra`: 外部連携・保存層（`config_loader.py`, `gspread_service.py`, `log_handler.py`, `play_log_store.py`）
-  - `src/ui`: UIレイアウト（`gui_layout.py`）
-  - `src/app`: エントリーポイント/UI制御（`main.py`, `main_components.py`）
+  - `src/core`: ドメイン層（`models.py`, `domain.py`, `adapters.py`, `time_utils.py`, `window_state.py`）
+  - `src/infra`: 外部連携・保存層（`config_loader.py`, `gspread_service.py`, `log_config.py`, `log_handler.py`, `play_log_analytics.py`, `play_log_backup.py`, `play_log_store.py`, `settings_repository.py`, `sqlite_base_store.py`）
+  - `src/ui`: UIレイアウトとダイアログ（`gui_layout.py`, `report_dialog.py`, `report_charts.py`, `report_graph_unit.py`, `report_log_operations.py`, `report_log_table.py`, `report_summary_table.py`, `report_sync_messages.py`, `report_tab_refresh.py`, `report_tab_state.py`, `report_title_filter.py`, `report_trend_selection.py`, `report_date_ranges.py`）
+  - `src/app`: エントリーポイント/UI制御（`main.py`, `controllers/`, `session_state.py`, `main_ui.py`, `main_loop.py`, `main_scan.py`, `main_alerts.py`, `main_bootstrap.py`, `main_dialogs.py`, `tray_controller.py`, `main_context_menu.py`, `window_title_controller.py`, `cover_detector.py`, `main_overlay.py`, `overlay_window.py`, `window_state_controller.py`, `display_modes.py`）
   - ルートの `main.py` は実行エントリです。実装は `src/` 配下にあります。
 
 ## 開発ガイド
 - 仮想環境: `python -m venv .venv && .\.venv\Scripts\activate && pip install -r requirements.txt`
 - 実行: `python main.py`（ローカルDBへの書き込みと Google Sheets へのバックアップが発生するため必要なら別シートで検証）
 - 設定: 初回起動時の設定画面でプレイログ保存モード、ログシート・ゲーム情報シートのキーと gid、サービスアカウント JSON のパスを指定
-- テスト: 依存をスタブ化した単体テストを `python -m unittest` で実行（`tests/` 配下）
+- テスト: 依存をスタブ化した単体テストを `python -m pytest -q` で実行（`tests/` 配下）
 - 拡張例:
   - ポーリング間隔の変更は `src/app/main.py` の `POLL_INTERVAL_SECONDS`
-  - 最小記録時間の変更は `src/core/services_domain.py` の `MIN_PLAY_MINUTES`
+  - 最小記録時間の変更は `src/core/domain.py` の `MIN_PLAY_MINUTES`
   - 対応ブラウザや除外ウィンドウの追加は設定画面（未設定時は `config_loader.py` のデフォルト値）
   - 新しいデータモデルは `src/core/models.py` に追加
-  - 新しいビジネスロジックは `src/core/services.py` / `src/core/services_domain.py` に追加
-  - UIの拡張は `src/app/main.py` の `MainWindow` を拡張
+  - 新しい純粋ロジックは `src/core/domain.py`、外部I/Oを伴う処理は `src/core/adapters.py` に追加
+  - UIの拡張は `src/app/main.py` の `MainWindow` から委譲される controller 側に追加し、呼び出し側は `src/app/controllers/` の公開 import 面を使う
 
 ### クラス/メソッドの関係図（Mermaid）
 ```mermaid
