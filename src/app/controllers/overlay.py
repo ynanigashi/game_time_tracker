@@ -2,7 +2,7 @@
 
 import logging
 import time
-from typing import Any, Optional, Tuple, cast
+from typing import Any, Callable, Optional, Tuple, cast
 
 from PySide6.QtWidgets import QApplication, QWidget
 
@@ -28,26 +28,51 @@ logger = logging.getLogger(__name__)
 class MainWindowOverlayController:
     """MainWindow のオーバーレイ表示制御ロジック."""
 
-    def __init__(self, owner: "MainWindow") -> None:
+    def __init__(
+        self,
+        owner: "MainWindow",
+        *,
+        overlay_window_provider: Optional[Callable[[], object]] = None,
+        set_overlay_window: Optional[Callable[[object], None]] = None,
+        today_time_display_provider: Optional[Callable[[], object]] = None,
+        save_window_state: Optional[Callable[[], None]] = None,
+        has_playing_games: Optional[Callable[[], bool]] = None,
+        today_display_cover_state: Optional[Callable[[], Tuple[bool, str]]] = None,
+        is_own_window: Optional[Callable[[int], bool]] = None,
+    ) -> None:
         self.owner = owner
         self.visibility_log_state = OverlayVisibilityLogState()
+        self.overlay_window_provider = overlay_window_provider or (
+            lambda: getattr(self.owner, "overlay_window", None)
+        )
+        self.set_overlay_window = set_overlay_window or (
+            lambda window: setattr(self.owner, "overlay_window", window)
+        )
+        self.today_time_display_provider = today_time_display_provider or (
+            lambda: None
+        )
+        self.save_window_state = save_window_state or (lambda: None)
+        self.has_playing_games = has_playing_games or (lambda: False)
+        self.today_display_cover_state = today_display_cover_state
+        self.is_own_window = is_own_window
 
     def initialize_overlay(self) -> None:
         """今日のプレイ時間オーバーレイを初期化する."""
-        if self.owner._get_overlay_window() is not None:
+        if self.overlay_window_provider() is not None:
             return
 
         try:
-            self.owner.overlay_window = TodayTimeOverlayWindow(
+            overlay_window = TodayTimeOverlayWindow(
                 on_moved=self._on_overlay_moved,
                 on_dragged=self._on_overlay_dragged,
                 on_move_finished=self._save_overlay_position,
             )
-            self.owner.overlay_window.hide()
+            self.set_overlay_window(overlay_window)
+            overlay_window.hide()
             self.sync_overlay()
         except Exception as e:
             logger.warning("オーバーレイ初期化に失敗したため無効化します: %s", e)
-            self.owner.overlay_window = None
+            self.set_overlay_window(None)
 
     def _on_overlay_moved(self, x: int, y: int) -> None:
         self.owner.overlay_position = (int(x), int(y))
@@ -58,7 +83,7 @@ class MainWindowOverlayController:
         self._move_owner_today_display_to(int(x), int(y))
 
     def _move_owner_today_display_to(self, x: int, y: int) -> None:
-        target = self.owner._get_today_time_display()
+        target = self.today_time_display_provider()
         if target is None:
             return
         try:
@@ -75,21 +100,19 @@ class MainWindowOverlayController:
             logger.debug("メインウィンドウ位置の同期に失敗", exc_info=True)
 
     def _save_overlay_position(self) -> None:
-        save = getattr(self.owner, "_save_window_state", None)
-        if callable(save):
-            save()
+        self.save_window_state()
 
     def refresh_overlay_time(self) -> None:
         """オーバーレイの時刻表示を更新する."""
-        overlay_window = self.owner._get_overlay_window()
-        today_time_display = self.owner._get_today_time_display()
+        overlay_window = self.overlay_window_provider()
+        today_time_display = self.today_time_display_provider()
         if overlay_window is None or today_time_display is None:
             return
         overlay_window.set_today_text(today_time_display.text())
 
     def sync_overlay_geometry(self) -> None:
         """Apply the overlay position for the current main-window state."""
-        overlay_window = self.owner._get_overlay_window()
+        overlay_window = self.overlay_window_provider()
         if overlay_window is None:
             return
         is_dragging = getattr(overlay_window, "is_dragging", None)
@@ -98,7 +121,7 @@ class MainWindowOverlayController:
 
         try:
             if bool(getattr(self.owner, "isVisible", lambda: False)()):
-                target = self.owner._get_today_time_display()
+                target = self.today_time_display_provider()
                 if target is None:
                     return
                 top_left = target.mapToGlobal(target.rect().topLeft())
@@ -172,18 +195,13 @@ class MainWindowOverlayController:
     def _evaluate_overlay_visibility(self) -> Tuple[bool, str]:
         """オーバーレイ表示可否と理由を返す."""
         if bool(getattr(self.owner, "isVisible", lambda: False)()):
-            if not bool(getattr(self.owner, "_has_playing_games", lambda: False)()):
+            if not self.has_playing_games():
                 return False, "no_playing_game"
             if self._is_own_window_foreground():
                 return False, "own_window_foreground"
-            cover_state_getter = getattr(
-                self.owner,
-                "_get_today_display_cover_state",
-                None,
-            )
-            if callable(cover_state_getter):
+            if self.today_display_cover_state is not None:
                 try:
-                    covered, reason = cast(Tuple[bool, str], cover_state_getter())
+                    covered, reason = self.today_display_cover_state()
                     return (True, reason) if covered else (False, reason)
                 except Exception:
                     logger.debug("今日のプレイ時間被覆判定に失敗", exc_info=True)
@@ -193,7 +211,7 @@ class MainWindowOverlayController:
 
         if not bool(getattr(self.owner, "tray_overlay_enabled", False)):
             return False, "tray_overlay_disabled"
-        if not bool(getattr(self.owner, "_has_playing_games", lambda: False)()):
+        if not self.has_playing_games():
             return False, "no_playing_game"
         return True, "tray_overlay_enabled"
 
@@ -211,9 +229,8 @@ class MainWindowOverlayController:
 
         try:
             foreground_hwnd = get_foreground_hwnd()
-            is_own_window = getattr(self.owner, "_is_own_window", None)
-            if foreground_hwnd and callable(is_own_window):
-                return bool(is_own_window(foreground_hwnd))
+            if foreground_hwnd and self.is_own_window is not None:
+                return bool(self.is_own_window(foreground_hwnd))
         except Exception:
             logger.debug("前面ウィンドウ判定に失敗", exc_info=True)
 
@@ -247,7 +264,7 @@ class MainWindowOverlayController:
 
     def sync_overlay_visibility(self) -> None:
         """表示条件に応じてオーバーレイを表示/非表示する."""
-        overlay_window = self.owner._get_overlay_window()
+        overlay_window = self.overlay_window_provider()
         if overlay_window is None:
             return
 
@@ -278,7 +295,7 @@ class MainWindowOverlayController:
     def sync_overlay(self) -> None:
         """オーバーレイの表示内容・位置・可視状態を同期する."""
         self.refresh_overlay_time()
-        overlay_window = self.owner._get_overlay_window()
+        overlay_window = self.overlay_window_provider()
         continue_drag = getattr(overlay_window, "continue_drag_from_global_cursor", None)
         is_dragging = bool(continue_drag()) if callable(continue_drag) else False
         if not is_dragging:
@@ -342,11 +359,11 @@ class MainWindowOverlayController:
 
     def close_overlay(self) -> None:
         """オーバーレイを閉じて参照を解放する."""
-        overlay_window = self.owner._get_overlay_window()
+        overlay_window = self.overlay_window_provider()
         if overlay_window is None:
             return
         overlay_window.close()
-        self.owner.overlay_window = None
+        self.set_overlay_window(None)
 
 
 __all__ = [
