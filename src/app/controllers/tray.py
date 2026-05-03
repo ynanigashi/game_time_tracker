@@ -35,6 +35,15 @@ class MainWindowTrayController:
         sync_tray_window_actions_callback: Callable[[], None] = lambda: None,
         save_window_state: Callable[[], None] = lambda: None,
         sync_overlay: Callable[[], None] = lambda: None,
+        set_force_startup_window_visible: Callable[[bool], None] = lambda _visible: None,
+        process_pending_ui_events_callback: Callable[[], None] = lambda: None,
+        align_today_display_to_overlay_position_callback: Callable[[], None] = (
+            lambda: None
+        ),
+        today_time_display_provider: Callable[[], object] = lambda: None,
+        set_quitting: Callable[[bool], None] = lambda _quitting: None,
+        record_playing_games_before_close: Callable[[], None] = lambda: None,
+        close_overlay: Callable[[], None] = lambda: None,
     ) -> None:
         self.owner = owner
         self.base_title = base_title
@@ -51,11 +60,20 @@ class MainWindowTrayController:
         self.sync_tray_window_actions_callback = sync_tray_window_actions_callback
         self.save_window_state = save_window_state
         self.sync_overlay = sync_overlay
+        self.set_force_startup_window_visible = set_force_startup_window_visible
+        self.process_pending_ui_events_callback = process_pending_ui_events_callback
+        self.align_today_display_to_overlay_position_callback = (
+            align_today_display_to_overlay_position_callback
+        )
+        self.today_time_display_provider = today_time_display_provider
+        self.set_quitting = set_quitting
+        self.record_playing_games_before_close = record_playing_games_before_close
+        self.close_overlay = close_overlay
 
     def initialize_tray_icon(self) -> None:
         if not QSystemTrayIcon.isSystemTrayAvailable():
             logger.warning("system tray is not available")
-            self.owner._force_startup_window_visible = True
+            self.set_force_startup_window_visible(True)
             return
 
         tray_icon = QSystemTrayIcon(self.create_tray_icon(), self.owner)
@@ -153,14 +171,14 @@ class MainWindowTrayController:
 
     def show_main_window_from_tray(self) -> None:
         self.owner.show()
-        self.owner._process_pending_ui_events()
-        self.owner._align_today_display_to_overlay_position()
-        self.owner._process_pending_ui_events()
-        self.owner._align_today_display_to_overlay_position()
+        self.process_pending_ui_events_callback()
+        self.align_today_display_to_overlay_position_callback()
+        self.process_pending_ui_events_callback()
+        self.align_today_display_to_overlay_position_callback()
         self.owner.raise_()
         self.owner.activateWindow()
-        self.owner._sync_tray_window_actions()
-        self.owner._sync_overlay()
+        self.sync_tray_window_actions_callback()
+        self.sync_overlay()
 
     @staticmethod
     def process_pending_ui_events() -> None:
@@ -173,7 +191,7 @@ class MainWindowTrayController:
         overlay_position = getattr(self.owner, "overlay_position", None)
         if overlay_position is None:
             return
-        target = self.owner._get_today_time_display()
+        target = self.today_time_display_provider()
         if target is None:
             return
         try:
@@ -221,10 +239,10 @@ class MainWindowTrayController:
         self.sync_overlay()
 
     def quit_application(self) -> None:
-        self.owner._is_quitting = True
-        self.owner._record_playing_games_before_close()
+        self.set_quitting(True)
+        self.record_playing_games_before_close()
         self.save_window_state()
-        self.owner._close_overlay()
+        self.close_overlay()
         tray_icon = getattr(self.owner, "tray_icon", None)
         if tray_icon is not None:
             tray_icon.hide()

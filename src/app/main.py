@@ -742,6 +742,25 @@ class MainWindow(QWidget):
                 sync_tray_window_actions_callback=self._sync_tray_window_actions,
                 save_window_state=self._save_window_state,
                 sync_overlay=self._sync_overlay,
+                set_force_startup_window_visible=lambda visible: setattr(
+                    self,
+                    "_force_startup_window_visible",
+                    bool(visible),
+                ),
+                process_pending_ui_events_callback=self._process_pending_ui_events,
+                align_today_display_to_overlay_position_callback=(
+                    self._align_today_display_to_overlay_position
+                ),
+                today_time_display_provider=self._get_today_time_display,
+                set_quitting=lambda quitting: setattr(
+                    self,
+                    "_is_quitting",
+                    bool(quitting),
+                ),
+                record_playing_games_before_close=(
+                    self._record_playing_games_before_close
+                ),
+                close_overlay=self._close_overlay,
             ),
             validator=lambda controller: controller.owner is self,
         )

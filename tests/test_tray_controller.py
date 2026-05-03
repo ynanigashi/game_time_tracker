@@ -69,6 +69,62 @@ class MainWindowTrayControllerTest(unittest.TestCase):
         self.assertTrue(owner.tray_overlay_enabled)
         self.assertEqual(calls, ["save", "overlay"])
 
+    def test_show_main_window_from_tray_uses_injected_flow_callbacks(self):
+        calls = []
+        owner = SimpleNamespace(
+            show=lambda: calls.append("show"),
+            raise_=lambda: calls.append("raise"),
+            activateWindow=lambda: calls.append("activate"),
+        )
+        controller = MainWindowTrayController(
+            owner,
+            base_title="Game Time Tracker",
+            action_state=TrayActionState(),
+            process_pending_ui_events_callback=lambda: calls.append("process"),
+            align_today_display_to_overlay_position_callback=lambda: calls.append(
+                "align"
+            ),
+            sync_tray_window_actions_callback=lambda: calls.append("tray"),
+            sync_overlay=lambda: calls.append("overlay"),
+        )
+
+        controller.show_main_window_from_tray()
+
+        self.assertEqual(
+            calls,
+            [
+                "show",
+                "process",
+                "align",
+                "process",
+                "align",
+                "raise",
+                "activate",
+                "tray",
+                "overlay",
+            ],
+        )
+
+    def test_quit_application_uses_injected_shutdown_callbacks(self):
+        calls = []
+        owner = SimpleNamespace(tray_icon=None)
+        controller = MainWindowTrayController(
+            owner,
+            base_title="Game Time Tracker",
+            action_state=TrayActionState(),
+            set_quitting=lambda value: calls.append(("quitting", value)),
+            record_playing_games_before_close=lambda: calls.append("record"),
+            save_window_state=lambda: calls.append("save"),
+            close_overlay=lambda: calls.append("close_overlay"),
+        )
+
+        controller.quit_application()
+
+        self.assertEqual(
+            calls,
+            [("quitting", True), "record", "save", "close_overlay"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
