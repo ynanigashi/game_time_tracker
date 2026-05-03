@@ -850,6 +850,18 @@ class MainWindow(QWidget):
             factory=lambda: MainWindowOvertimeAlertController(
                 self,
                 self._ensure_alert_state(),
+                toggle_provider=self._get_overtime_alert_toggle,
+                on_toggle_changed=self._on_overtime_alert_toggled,
+                active_games_provider=lambda: self.active_games_cache,
+                inactive_games_provider=lambda: self.inactive_games_cache,
+                calculate_today_total_seconds=lambda active, inactive, now: (
+                    self._get_ui_controller().calculate_today_total_seconds(
+                        active,
+                        inactive,
+                        now,
+                    )
+                ),
+                sync_overlay=self._sync_overlay,
             ),
             validator=lambda controller: (
                 controller.owner is self

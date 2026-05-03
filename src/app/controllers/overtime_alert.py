@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Tuple
+from typing import TYPE_CHECKING, Callable, List, Sequence, Tuple
 
 from PySide6.QtWidgets import QApplication
 
@@ -13,6 +13,7 @@ from src.core.time_utils import SECONDS_PER_MINUTE
 
 if TYPE_CHECKING:
     from src.app.alert_state import GameAlertState
+    from src.core.models import GameEntry
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +62,29 @@ class OvertimeAlertTracker:
 class MainWindowOvertimeAlertController:
     """Owns overtime-alert toggle and threshold notifications."""
 
-    def __init__(self, owner: "MainWindow", state: GameAlertState) -> None:
+    def __init__(
+        self,
+        owner: "MainWindow",
+        state: GameAlertState,
+        *,
+        toggle_provider: Callable[[], object],
+        on_toggle_changed: Callable[[bool], None],
+        active_games_provider: Callable[[], Sequence["GameEntry"]],
+        inactive_games_provider: Callable[[], Sequence["GameEntry"]],
+        calculate_today_total_seconds: Callable[
+            [Sequence["GameEntry"], Sequence["GameEntry"], datetime],
+            float,
+        ],
+        sync_overlay: Callable[[], None],
+    ) -> None:
         self.owner = owner
         self.state = state
+        self.toggle_provider = toggle_provider
+        self.on_toggle_changed = on_toggle_changed
+        self.active_games_provider = active_games_provider
+        self.inactive_games_provider = inactive_games_provider
+        self.calculate_today_total_seconds = calculate_today_total_seconds
+        self.sync_overlay = sync_overlay
 
     def is_enabled(self) -> bool:
         return bool(self.state.overtime_alert_enabled)
@@ -75,7 +96,7 @@ class MainWindowOvertimeAlertController:
         return self.state.overtime_alert_tracker
 
     def initialize_toggle(self) -> None:
-        toggle = self.owner._get_overtime_alert_toggle()
+        toggle = self.toggle_provider()
         if toggle is None:
             return
 
@@ -85,23 +106,23 @@ class MainWindowOvertimeAlertController:
 
         if self.state.toggle_connected:
             try:
-                toggle.toggled.disconnect(self.owner._on_overtime_alert_toggled)
+                toggle.toggled.disconnect(self.on_toggle_changed)
             except (TypeError, RuntimeError):
                 pass
-        toggle.toggled.connect(self.owner._on_overtime_alert_toggled)
+        toggle.toggled.connect(self.on_toggle_changed)
         self.state.toggle_connected = True
 
     def on_toggled(self, checked: bool) -> None:
         self.set_enabled(checked)
 
         now = datetime.now()
-        total_seconds = self.owner._get_ui_controller().calculate_today_total_seconds(
-            self.owner.active_games_cache,
-            self.owner.inactive_games_cache,
+        total_seconds = self.calculate_today_total_seconds(
+            self.active_games_provider(),
+            self.inactive_games_provider(),
             now,
         )
-        self.owner._prime_overtime_alert_progress(total_seconds)
-        self.owner._sync_overlay()
+        self.prime_progress(total_seconds)
+        self.sync_overlay()
 
     def prime_progress(self, total_seconds: float) -> None:
         self.get_tracker().prime(total_seconds)
@@ -120,4 +141,4 @@ class MainWindowOvertimeAlertController:
             alerts_enabled=self.is_enabled(),
         )
         for minute in triggered_minutes:
-            self.owner._emit_overtime_alert(minute)
+            self.emit_alert(minute)
