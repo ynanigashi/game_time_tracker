@@ -37,6 +37,7 @@ from src.app.controllers import (
 )
 from src.app.alert_state import GameAlertState
 from src.app.cover_detector import Win32CoverDetector
+from src.app.dialog_state import DialogRefState
 from src.app.display_state import WindowDisplayState
 from src.app.session_state import GameSessionState
 from src.app.win32_helpers import (
@@ -196,12 +197,7 @@ class MainWindow(QWidget):
             thresholds_minutes=OVERTIME_ALERT_THRESHOLDS_MINUTES,
         )
         self._overtime_alert_toggle_connected = False
-        self._report_button_connected = False
-        self._manual_record_button_connected = False
-        self._report_dialog: Optional[ReportDialog] = None
-        self._game_catalog_dialog: Optional[GameCatalogDialog] = None
-        self._manual_record_dialog: Optional[ManualRecordDialog] = None
-        self._settings_dialog: Optional[SettingsDialog] = None
+        self.dialog_state = DialogRefState()
         self._window_title_copy_connected = False
         self._window_title_context_menu_connected = False
 
@@ -322,6 +318,61 @@ class MainWindow(QWidget):
             self._ensure_display_state().overlay_position = None
             return
         self._ensure_display_state().overlay_position = (int(value[0]), int(value[1]))
+
+    def _ensure_dialog_state(self) -> DialogRefState:
+        state = getattr(self, "dialog_state", None)
+        if state is None:
+            state = DialogRefState()
+            self.dialog_state = state
+        return state
+
+    @property
+    def _report_dialog(self) -> Optional[ReportDialog]:
+        return self._ensure_dialog_state().report_dialog
+
+    @_report_dialog.setter
+    def _report_dialog(self, value: Optional[ReportDialog]) -> None:
+        self._ensure_dialog_state().report_dialog = value
+
+    @property
+    def _game_catalog_dialog(self) -> Optional[GameCatalogDialog]:
+        return self._ensure_dialog_state().game_catalog_dialog
+
+    @_game_catalog_dialog.setter
+    def _game_catalog_dialog(self, value: Optional[GameCatalogDialog]) -> None:
+        self._ensure_dialog_state().game_catalog_dialog = value
+
+    @property
+    def _manual_record_dialog(self) -> Optional[ManualRecordDialog]:
+        return self._ensure_dialog_state().manual_record_dialog
+
+    @_manual_record_dialog.setter
+    def _manual_record_dialog(self, value: Optional[ManualRecordDialog]) -> None:
+        self._ensure_dialog_state().manual_record_dialog = value
+
+    @property
+    def _settings_dialog(self) -> Optional[SettingsDialog]:
+        return self._ensure_dialog_state().settings_dialog
+
+    @_settings_dialog.setter
+    def _settings_dialog(self, value: Optional[SettingsDialog]) -> None:
+        self._ensure_dialog_state().settings_dialog = value
+
+    @property
+    def _report_button_connected(self) -> bool:
+        return self._ensure_dialog_state().report_button_connected
+
+    @_report_button_connected.setter
+    def _report_button_connected(self, value: bool) -> None:
+        self._ensure_dialog_state().report_button_connected = bool(value)
+
+    @property
+    def _manual_record_button_connected(self) -> bool:
+        return self._ensure_dialog_state().manual_record_button_connected
+
+    @_manual_record_button_connected.setter
+    def _manual_record_button_connected(self, value: bool) -> None:
+        self._ensure_dialog_state().manual_record_button_connected = bool(value)
 
     def _initialize_tray_icon(self) -> None:
         """Create the tray icon and context menu used as the app's home."""
