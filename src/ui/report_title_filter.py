@@ -9,15 +9,22 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTableWidgetItem
 
 from src.core.reporting import ReportSummary, build_game_report
+from src.ui.report_tab_state import ReportTabState
 from src.ui.report_title_filter_state import ReportTitleFilterState
 
 
 class ReportTitleFilterController:
     """Manage title-filter checkboxes and refresh side effects."""
 
-    def __init__(self, owner: object, state: ReportTitleFilterState) -> None:
+    def __init__(
+        self,
+        owner: object,
+        state: ReportTitleFilterState,
+        tab_state: ReportTabState,
+    ) -> None:
         self.owner = owner
         self.state = state
+        self.tab_state = tab_state
 
     def selected_titles(self) -> List[str]:
         titles: List[str] = []
@@ -31,24 +38,23 @@ class ReportTitleFilterController:
         return titles
 
     def load_title_filter_summary(self) -> ReportSummary:
-        state = self.owner._ensure_report_tab_state()
         if (
-            state.title_filter_summary is not None
-            and not state.title_filter_dirty
+            self.tab_state.title_filter_summary is not None
+            and not self.tab_state.title_filter_dirty
         ):
-            return state.title_filter_summary
+            return self.tab_state.title_filter_summary
 
         get_report_stats = getattr(self.owner.log_handler, "get_report_stats", None)
         if callable(get_report_stats):
             summary = get_report_stats(start_date=None, end_date=None)
         else:
             summary = build_game_report(self.owner._cached_records())
-        state.title_filter_summary = summary
+        self.tab_state.title_filter_summary = summary
         return summary
 
     def sync_title_filter(self, summary: ReportSummary) -> None:
         checked_titles = (
-            set(self.owner._selected_titles())
+            set(self.selected_titles())
             if self.state.initialized
             else {row.game_title for row in summary.rows}
         )

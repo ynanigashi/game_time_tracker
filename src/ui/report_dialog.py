@@ -648,6 +648,7 @@ class ReportDialog(QDialog):
             controller = ReportTitleFilterController(
                 self,
                 self._ensure_title_filter_state(),
+                self._ensure_report_tab_state(),
             )
             self._title_filter_controller = controller
         return controller
