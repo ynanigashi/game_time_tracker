@@ -823,7 +823,23 @@ class MainWindow(QWidget):
         """Return the game scan controller."""
         return self._resolve_dependency(
             "_scan_controller",
-            factory=lambda: MainWindowScanController(self),
+            factory=lambda: MainWindowScanController(
+                self,
+                games_provider=lambda: self.games,
+                scan_result_updater=lambda active, inactive, titles: (
+                    self._ensure_session_state().update_scan_result(
+                        active_games=active,
+                        inactive_games=inactive,
+                        window_titles=titles,
+                    )
+                ),
+                update_active_list=self._update_active_list,
+                update_window_list=self._update_window_list,
+                update_scan_status=self._update_scan_status,
+                set_status=self._set_status,
+                load_today_game_minutes=self._load_today_game_minutes,
+                get_today_stats=self.recorder.log_handler.get_today_stats,
+            ),
             validator=lambda controller: controller.owner is self,
         )
 
