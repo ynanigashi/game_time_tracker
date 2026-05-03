@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Callable
 
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QStyle, QSystemTrayIcon
@@ -22,10 +23,30 @@ class MainWindowTrayController:
         *,
         base_title: str,
         action_state: TrayActionState,
+        show_main_window: Callable[[], None] = lambda: None,
+        hide_main_window: Callable[[], None] = lambda: None,
+        set_tray_overlay_enabled: Callable[[bool], None] = lambda _enabled: None,
+        set_startup_window_visible: Callable[[bool], None] = lambda _visible: None,
+        open_manual_record_dialog: Callable[[], None] = lambda: None,
+        open_report_dialog: Callable[[], None] = lambda: None,
+        open_game_catalog_dialog: Callable[[], None] = lambda: None,
+        open_settings_dialog: Callable[[], None] = lambda: None,
+        quit_application: Callable[[], None] = lambda: None,
+        sync_tray_window_actions_callback: Callable[[], None] = lambda: None,
     ) -> None:
         self.owner = owner
         self.base_title = base_title
         self.action_state = action_state
+        self.show_main_window_callback = show_main_window
+        self.hide_main_window_callback = hide_main_window
+        self.set_tray_overlay_enabled_callback = set_tray_overlay_enabled
+        self.set_startup_window_visible_callback = set_startup_window_visible
+        self.open_manual_record_dialog_callback = open_manual_record_dialog
+        self.open_report_dialog_callback = open_report_dialog
+        self.open_game_catalog_dialog_callback = open_game_catalog_dialog
+        self.open_settings_dialog_callback = open_settings_dialog
+        self.quit_application_callback = quit_application
+        self.sync_tray_window_actions_callback = sync_tray_window_actions_callback
 
     def initialize_tray_icon(self) -> None:
         if not QSystemTrayIcon.isSystemTrayAvailable():
@@ -84,29 +105,31 @@ class MainWindowTrayController:
         exit_action = menu.addAction("\u7d42\u4e86")
 
         show_action.triggered.connect(
-            lambda _checked=False: self.owner._show_main_window_from_tray()
+            lambda _checked=False: self.show_main_window_callback()
         )
         hide_action.triggered.connect(
-            lambda _checked=False: self.owner._hide_main_window_to_tray()
+            lambda _checked=False: self.hide_main_window_callback()
         )
-        overlay_action.toggled.connect(self.owner._set_tray_overlay_enabled)
+        overlay_action.toggled.connect(self.set_tray_overlay_enabled_callback)
         startup_show_action.triggered.connect(
-            lambda _checked=False: self.owner._set_startup_window_visible(True)
+            lambda _checked=False: self.set_startup_window_visible_callback(True)
         )
         startup_hide_action.triggered.connect(
-            lambda _checked=False: self.owner._set_startup_window_visible(False)
+            lambda _checked=False: self.set_startup_window_visible_callback(False)
         )
         manual_record_action.triggered.connect(
-            lambda _checked=False: self.owner._open_manual_record_dialog()
+            lambda _checked=False: self.open_manual_record_dialog_callback()
         )
-        report_action.triggered.connect(lambda _checked=False: self.owner._open_report_dialog())
+        report_action.triggered.connect(
+            lambda _checked=False: self.open_report_dialog_callback()
+        )
         game_catalog_action.triggered.connect(
-            lambda _checked=False: self.owner._open_game_catalog_dialog()
+            lambda _checked=False: self.open_game_catalog_dialog_callback()
         )
         settings_action.triggered.connect(
-            lambda _checked=False: self.owner._open_settings_dialog()
+            lambda _checked=False: self.open_settings_dialog_callback()
         )
-        exit_action.triggered.connect(lambda _checked=False: self.owner._quit_application())
+        exit_action.triggered.connect(lambda _checked=False: self.quit_application_callback())
 
         self.action_state.show_action = show_action
         self.action_state.hide_action = hide_action
@@ -119,7 +142,7 @@ class MainWindowTrayController:
         about_to_show = getattr(menu, "aboutToShow", None)
         if about_to_show is not None:
             try:
-                about_to_show.connect(self.owner._sync_tray_window_actions)
+                about_to_show.connect(self.sync_tray_window_actions_callback)
             except Exception:
                 logger.debug("failed to connect tray menu refresh", exc_info=True)
         return menu
