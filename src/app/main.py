@@ -759,6 +759,12 @@ class MainWindow(QWidget):
             factory=lambda: MainWindowContextMenuController(
                 self,
                 display_modes=DISPLAY_MODES,
+                set_display_mode=self._set_display_mode,
+                open_manual_record_dialog=self._open_manual_record_dialog,
+                open_report_dialog=self._open_report_dialog,
+                open_game_catalog_dialog=self._open_game_catalog_dialog,
+                open_settings_dialog=self._open_settings_dialog,
+                quit_application=self._quit_application,
             ),
             validator=lambda controller: controller.owner is self,
         )

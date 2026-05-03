@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Sequence
+from typing import Callable, Dict, Optional, Sequence
 
 from PySide6.QtWidgets import QMenu
 
@@ -10,9 +10,26 @@ from PySide6.QtWidgets import QMenu
 class MainWindowContextMenuController:
     """Builds and handles the main-window right-click menu."""
 
-    def __init__(self, owner: "MainWindow", *, display_modes: Sequence[str]) -> None:
+    def __init__(
+        self,
+        owner: "MainWindow",
+        *,
+        display_modes: Sequence[str],
+        set_display_mode: Callable[[str], None],
+        open_manual_record_dialog: Callable[[], None],
+        open_report_dialog: Callable[[], None],
+        open_game_catalog_dialog: Callable[[], None],
+        open_settings_dialog: Callable[[], None],
+        quit_application: Callable[[], None],
+    ) -> None:
         self.owner = owner
         self.display_modes = display_modes
+        self.set_display_mode = set_display_mode
+        self.open_manual_record_dialog = open_manual_record_dialog
+        self.open_report_dialog = open_report_dialog
+        self.open_game_catalog_dialog = open_game_catalog_dialog
+        self.open_settings_dialog = open_settings_dialog
+        self.quit_application = quit_application
 
     def show_context_menu(self, event: object) -> None:
         menu = QMenu(self.owner)
@@ -69,15 +86,15 @@ class MainWindowContextMenuController:
         if mode_actions:
             for mode, action in mode_actions.items():
                 if selected_action is action:
-                    self.owner._set_display_mode(mode)
+                    self.set_display_mode(mode)
                     return
         if selected_action is manual_record_action:
-            self.owner._open_manual_record_dialog()
+            self.open_manual_record_dialog()
         elif selected_action is report_action:
-            self.owner._open_report_dialog()
+            self.open_report_dialog()
         elif selected_action is game_catalog_action:
-            self.owner._open_game_catalog_dialog()
+            self.open_game_catalog_dialog()
         elif selected_action is settings_action:
-            self.owner._open_settings_dialog()
+            self.open_settings_dialog()
         elif selected_action is exit_action:
-            self.owner._quit_application()
+            self.quit_application()
