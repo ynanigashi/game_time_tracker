@@ -11,10 +11,15 @@ Windows PC で実行中のゲームをウィンドウタイトルから自動検
 - 設定値とウィンドウ状態は `data/settings.sqlite3` に保存する。`config/config.ini` は設定画面の Import/Export で手動入出力する。
 - プレイログは `data/play_logs.sqlite3` に保存し、Google スプレッドシートへベストエフォートでバックアップする。
 - ゲーム情報は `data/game_catalog.sqlite3` に保存し、空の場合のみ Google スプレッドシートから初回取り込みする。
+- アプリはタスクトレイ常駐を基本とする。メインウィンドウは必要時に表示する補助UIで、×ボタンでは終了せずタスクトレイへ戻る。
+- 起動時にメインウィンドウを表示するかどうかは、タスクトレイメニューの `起動時` 設定で保存する。
+- タスクトレイメニューから `オーバーレイ表示` を切り替えられる。これはメインウィンドウ非表示中の今日のプレイ時間オーバーレイに適用する。
+- メインウィンドウ表示中は、今日のプレイ時間表示が他ウィンドウに覆われた場合に、トレイ側設定に依存せず補完オーバーレイを表示する。
 - レポート画面の `ログ` タブでプレイログの編集保存・削除とスプレッドシートの手動同期を実行できる。
 - レポート画面は表示中タブだけを更新し、未表示タブは dirty 扱いで遅延更新する。推移タブのタイトルフィルタ用集計は、ログデータが変わるまでキャッシュを再利用する。
 - プレイログのバックアップは設定画面の `プレイログ保存` で `ローカルのみで運用` / `スプレッドシートにバックアップ` を切り替える。
 - メインウィンドウ右クリックメニューで `手入力で記録` / `レポート` / `ゲーム管理` / `設定` / `終了` を選択できる。
+- タスクトレイ右クリックメニューで `ウィンドウを表示` / `ウィンドウを非表示`、`オーバーレイ表示`、`起動時`、既存の主要画面、`終了` を選択できる。
 - ウィンドウタイトルで自動検出できないゲームは、手入力画面から登録済みゲーム・開始日時・終了日時を指定して記録できる。フレンドプレイ有無はゲーム管理に保存された設定を使う。
 - 手入力画面には開始/停止ボタンと経過時間表示があり、開始/終了日時を自動入力できる。経過時間表示は 100ms 間隔で更新する。
 - SQLite と INI のどちらにも有効な設定がない場合、起動時に設定画面を表示する。
@@ -118,6 +123,9 @@ classDiagram
             +load_all()$ Tuple
             +load()$ Tuple
             +load_overtime_alert_enabled()$ bool
+            +load_startup_window_visible()$ bool
+            +load_tray_overlay_enabled()$ bool
+            +load_overlay_position()$ Tuple
             +save()$
         }
     }
@@ -140,6 +148,13 @@ classDiagram
             +daily_stats: DailyStatsTracker
             +state_tracker: GameStateTracker
             +overtime_alert_enabled: bool
+            +startup_window_visible: bool
+            +tray_overlay_enabled: bool
+            +overlay_position: Tuple
+            -_initialize_tray_icon()
+            -_show_main_window_from_tray()
+            -_hide_main_window_to_tray()
+            -_quit_application()
             -_init_components()
             -_scan_tick()
             -_ui_tick()
@@ -153,6 +168,9 @@ classDiagram
             +load_all() Tuple
             +load() Tuple
             +load_overtime_alert_enabled() bool
+            +load_startup_window_visible() bool
+            +load_tray_overlay_enabled() bool
+            +load_overlay_position() Tuple
             +save()
             +record_resize()$
         }
@@ -499,7 +517,10 @@ UIから独立した状態遷移ロジックを提供。
 | `load_all(path)` | ファイルから `(x, y, display_mode, mode_sizes, overtime_alert_enabled)` を読込。**display_modeが不正な場合は"max"にフォールバック** | `MainWindowStateController.load_all()`, `load()`, `load_overtime_alert_enabled()` |
 | `load(path)` | ファイルから `(x, y, display_mode, mode_sizes)` を読込（`load_all()` のラッパー） | `MainWindowStateController.load()` |
 | `load_overtime_alert_enabled(path)` | ファイルから `overtime_alert_enabled` を読込（未設定時は `True`） | `MainWindowStateController.load_overtime_alert_enabled()` |
-| `save(path, x, y, display_mode, mode_sizes, overtime_alert_enabled=True)` | 現在の状態をファイルに保存（`overtime_alert_enabled` を含む） | `MainWindowStateController.save()` |
+| `load_startup_window_visible(path)` | 起動時にメインウィンドウを表示するかを読込（未設定時は `False`） | `MainWindowStateController.load_startup_window_visible()` |
+| `load_tray_overlay_enabled(path)` | メインウィンドウ非表示中のオーバーレイ表示可否を読込（未設定時は `False`） | `MainWindowStateController.load_tray_overlay_enabled()` |
+| `load_overlay_position(path)` | トレイ用オーバーレイ保存位置を読込（未設定時は `None`） | `MainWindowStateController.load_overlay_position()` |
+| `save(path, x, y, display_mode, mode_sizes, overtime_alert_enabled=True, startup_window_visible=False, tray_overlay_enabled=False, overlay_position=None)` | 現在の状態を保存（アラート設定、起動時表示設定、トレイ用オーバーレイ設定/位置を含む） | `MainWindowStateController.save()` |
 
 ---
 
@@ -528,10 +549,18 @@ GUI版メインウィンドウ。
 | `__init__()` | 起動フローのオーケストレーション（状態復元→依存ウォームアップ→初期化→タイマー開始） | `main()` 関数 |
 | `_initialize_window_state()` | タイトル設定とウィンドウ状態の復元 | `__init__()` 内部 |
 | `_initialize_runtime_state()` | 実行時キャッシュ/依存の初期値を設定 | `__init__()` 内部 |
+| `_initialize_tray_icon()` | タスクトレイアイコンと右クリックメニューを初期化 | `__init__()` 内部 |
+| `_build_tray_menu()` | トレイメニューを構築し、ウィンドウ表示/非表示、オーバーレイ、起動時設定、主要画面、終了へ接続 | `_initialize_tray_icon()` |
+| `_show_main_window_from_tray()` | トレイからメインウィンドウを表示し、保存済みオーバーレイ位置に今日のプレイ時間表示を合わせる | トレイメニュー |
+| `_hide_main_window_to_tray()` | メインウィンドウを非表示にし、タスクトレイ常駐へ戻す | トレイメニュー, `closeEvent()` |
+| `_set_startup_window_visible(visible)` | 起動時にメインウィンドウを表示するかを保存 | トレイメニュー `起動時` |
+| `_set_tray_overlay_enabled(enabled)` | メインウィンドウ非表示中のオーバーレイ表示可否を保存し、表示状態を同期 | トレイメニュー |
+| `_quit_application()` | プレイ中セッションを記録し、状態保存・オーバーレイ終了・トレイアイコン非表示後にアプリ終了 | トレイメニュー `終了` |
+| `should_show_window_on_startup()` | 起動直後にメインウィンドウを表示するかを返す | `main()` 関数 |
 | `_warmup_dependencies()` | UI/表示/loop/bootstrap 依存を事前生成 | `__init__()` 内部 |
 | `_start_background_timers()` | 監視/UI更新タイマーを開始 | `__init__()` 内部 |
 | `_run_initial_refresh()` | 起動直後の初回スキャン/UI更新を実行 | `__init__()` 内部 |
-| `closeEvent(event)` | 終了時の記録・状態保存をオーケストレーション | Qt イベント |
+| `closeEvent(event)` | 通常の × ボタンではウィンドウを非表示にしてトレイへ戻す。完全終了時のみ記録・状態保存を実行 | Qt イベント |
 | `_record_playing_games_before_close()` | 終了時に記録対象ゲームを記録 | `closeEvent()` 内部 |
 | `_iter_recordable_games()` | 記録対象ゲームのみ抽出 | `_record_playing_games_before_close()` 内部 |
 | `_start_timer(interval, callback)` | タイマーを作成して開始 | `__init__()` 内部 |
@@ -557,13 +586,13 @@ GUI版メインウィンドウ。
 | `_load_today_game_minutes()` | スプレッドシートから今日のゲーム別時間を集計 | `_init_components()`, `_scan_games()` |
 | `_update_today_games_list()` | 今日プレイしたゲーム一覧をUIに反映。**日跨ぎセッションは0:00以降のみ、5分未満は除外** | `_ui_tick()` 内部 |
 | `_load_today_completed_seconds()` | 起動時に今日分の完了時間をロード | `_init_components()` 内部 |
-| `_save_window_state()` | ウィンドウ位置・サイズ・モードを保存 | `closeEvent()`, `_cycle_display_mode()` |
-| `_is_overtime_alert_enabled()` | 時間超過防止アラートの有効状態を返す | `_save_window_state()`, `_update_overtime_alert()`, オーバーレイ判定 |
+| `_save_window_state()` | ウィンドウ位置・サイズ・モード、起動時表示設定、トレイ用オーバーレイ設定/位置を保存 | `closeEvent()`, `_cycle_display_mode()`, トレイ設定変更 |
+| `_is_overtime_alert_enabled()` | 時間超過防止アラートの有効状態を返す | `_save_window_state()`, `_update_overtime_alert()` |
 | `_set_overtime_alert_enabled(enabled)` | 時間超過防止アラートの有効状態を更新 | `_on_overtime_alert_toggled()` |
 | `_get_overtime_alert_tracker()` | アラート閾値跨ぎ判定用トラッカーを取得（必要時生成） | `_prime_overtime_alert_progress()`, `_update_overtime_alert()` |
 | `_get_overtime_alert_toggle()` | レイアウト上のアラートトグルウィジェット参照を取得 | `_initialize_overtime_alert_toggle()` |
 | `_initialize_overtime_alert_toggle()` | トグル初期状態を反映し、`toggled` シグナルを接続 | `_init_components()` |
-| `_on_overtime_alert_toggled(checked)` | トグル変更時に有効状態を更新し、進捗再初期化とオーバーレイ同期を実行 | `QPushButton.toggled` |
+| `_on_overtime_alert_toggled(checked)` | トグル変更時に有効状態を更新し、通知進捗を再初期化 | `QPushButton.toggled` |
 | `_prime_overtime_alert_progress(total_seconds)` | 現在値を基準に通知進捗を初期化（遡及通知防止） | 日付変更時, `_on_overtime_alert_toggled()` |
 | `_emit_overtime_alert(threshold_minutes)` | 閾値到達アラートを通知（`QApplication.beep()` + ログ） | `_update_overtime_alert()` |
 | `_update_overtime_alert(total_seconds)` | 閾値跨ぎを検知して未通知閾値のみアラート通知 | `_ui_tick()` |
@@ -585,10 +614,10 @@ GUI版メインウィンドウ。
 |--------|------|--------------|
 | `MainWindowUiController` | `active/session/today/windows` のUI更新を担当 | `update_session_times()`, `update_today_totals()`, `update_today_games_list()` |
 | `MainWindowDisplayController` | `min/mid/max` 表示モードの可視性・サイズ制約・ジオメトリ適用を担当 | `apply_display_mode()`, `apply_mode_geometry()`, `next_display_mode()` |
-| `MainWindowStateController` | ウィンドウ状態の読み書きとリサイズ記録を担当 | `load_all()`, `save()`, `record_resize()` |
+| `MainWindowStateController` | ウィンドウ状態、起動時表示設定、トレイ用オーバーレイ設定/位置の読み書きとリサイズ記録を担当 | `load_all()`, `load_startup_window_visible()`, `load_tray_overlay_enabled()`, `load_overlay_position()`, `save()`, `record_resize()` |
 | `MainWindowLoopController` | タイマー生成と `scan_tick/ui_tick` 実行フローを担当 | `start_timer()`, `run_scan_tick()`, `run_ui_tick()` |
 | `MainWindowBootstrapper` | 初期化依存構築と初期統計ロードを担当（失敗時は `MainWindowBootstrapError`） | `bootstrap()` |
-| `MainWindowOverlayController` | オーバーレイの初期化・表示条件判定・可視同期を担当 | `initialize_overlay()`, `should_show_overlay()`, `sync_overlay()` |
+| `MainWindowOverlayController` | 今日のプレイ時間オーバーレイの初期化、表示条件判定、位置/可視同期、ドラッグ後の保存を担当 | `initialize_overlay()`, `should_show_overlay()`, `sync_overlay()`, `sync_overlay_geometry()`, `sync_overlay_visibility()` |
 
 ---
 
@@ -836,6 +865,8 @@ Google Spreadsheet操作を抽象化するサービスクラス。
 - **[src/ui/game_catalog_dialog.py](../src/ui/game_catalog_dialog.py)**
   - ゲーム名、ウィンドウタイトル、フレンドプレイ、ブラウザゲーム設定を追加・編集・削除する。
   - 保存先は `data/game_catalog.sqlite3`。
+  - 画面を開いた時は、ローカルの有効なゲーム定義をスプレッドシートへ送信してから、スプレッドシート側の定義を `id` 基準で取り込む。
+  - 画面を閉じる時は、ローカルの有効なゲーム定義をスプレッドシートへ送信する。接続や認証に失敗した場合はステータス表示に留め、ローカル編集は継続する。
   - `スプシから取得` でゲーム情報シートを手動取得し、ローカルDBへ反映する。
   - `スプシへ送信` で有効なローカルゲーム定義をゲーム情報シートへ反映する。既存の `id` は更新し、シートにない `id` は追記する。ローカルで削除済みのゲームは自動ではシートから削除しない。
 
@@ -872,7 +903,7 @@ Google Spreadsheet操作を抽象化するサービスクラス。
   - `.gitignore` で除外管理。
 
 ## 自動検出フロー
-1. 起動時に `data/game_catalog.sqlite3` から `game_title/window_title/play_with_friends/is_browser_game` をメモリに保持。ローカルDBが空の場合のみ、ゲーム情報シートから初回取り込みする。
+1. 起動時に `data/game_catalog.sqlite3` から `game_title/window_title/play_with_friends/is_browser_game` をメモリに保持。ローカルDBが空の場合のみ、ゲーム情報シートから初回取り込みする。ゲーム管理画面を開閉した場合は、ローカルDBとゲーム情報シートの同期をベストエフォートで実行する。
 2. 1秒間隔（`POLL_INTERVAL_SECONDS = 1`）で以下を実行：
    - 全ウィンドウのタイトルを取得（`pygetwindow.getAllWindows()`）。
    - フォアグラウンド（最前面）ウィンドウのタイトルを取得（`pygetwindow.getActiveWindow()`）。
@@ -1030,12 +1061,32 @@ def matches_window(self, window_title: str, browsers: Sequence[str]) -> bool:
 - 設定エリア（最下部）
   - `時間超過防止アラート` トグル
 
+## タスクトレイ常駐とオーバーレイ
+
+### タスクトレイ
+- アプリ本体はタスクトレイ常駐を基本とする。
+- メインウィンドウは補助UIとして表示/非表示を切り替える。
+- メインウィンドウの × ボタンではアプリを終了せず、ウィンドウを非表示にしてトレイ常駐へ戻る。この操作ではプレイ中セッションを終了しない。
+- 完全終了はタスクトレイメニューの `終了` から行う。終了時はプレイ中セッションを記録し、状態を保存してからアプリを閉じる。
+- トレイメニューの `ウィンドウを表示` / `ウィンドウを非表示` は現在状態に応じて片方だけ表示する。
+- トレイメニューの `起動時` で `ウィンドウを表示` / `ウィンドウを非表示` を選び、`startup_window_visible` として保存する。
+
+### 今日のプレイ時間オーバーレイ
+- 表示内容はメインウィンドウの `today_time_display` と同じ今日のプレイ時間。
+- メインウィンドウ非表示中は、`tray_overlay_enabled == True` かつプレイ中ゲームがある場合に表示する。
+- メインウィンドウ表示中は、プレイ中ゲームがあり、`today_time_display` が自プロセス外ウィンドウに覆われている場合に表示する。この場合、`tray_overlay_enabled` は参照しない。
+- オーバーレイ本体はクリック透過にし、左端の細いドラッグハンドルだけが入力を受け取る。
+- ドラッグ中は UI tick による追従同期を止める。
+- メインウィンドウ非表示中にドラッグした位置は `overlay_position` として保存する。
+- メインウィンドウ表示中にドラッグした場合は、ドラッグ完了後に `today_time_display` がドラッグ後の位置に合うようメインウィンドウを移動する。
+- メインウィンドウをトレイから表示する時は、保存済み `overlay_position` に `today_time_display` が合うようメインウィンドウを移動する。
+
 ## 1時間アラート（時間超過防止）
 
 ### 目的
 - プレイ時間を1日1時間（60分）の目安で管理するため、段階的にアラートを鳴らす。
 - 「時間超過防止アラート」を無効化したいときは、トグルで即時OFFできるようにする。
-- トグルがOFFの間は、オーバーレイの時間表示を完全に無効化する。
+- トグルがOFFの間は、アラート音だけを無効化する。今日のプレイ時間オーバーレイは別設定で制御する。
 
 ### 仕様（ユーザー向け）
 - 追加UI: `時間超過防止アラート` トグル（ON/OFF）
@@ -1050,7 +1101,7 @@ def matches_window(self, window_title: str, browsers: Sequence[str]) -> bool:
   - 各閾値に到達した瞬間に1回のみ鳴る（同一日で再通知しない）
 - トグルOFF時:
   - アラート音を鳴らさない
-  - オーバーレイ時間表示を非表示にする（表示中なら即時で閉じる/隠す）
+  - 今日のプレイ時間オーバーレイの表示可否には影響しない
 
 ### 判定ルール（内部仕様）
 - アラート判定に使う「今日のプレイ時間」は、既存の `today_time_display` と同じ計算値を使用する。
@@ -1066,20 +1117,19 @@ def matches_window(self, window_title: str, browsers: Sequence[str]) -> bool:
   - 通知可否は `時間超過防止アラート` トグル状態のみで決定する。
 
 ### オーバーレイ連携
-- 既存のオーバーレイ表示条件に以下を追加:
-  - `時間超過防止アラート == ON` のときのみオーバーレイ表示判定を実行
-- `時間超過防止アラート == OFF` の間は、オーバーレイ表示判定をスキップし常時非表示。
+- 今日のプレイ時間オーバーレイは、プレイ中ゲームの有無、メインウィンドウの表示状態、被覆判定、トレイメニューの `オーバーレイ表示` に基づいて制御する。
+- `時間超過防止アラート` トグルはアラート音だけを制御し、オーバーレイ表示条件には使わない。
 
 ### 永続化
 - トグル状態は `data/settings.sqlite3` に保存・復元する。
-  - 追加キー（案）: `overtime_alert_enabled: bool`
+  - キー: `overtime_alert_enabled: bool`
   - 旧形式ファイル（キーなし）読み込み時は `True` 扱い
 
 ### 受け入れ条件
 1. トグルONで、45/50/55/58/60分到達時に各1回だけアラートが鳴る。
 2. 同一閾値は同日中に重複して鳴らない。
 3. `mid/min` モードでも、`時間超過防止アラート` トグルがウィンドウ最下部に表示される。
-4. トグルOFF直後にオーバーレイが非表示になり、以後表示されない。
+4. トグルOFF後も、オーバーレイ表示条件を満たす場合は今日のプレイ時間オーバーレイを表示できる。
 5. トグルOFF中はアラートが鳴らない。
 6. 日付変更で閾値通知状態がリセットされる。
 7. アプリ再起動後もトグル状態が復元される。

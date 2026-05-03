@@ -43,6 +43,7 @@ class GameCatalogDialog(QDialog):
         super().__init__(parent)
         self.game_store = game_store or GameCatalogStore()
         self._on_saved = on_saved
+        self._close_sync_done = False
         self.setWindowTitle("ゲーム管理")
         self.resize(760, 520)
 
@@ -69,7 +70,7 @@ class GameCatalogDialog(QDialog):
         self.delete_button.clicked.connect(self._delete_game)
         self.pull_button.clicked.connect(self._sync_from_spreadsheet)
         self.push_button.clicked.connect(self._push_to_spreadsheet)
-        self.close_button.clicked.connect(self.accept)
+        self.close_button.clicked.connect(self._close_dialog)
 
         self._build_layout()
         self._load_games()
@@ -158,6 +159,58 @@ class GameCatalogDialog(QDialog):
         """Prepare the form for adding a new game."""
         self._clear_form()
         self.window_title_edit.setText(window_title.strip())
+
+    def sync_on_open(self) -> None:
+        """Best-effort game catalog sync when the dialog is opened."""
+        try:
+            service = self._game_info_service()
+            push_result = self._push_local_games(service)
+            if push_result.failed:
+                self.status_label.setText(
+                    "自動同期の取得をスキップしました: "
+                    f"送信失敗 {push_result.failed} 件"
+                )
+                return
+            records = service.get_all_records()
+            pull_result = self.game_store.sync_records_from_spreadsheet(records)
+        except Exception as exc:
+            logger.info("Skipped game catalog open sync: %s", exc)
+            self.status_label.setText(f"自動同期をスキップしました: {exc}")
+            return
+
+        self._clear_form()
+        self._load_games()
+        self._notify_saved()
+        self.status_label.setText(
+            "自動同期しました: "
+            f"送信 {push_result.sent} 件 / 取得 {pull_result.received} 件"
+        )
+
+    def _sync_on_close(self) -> None:
+        if self._close_sync_done:
+            return
+        self._close_sync_done = True
+        try:
+            service = self._game_info_service()
+            result = self._push_local_games(service)
+        except Exception as exc:
+            logger.info("Skipped game catalog close sync: %s", exc)
+            self.status_label.setText(f"終了時同期をスキップしました: {exc}")
+            return
+
+        self.status_label.setText(
+            "終了時同期しました: "
+            f"送信 {result.sent} 件 / 更新 {result.updated} 件 / "
+            f"追加 {result.appended} 件 / 失敗 {result.failed} 件"
+        )
+
+    def _close_dialog(self) -> None:
+        self._sync_on_close()
+        self.accept()
+
+    def closeEvent(self, event) -> None:
+        self._sync_on_close()
+        super().closeEvent(event)
 
     def _add_game(self) -> None:
         try:

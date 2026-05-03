@@ -113,6 +113,23 @@ class TestWindowState(unittest.TestCase):
         self.assertEqual(loaded_sizes["mid"], (450, 300))
         self.assertFalse(overtime_alert_enabled)
 
+    def test_save_and_load_tray_options(self):
+        mode_sizes = {"max": (500, 400), "mid": (450, 300), "min": (300, 150)}
+        WindowState.save(
+            self.test_path,
+            100,
+            200,
+            "mid",
+            mode_sizes,
+            startup_window_visible=True,
+            tray_overlay_enabled=True,
+            overlay_position=(321, 654),
+        )
+
+        self.assertTrue(WindowState.load_startup_window_visible(self.test_path))
+        self.assertTrue(WindowState.load_tray_overlay_enabled(self.test_path))
+        self.assertEqual(WindowState.load_overlay_position(self.test_path), (321, 654))
+
 
 if __name__ == "__main__":
     unittest.main()

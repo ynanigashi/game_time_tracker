@@ -14,7 +14,12 @@ MODE_DEFAULT_SIZES = {
     "min": (320, 180),
 }
 DEFAULT_OVERTIME_ALERT_ENABLED = True
+DEFAULT_STARTUP_WINDOW_VISIBLE = False
+DEFAULT_TRAY_OVERLAY_ENABLED = False
 OVERTIME_ALERT_ENABLED_KEY = "overtime_alert_enabled"
+STARTUP_WINDOW_VISIBLE_KEY = "startup_window_visible"
+TRAY_OVERLAY_ENABLED_KEY = "tray_overlay_enabled"
+OVERLAY_POSITION_KEY = "overlay_position"
 
 
 class WindowState:
@@ -120,9 +125,12 @@ class WindowState:
         display_mode: str,
         mode_sizes: Dict[str, Tuple[int, int]],
         overtime_alert_enabled: bool = DEFAULT_OVERTIME_ALERT_ENABLED,
+        startup_window_visible: bool = DEFAULT_STARTUP_WINDOW_VISIBLE,
+        tray_overlay_enabled: bool = DEFAULT_TRAY_OVERLAY_ENABLED,
+        overlay_position: Tuple[int, int] | None = None,
     ) -> Dict[str, object]:
         mode_sizes_serialized = {k: [v[0], v[1]] for k, v in mode_sizes.items()}
-        return {
+        data: Dict[str, object] = {
             "x": x,
             "y": y,
             "width": mode_sizes[display_mode][0],
@@ -130,7 +138,12 @@ class WindowState:
             "display_mode": display_mode,
             "mode_sizes": mode_sizes_serialized,
             OVERTIME_ALERT_ENABLED_KEY: bool(overtime_alert_enabled),
+            STARTUP_WINDOW_VISIBLE_KEY: bool(startup_window_visible),
+            TRAY_OVERLAY_ENABLED_KEY: bool(tray_overlay_enabled),
         }
+        if overlay_position is not None:
+            data[OVERLAY_POSITION_KEY] = [int(overlay_position[0]), int(overlay_position[1])]
+        return data
 
     @staticmethod
     def load(path: Path) -> Tuple[int, int, str, Dict[str, Tuple[int, int]]]:
@@ -145,6 +158,46 @@ class WindowState:
         return overtime_alert_enabled
 
     @staticmethod
+    def load_startup_window_visible_from_data(data: Dict[str, object]) -> bool:
+        return WindowState._coerce_bool(
+            data.get(STARTUP_WINDOW_VISIBLE_KEY),
+            DEFAULT_STARTUP_WINDOW_VISIBLE,
+        )
+
+    @staticmethod
+    def load_tray_overlay_enabled_from_data(data: Dict[str, object]) -> bool:
+        return WindowState._coerce_bool(
+            data.get(TRAY_OVERLAY_ENABLED_KEY),
+            DEFAULT_TRAY_OVERLAY_ENABLED,
+        )
+
+    @staticmethod
+    def load_overlay_position_from_data(data: Dict[str, object]) -> Tuple[int, int] | None:
+        value = data.get(OVERLAY_POSITION_KEY)
+        if not isinstance(value, list) or len(value) != 2:
+            return None
+        try:
+            return int(value[0]), int(value[1])
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def load_startup_window_visible(path: Path) -> bool:
+        return WindowState.load_startup_window_visible_from_data(
+            WindowState._load_data(path)
+        )
+
+    @staticmethod
+    def load_tray_overlay_enabled(path: Path) -> bool:
+        return WindowState.load_tray_overlay_enabled_from_data(
+            WindowState._load_data(path)
+        )
+
+    @staticmethod
+    def load_overlay_position(path: Path) -> Tuple[int, int] | None:
+        return WindowState.load_overlay_position_from_data(WindowState._load_data(path))
+
+    @staticmethod
     def save(
         path: Path,
         x: int,
@@ -152,6 +205,9 @@ class WindowState:
         display_mode: str,
         mode_sizes: Dict[str, Tuple[int, int]],
         overtime_alert_enabled: bool = DEFAULT_OVERTIME_ALERT_ENABLED,
+        startup_window_visible: bool = DEFAULT_STARTUP_WINDOW_VISIBLE,
+        tray_overlay_enabled: bool = DEFAULT_TRAY_OVERLAY_ENABLED,
+        overlay_position: Tuple[int, int] | None = None,
     ) -> None:
         """Save current window state to a file."""
         try:
@@ -161,6 +217,9 @@ class WindowState:
                 display_mode,
                 mode_sizes,
                 overtime_alert_enabled=overtime_alert_enabled,
+                startup_window_visible=startup_window_visible,
+                tray_overlay_enabled=tray_overlay_enabled,
+                overlay_position=overlay_position,
             )
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(data, indent=2), encoding="utf-8")

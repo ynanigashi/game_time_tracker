@@ -74,6 +74,12 @@ def create_mock_main_window(
 
     window.daily_stats = services.DailyStatsTracker()
     window.overlay_window = None
+    window.tray_icon = None
+    window.tray_menu = None
+    window._is_quitting = False
+    window.startup_window_visible = False
+    window.tray_overlay_enabled = False
+    window.overlay_position = None
     window._overtime_alert_tracker = main.OvertimeAlertTracker(
         thresholds_minutes=main.OVERTIME_ALERT_THRESHOLDS_MINUTES,
         alerted_threshold_minutes=set(),

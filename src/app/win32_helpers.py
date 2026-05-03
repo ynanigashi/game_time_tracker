@@ -39,6 +39,8 @@ if _USER32 is not None:
     _USER32.WindowFromPoint.restype = ctypes.c_void_p
     _USER32.GetWindowRect.restype = ctypes.c_int
     _USER32.GetWindowThreadProcessId.restype = ctypes.c_uint
+    _USER32.GetCursorPos.restype = ctypes.c_int
+    _USER32.GetAsyncKeyState.restype = ctypes.c_short
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +74,25 @@ def rects_intersect(first_rect: Rect, second_rect: Rect) -> bool:
     right = min(first_rect[2], second_rect[2])
     bottom = min(first_rect[3], second_rect[3])
     return right > left and bottom > top
+
+
+def cursor_position() -> Optional[Point]:
+    """Return the current global cursor position."""
+    if _USER32 is None:
+        return None
+
+    point = _WinPoint()
+    if _USER32.GetCursorPos(ctypes.byref(point)) == 0:
+        return None
+    return int(point.x), int(point.y)
+
+
+def is_right_mouse_button_pressed() -> bool:
+    """Return whether the right mouse button is currently pressed globally."""
+    if _USER32 is None:
+        return False
+    # VK_RBUTTON = 0x02; high bit means currently pressed.
+    return bool(_USER32.GetAsyncKeyState(0x02) & 0x8000)
 
 
 def sample_points_from_rect(

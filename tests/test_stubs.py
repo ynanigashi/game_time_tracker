@@ -18,16 +18,100 @@ class FakeQWidget:
     """QWidget のスタブ."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.visible = False
+        self._geom = types.SimpleNamespace(
+            x=lambda: 0,
+            y=lambda: 0,
+            width=lambda: 100,
+            height=lambda: 30,
+        )
+
+    def show(self) -> None:
+        self.visible = True
+
+    def hide(self) -> None:
+        self.visible = False
+
+    def isVisible(self) -> bool:
+        return bool(getattr(self, "visible", False))
+
+    def raise_(self) -> None:
         pass
+
+    def activateWindow(self) -> None:
+        pass
+
+    def geometry(self) -> Any:
+        return self._geom
+
+    def setGeometry(self, x: int, y: int, width: int, height: int) -> None:
+        self._geom = types.SimpleNamespace(
+            x=lambda: x,
+            y=lambda: y,
+            width=lambda: width,
+            height=lambda: height,
+        )
+
+    def move(self, x: int, y: int) -> None:
+        self.setGeometry(x, y, int(self._geom.width()), int(self._geom.height()))
+
+    def resize(self, width: int, height: int) -> None:
+        self.setGeometry(int(self._geom.x()), int(self._geom.y()), width, height)
+
+    def width(self) -> int:
+        return int(self._geom.width())
+
+    def height(self) -> int:
+        return int(self._geom.height())
 
     def closeEvent(self, event) -> None:
         pass
+
+    def moveEvent(self, event) -> None:
+        pass
+
+    def nativeEvent(self, event_type, message):
+        return False, 0
 
     def resizeEvent(self, event) -> None:
         pass
 
     def mousePressEvent(self, event) -> None:
         pass
+
+    def mouseMoveEvent(self, event) -> None:
+        pass
+
+    def mouseReleaseEvent(self, event) -> None:
+        pass
+
+    def setCursor(self, cursor: Any) -> None:
+        self.cursor = cursor
+
+    def unsetCursor(self) -> None:
+        self.cursor = None
+
+    def setStyleSheet(self, style: str) -> None:
+        self.style = style
+
+    def close(self) -> bool:
+        self.closed = True
+        return True
+
+    def setWindowFlags(self, flags: Any) -> None:
+        self.window_flags = flags
+
+    def setWindowOpacity(self, opacity: float) -> None:
+        self.window_opacity = opacity
+
+    def setAttribute(self, attribute: Any, enabled: bool = True) -> None:
+        self.attribute = (attribute, enabled)
+
+    def setFocusPolicy(self, policy: Any) -> None:
+        self.focus_policy = policy
+
+    def setLayout(self, layout: Any) -> None:
+        self.layout = layout
 
 
 class FakeQMouseEvent:
@@ -64,6 +148,91 @@ class FakeQApplication:
     def processEvents() -> None:
         return None
 
+    _instance = None
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        FakeQApplication._instance = self
+        self.quit_on_last_window_closed = True
+        self.quit_called = False
+
+    @staticmethod
+    def mouseButtons() -> int:
+        return 0
+
+    @staticmethod
+    def style() -> Any:
+        return FakeStyle()
+
+    @staticmethod
+    def instance() -> Any:
+        return FakeQApplication._instance
+
+    def setQuitOnLastWindowClosed(self, value: bool) -> None:
+        self.quit_on_last_window_closed = value
+
+    def quit(self) -> None:
+        self.quit_called = True
+
+    def exec(self) -> int:
+        return 0
+
+
+class FakePoint:
+    def __init__(self, x: int = 0, y: int = 0) -> None:
+        self._x = x
+        self._y = y
+
+    def x(self) -> int:
+        return self._x
+
+    def y(self) -> int:
+        return self._y
+
+
+class FakeQCursor:
+    _pos = FakePoint()
+
+    @staticmethod
+    def pos() -> FakePoint:
+        return FakeQCursor._pos
+
+
+class FakeQIcon:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.args = args
+        self.kwargs = kwargs
+
+
+class FakeStyle:
+    def standardIcon(self, *args: Any, **kwargs: Any) -> FakeQIcon:
+        return FakeQIcon()
+
+
+class FakeQStyle:
+    StandardPixmap = types.SimpleNamespace(SP_ComputerIcon=1)
+
+
+class FakeSystemTrayIcon:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.visible = False
+        self.context_menu = None
+
+    @staticmethod
+    def isSystemTrayAvailable() -> bool:
+        return True
+
+    def setToolTip(self, text: str) -> None:
+        self.tooltip = text
+
+    def setContextMenu(self, menu: Any) -> None:
+        self.context_menu = menu
+
+    def show(self) -> None:
+        self.visible = True
+
+    def hide(self) -> None:
+        self.visible = False
+
 
 class FakeQDate:
     def __init__(self, year: int, month: int, day: int) -> None:
@@ -83,6 +252,9 @@ class FakeQDate:
 
 
 class FakeSignal:
+    def __init__(self) -> None:
+        self.callback = None
+
     def connect(self, callback: Any) -> None:
         self.callback = callback
 
@@ -177,6 +349,33 @@ class FakeWidget:
 
     def reject(self) -> None:
         self.rejected = True
+
+    def closeEvent(self, event) -> None:
+        self.closed_event = event
+
+    def mousePressEvent(self, event) -> None:
+        pass
+
+    def mouseMoveEvent(self, event) -> None:
+        pass
+
+    def mouseReleaseEvent(self, event) -> None:
+        pass
+
+    def setFixedWidth(self, width: int) -> None:
+        self.fixed_width = width
+
+    def setStyleSheet(self, style: str) -> None:
+        self.style = style
+
+    def setAlignment(self, alignment: Any) -> None:
+        self.alignment = alignment
+
+    def setCursor(self, cursor: Any) -> None:
+        self.cursor = cursor
+
+    def unsetCursor(self) -> None:
+        self.cursor = None
 
 
 class FakeLineEdit(FakeWidget):
@@ -386,20 +585,34 @@ class FakeFileDialog:
         return FakeFileDialog.next_save_file_name
 
 
+class FakeAction:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.checkable = False
+        self.checked = False
+        self.visible = True
+        self.triggered = FakeSignal()
+        self.toggled = FakeSignal()
+
+    def setCheckable(self, value: bool) -> None:
+        self.checkable = value
+
+    def setChecked(self, value: bool) -> None:
+        self.checked = value
+
+    def setVisible(self, value: bool) -> None:
+        self.visible = value
+
+
 class FakeMenu:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.actions = []
         self.menus = []
         self.selected_action = None
+        self.aboutToShow = FakeSignal()
 
     def addAction(self, text: str) -> object:
-        action = types.SimpleNamespace(
-            text=text,
-            checkable=False,
-            checked=False,
-        )
-        action.setCheckable = lambda value: setattr(action, "checkable", value)
-        action.setChecked = lambda value: setattr(action, "checked", value)
+        action = FakeAction(text)
         self.actions.append(action)
         return action
 
@@ -420,10 +633,17 @@ fake_pyside6_core: Any = types.SimpleNamespace(
         ContextMenuPolicy=types.SimpleNamespace(CustomContextMenu=3),
         CheckState=types.SimpleNamespace(Unchecked=0, Checked=2),
         AlignmentFlag=types.SimpleNamespace(AlignCenter=0),
+        CursorShape=types.SimpleNamespace(
+            OpenHandCursor=10,
+            ClosedHandCursor=11,
+            SizeAllCursor=12,
+        ),
     ),
 )
 fake_pyside6_gui: Any = types.SimpleNamespace(
     QCloseEvent=type("QCloseEvent", (), {}),
+    QCursor=FakeQCursor,
+    QIcon=FakeQIcon,
     QMouseEvent=FakeQMouseEvent,
     QResizeEvent=type("QResizeEvent", (), {}),
 )
@@ -441,6 +661,8 @@ fake_pyside6_widgets: Any = types.SimpleNamespace(
     QFormLayout=FakeLayout,
     QLineEdit=FakeLineEdit,
     QMessageBox=FakeMessageBox,
+    QStyle=FakeQStyle,
+    QSystemTrayIcon=FakeSystemTrayIcon,
     QTextEdit=FakeTextEdit,
     QComboBox=FakeComboBox,
     QDateEdit=FakeDateEdit,

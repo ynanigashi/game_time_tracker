@@ -9,13 +9,15 @@ from logging.handlers import RotatingFileHandler
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
 
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtGui import QCloseEvent, QMouseEvent, QResizeEvent
+from PySide6.QtGui import QCloseEvent, QIcon, QMouseEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QApplication,
     QLabel,
     QMenu,
     QMessageBox,
     QPushButton,
+    QStyle,
+    QSystemTrayIcon,
     QWidget,
 )
 
@@ -78,6 +80,7 @@ from src.infra.runtime_paths import (
     default_log_file,
     default_window_state_file,
     resolve_log_file,
+    runtime_path,
     resolve_window_state_file,
 )
 from src.ui.gui_layout import build_main_layout
@@ -202,6 +205,7 @@ class MainWindow(QWidget):
         self._initialize_window_state()
         self.w = build_main_layout(self)
         self._initialize_runtime_state()
+        self._initialize_tray_icon()
         self._initialize_window_title_copy()
         self._warmup_dependencies()
         self._init_components()
@@ -218,6 +222,10 @@ class MainWindow(QWidget):
             self.mode_sizes,
             self.overtime_alert_enabled,
         ) = self._get_state_controller().load_all()
+        state_controller = self._get_state_controller()
+        self.startup_window_visible = state_controller.load_startup_window_visible()
+        self.tray_overlay_enabled = state_controller.load_tray_overlay_enabled()
+        self.overlay_position = state_controller.load_overlay_position()
         self.setGeometry(x, y, *self.mode_sizes[self.display_mode])
 
     def _initialize_runtime_state(self) -> None:
@@ -231,8 +239,18 @@ class MainWindow(QWidget):
         self.inactive_games_cache: List[GameEntry] = []
         self.latest_window_titles: List[str] = []
         self.overlay_window: Optional[TodayTimeOverlayWindow] = None
+        self.tray_icon: Optional[QSystemTrayIcon] = None
+        self.tray_menu: Optional[QMenu] = None
+        self._is_quitting = False
+        self._force_startup_window_visible = False
         self.overtime_alert_enabled = bool(
             getattr(self, "overtime_alert_enabled", DEFAULT_OVERTIME_ALERT_ENABLED)
+        )
+        self.startup_window_visible = bool(
+            getattr(self, "startup_window_visible", False)
+        )
+        self.tray_overlay_enabled = bool(
+            getattr(self, "tray_overlay_enabled", False)
         )
         self._overtime_alert_toggle_connected = False
         self._report_button_connected = False
@@ -247,6 +265,173 @@ class MainWindow(QWidget):
         )
         self._window_title_copy_connected = False
         self._window_title_context_menu_connected = False
+
+    def _initialize_tray_icon(self) -> None:
+        """Create the tray icon and context menu used as the app's home."""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            logger.warning("system tray is not available")
+            self._force_startup_window_visible = True
+            return
+
+        tray_icon = QSystemTrayIcon(self._create_tray_icon(), self)
+        tray_icon.setToolTip(BASE_TITLE)
+        tray_icon.setContextMenu(self._build_tray_menu())
+        tray_icon.show()
+        self.tray_icon = tray_icon
+
+    def _create_tray_icon(self) -> QIcon:
+        icon_path = runtime_path("assets", "tray_icon.ico")
+        if icon_path.exists():
+            return QIcon(str(icon_path))
+
+        try:
+            style = QApplication.style()
+            standard_pixmap = getattr(
+                getattr(QStyle, "StandardPixmap", object),
+                "SP_ComputerIcon",
+                None,
+            )
+            if standard_pixmap is not None:
+                return style.standardIcon(standard_pixmap)
+        except Exception:
+            logger.debug("failed to create standard tray icon", exc_info=True)
+        return QIcon()
+
+    def _build_tray_menu(self) -> QMenu:
+        menu = QMenu(self)
+        show_action = menu.addAction("\u30a6\u30a3\u30f3\u30c9\u30a6\u3092\u8868\u793a")
+        hide_action = menu.addAction("\u30a6\u30a3\u30f3\u30c9\u30a6\u3092\u975e\u8868\u793a")
+        overlay_action = menu.addAction("\u30aa\u30fc\u30d0\u30fc\u30ec\u30a4\u8868\u793a")
+        overlay_action.setCheckable(True)
+        overlay_action.setChecked(bool(getattr(self, "tray_overlay_enabled", False)))
+
+        startup_menu = menu.addMenu("\u8d77\u52d5\u6642")
+        startup_show_action = startup_menu.addAction("\u30a6\u30a3\u30f3\u30c9\u30a6\u3092\u8868\u793a")
+        startup_hide_action = startup_menu.addAction("\u30a6\u30a3\u30f3\u30c9\u30a6\u3092\u975e\u8868\u793a")
+        for action in (startup_show_action, startup_hide_action):
+            action.setCheckable(True)
+        startup_show_action.setChecked(bool(getattr(self, "startup_window_visible", False)))
+        startup_hide_action.setChecked(not bool(getattr(self, "startup_window_visible", False)))
+
+        manual_record_action = menu.addAction("\u624b\u5165\u529b\u3067\u8a18\u9332")
+        report_action = menu.addAction("\u30ec\u30dd\u30fc\u30c8")
+        game_catalog_action = menu.addAction("\u30b2\u30fc\u30e0\u7ba1\u7406")
+        settings_action = menu.addAction("\u8a2d\u5b9a")
+        exit_action = menu.addAction("\u7d42\u4e86")
+
+        show_action.triggered.connect(lambda _checked=False: self._show_main_window_from_tray())
+        hide_action.triggered.connect(lambda _checked=False: self._hide_main_window_to_tray())
+        overlay_action.toggled.connect(self._set_tray_overlay_enabled)
+        startup_show_action.triggered.connect(lambda _checked=False: self._set_startup_window_visible(True))
+        startup_hide_action.triggered.connect(lambda _checked=False: self._set_startup_window_visible(False))
+        manual_record_action.triggered.connect(lambda _checked=False: self._open_manual_record_dialog())
+        report_action.triggered.connect(lambda _checked=False: self._open_report_dialog())
+        game_catalog_action.triggered.connect(lambda _checked=False: self._open_game_catalog_dialog())
+        settings_action.triggered.connect(lambda _checked=False: self._open_settings_dialog())
+        exit_action.triggered.connect(lambda _checked=False: self._quit_application())
+
+        self._tray_show_action = show_action
+        self._tray_hide_action = hide_action
+        self._tray_startup_show_action = startup_show_action
+        self._tray_startup_hide_action = startup_hide_action
+        self._tray_overlay_action = overlay_action
+        self.tray_menu = menu
+        self._sync_tray_window_actions()
+
+        about_to_show = getattr(menu, "aboutToShow", None)
+        if about_to_show is not None:
+            try:
+                about_to_show.connect(self._sync_tray_window_actions)
+            except Exception:
+                logger.debug("failed to connect tray menu refresh", exc_info=True)
+        return menu
+
+    def _show_main_window_from_tray(self) -> None:
+        self.show()
+        self._process_pending_ui_events()
+        self._align_today_display_to_overlay_position()
+        self._process_pending_ui_events()
+        self._align_today_display_to_overlay_position()
+        self.raise_()
+        self.activateWindow()
+        self._sync_tray_window_actions()
+        self._sync_overlay()
+
+    @staticmethod
+    def _process_pending_ui_events() -> None:
+        try:
+            QApplication.processEvents()
+        except Exception:
+            logger.debug("failed to process pending UI events", exc_info=True)
+
+    def _align_today_display_to_overlay_position(self) -> None:
+        overlay_position = getattr(self, "overlay_position", None)
+        if overlay_position is None:
+            return
+        target = self._get_today_time_display()
+        if target is None:
+            return
+        try:
+            top_left = target.mapToGlobal(target.rect().topLeft())
+            geometry = self.geometry()
+            self.move(
+                int(geometry.x()) + int(overlay_position[0]) - int(top_left.x()),
+                int(geometry.y()) + int(overlay_position[1]) - int(top_left.y()),
+            )
+        except Exception:
+            logger.debug("failed to align main window to overlay position", exc_info=True)
+
+    def _hide_main_window_to_tray(self) -> None:
+        self._save_window_state()
+        self.hide()
+        self._sync_tray_window_actions()
+        self._sync_overlay()
+
+    def _sync_tray_window_actions(self) -> None:
+        is_window_visible = bool(getattr(self, "isVisible", lambda: False)())
+        show_action = getattr(self, "_tray_show_action", None)
+        hide_action = getattr(self, "_tray_hide_action", None)
+        if show_action is not None:
+            set_visible = getattr(show_action, "setVisible", None)
+            if callable(set_visible):
+                set_visible(not is_window_visible)
+        if hide_action is not None:
+            set_visible = getattr(hide_action, "setVisible", None)
+            if callable(set_visible):
+                set_visible(is_window_visible)
+
+    def _set_startup_window_visible(self, visible: bool) -> None:
+        self.startup_window_visible = bool(visible)
+        show_action = getattr(self, "_tray_startup_show_action", None)
+        hide_action = getattr(self, "_tray_startup_hide_action", None)
+        if show_action is not None:
+            show_action.setChecked(self.startup_window_visible)
+        if hide_action is not None:
+            hide_action.setChecked(not self.startup_window_visible)
+        self._save_window_state()
+
+    def _set_tray_overlay_enabled(self, enabled: bool) -> None:
+        self.tray_overlay_enabled = bool(enabled)
+        self._save_window_state()
+        self._sync_overlay()
+
+    def _quit_application(self) -> None:
+        self._is_quitting = True
+        self._record_playing_games_before_close()
+        self._save_window_state()
+        self._close_overlay()
+        tray_icon = getattr(self, "tray_icon", None)
+        if tray_icon is not None:
+            tray_icon.hide()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+
+    def should_show_window_on_startup(self) -> bool:
+        return bool(
+            getattr(self, "_force_startup_window_visible", False)
+            or getattr(self, "startup_window_visible", False)
+        )
 
     def _get_window_list_widget(self) -> Optional[QWidget]:
         """ウィンドウタイトル一覧ウィジェットを取得する。"""
@@ -416,6 +601,13 @@ class MainWindow(QWidget):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """ウィンドウ終了時にプレイ中のゲームを記録し、状態を保存."""
+        if not bool(getattr(self, "_is_quitting", True)):
+            self._hide_main_window_to_tray()
+            ignore = getattr(event, "ignore", None)
+            if callable(ignore):
+                ignore()
+            return
+
         self._record_playing_games_before_close()
         self._save_window_state()
         self._close_overlay()
@@ -548,6 +740,7 @@ class MainWindow(QWidget):
             if e.log_message:
                 logger.error(e.log_message)
             if getattr(e, "open_settings", False):
+                self._force_startup_window_visible = True
                 self._set_status(e.status_message)
                 alert_message = getattr(e, "alert_message", None)
                 if alert_message:
@@ -559,9 +752,11 @@ class MainWindow(QWidget):
                 self._open_settings_dialog()
                 return
             if getattr(e, "open_game_catalog", False):
+                self._force_startup_window_visible = True
                 self._set_status(e.status_message)
                 self._open_game_catalog_dialog()
                 return
+            self._force_startup_window_visible = True
             self._disable_with_status(e.status_message)
             return
 
@@ -625,6 +820,12 @@ class MainWindow(QWidget):
         return self._get_ui_controller().all_playing_games(
             active,
             self.inactive_games_cache,
+        )
+
+    def _has_playing_games(self) -> bool:
+        return any(
+            bool(getattr(game, "is_playing", False))
+            for game in getattr(self, "games", [])
         )
 
     def _update_session_times(
@@ -694,6 +895,9 @@ class MainWindow(QWidget):
             self.display_mode,
             self.mode_sizes,
             self._is_overtime_alert_enabled(),
+            startup_window_visible=bool(getattr(self, "startup_window_visible", False)),
+            tray_overlay_enabled=bool(getattr(self, "tray_overlay_enabled", False)),
+            overlay_position=getattr(self, "overlay_position", None),
         )
 
     def _set_status(self, message: str) -> None:
@@ -866,16 +1070,24 @@ class MainWindow(QWidget):
     def _open_game_catalog_dialog(self, *, initial_window_title: str = "") -> None:
         """Open a non-modal game catalog dialog."""
         dialog = getattr(self, "_game_catalog_dialog", None)
+        created_dialog = False
         if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
             dialog = GameCatalogDialog(self, on_saved=self._on_game_catalog_saved)
             self._game_catalog_dialog = dialog
+            created_dialog = True
+
+        dialog.show()
+
+        if created_dialog:
+            sync_on_open = getattr(dialog, "sync_on_open", None)
+            if callable(sync_on_open):
+                sync_on_open()
 
         if initial_window_title:
             prepare = getattr(dialog, "prepare_new_game", None)
             if callable(prepare):
                 prepare(window_title=initial_window_title)
 
-        dialog.show()
         dialog.raise_()
         dialog.activateWindow()
 
@@ -1077,17 +1289,6 @@ class MainWindow(QWidget):
         if target_rect is None:
             return False, "target_rect_missing"
 
-        # 前面ウィンドウの外接矩形が対象領域と交差しない場合は未被覆扱いにする。
-        foreground_rect = self._foreground_rect_if_foreign()
-        if foreground_rect is None:
-            return False, "foreground_not_foreign"
-        foreground_hwnd = get_foreground_hwnd()
-        if foreground_hwnd == 0:
-            return False, "foreground_not_foreign"
-        foreground_root_hwnd = self._root_window(foreground_hwnd)
-        if foreground_root_hwnd == 0:
-            return False, "foreground_root_missing"
-
         sample_points = self._sample_points_from_rect(target_rect)
 
         def count_covering_foreign_points(*, use_native_points: bool) -> int:
@@ -1095,18 +1296,21 @@ class MainWindow(QWidget):
                 1
                 for x, y in sample_points
                 if self._find_covering_foreign_window_at_point(
-                    *(self._to_native_point(x, y) if use_native_points else (x, y)),
-                    expected_root_hwnd=foreground_root_hwnd,
+                    *(self._to_native_point(x, y) if use_native_points else (x, y))
                 ) != 0
             )
 
-        target_rect_native = self._to_native_rect(target_rect)
-        if self._rects_intersect(target_rect_native, foreground_rect):
-            covered_points = count_covering_foreign_points(use_native_points=True)
-            if covered_points >= OVERLAY_COVERED_POINTS_THRESHOLD:
-                return True, "covered_native_points"
-            if covered_points > 0:
-                return False, "covered_native_points_below_threshold"
+        covered_points = count_covering_foreign_points(use_native_points=True)
+        if covered_points >= OVERLAY_COVERED_POINTS_THRESHOLD:
+            return True, "covered_native_points"
+        if covered_points > 0:
+            return False, "covered_native_points_below_threshold"
+
+        covered_points = count_covering_foreign_points(use_native_points=False)
+        if covered_points >= OVERLAY_COVERED_POINTS_THRESHOLD:
+            return True, "covered_logical_points"
+        if covered_points > 0:
+            return False, "covered_logical_points_below_threshold"
 
         return False, "no_cover_detected"
 
@@ -1253,7 +1457,7 @@ class MainWindow(QWidget):
         elif selected_action is settings_action:
             self._open_settings_dialog()
         elif selected_action is exit_action:
-            self.close()
+            self._quit_application()
 
     def _set_display_mode(self, display_mode: str) -> None:
         if display_mode not in DISPLAY_MODES:
@@ -1298,8 +1502,10 @@ class MainWindow(QWidget):
 def main() -> None:
     configure_logging()
     app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
     window = MainWindow()
-    window.show()
+    if window.should_show_window_on_startup():
+        window.show()
     sys.exit(app.exec())
 
 
