@@ -52,6 +52,7 @@ from src.ui.report_charts import (
 )
 from src.ui.report_date_ranges import RECENT_PERIOD_DAYS, date_range_for_period
 from src.ui.report_graph_unit import ReportGraphUnitController
+from src.ui.report_graph_unit_state import ReportGraphUnitState
 from src.ui.report_log_operations import ReportLogOperationController
 from src.ui.report_log_table import ReportLogTableController, bool_text
 from src.ui.report_summary_table import (
@@ -179,11 +180,8 @@ class ReportDialog(QDialog):
         self.chart_type_combo.addItem("パイチャート", "pie")
         self.chart_type_combo.currentIndexChanged.connect(self._request_summary_refresh)
 
-        self._graph_unit_hours = False
-        self._updating_unit_toggles = False
+        self._graph_unit_state = ReportGraphUnitState()
         self._trend_selected_indices: Optional[Tuple[int, int]] = None
-        self._unit_minute_buttons: List[QPushButton] = []
-        self._unit_hour_buttons: List[QPushButton] = []
         self.summary_unit_control = self._create_unit_toggle()
         self.trend_unit_control = self._create_unit_toggle()
         self._sync_unit_controls()
@@ -352,9 +350,51 @@ class ReportDialog(QDialog):
     def _get_graph_unit_controller(self) -> ReportGraphUnitController:
         controller = getattr(self, "_graph_unit_controller", None)
         if controller is None:
-            controller = ReportGraphUnitController(self)
+            controller = ReportGraphUnitController(
+                self,
+                self._ensure_graph_unit_state(),
+            )
             self._graph_unit_controller = controller
         return controller
+
+    def _ensure_graph_unit_state(self) -> ReportGraphUnitState:
+        state = getattr(self, "_graph_unit_state", None)
+        if state is None:
+            state = ReportGraphUnitState()
+            self._graph_unit_state = state
+        return state
+
+    @property
+    def _graph_unit_hours(self) -> bool:
+        return self._ensure_graph_unit_state().graph_unit_hours
+
+    @_graph_unit_hours.setter
+    def _graph_unit_hours(self, value: bool) -> None:
+        self._ensure_graph_unit_state().graph_unit_hours = bool(value)
+
+    @property
+    def _updating_unit_toggles(self) -> bool:
+        return self._ensure_graph_unit_state().updating_unit_toggles
+
+    @_updating_unit_toggles.setter
+    def _updating_unit_toggles(self, value: bool) -> None:
+        self._ensure_graph_unit_state().updating_unit_toggles = bool(value)
+
+    @property
+    def _unit_minute_buttons(self) -> List[QPushButton]:
+        return self._ensure_graph_unit_state().minute_buttons
+
+    @_unit_minute_buttons.setter
+    def _unit_minute_buttons(self, value: List[QPushButton]) -> None:
+        self._ensure_graph_unit_state().minute_buttons = list(value)
+
+    @property
+    def _unit_hour_buttons(self) -> List[QPushButton]:
+        return self._ensure_graph_unit_state().hour_buttons
+
+    @_unit_hour_buttons.setter
+    def _unit_hour_buttons(self, value: List[QPushButton]) -> None:
+        self._ensure_graph_unit_state().hour_buttons = list(value)
 
     def _create_unit_toggle(self) -> QWidget:
         return self._get_graph_unit_controller().create_unit_toggle()

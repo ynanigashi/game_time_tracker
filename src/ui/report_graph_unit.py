@@ -7,14 +7,17 @@ from time import perf_counter
 
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
+from src.ui.report_graph_unit_state import ReportGraphUnitState
+
 logger = logging.getLogger(__name__)
 
 
 class ReportGraphUnitController:
     """Manage minute/hour graph unit toggles and chart redraws."""
 
-    def __init__(self, owner: object) -> None:
+    def __init__(self, owner: object, state: ReportGraphUnitState) -> None:
         self.owner = owner
+        self.state = state
 
     def create_unit_toggle(self) -> QWidget:
         container = QWidget(self.owner)
@@ -40,29 +43,29 @@ class ReportGraphUnitController:
 
         layout.addWidget(minute_button)
         layout.addWidget(hour_button)
-        self.owner._unit_minute_buttons.append(minute_button)
-        self.owner._unit_hour_buttons.append(hour_button)
+        self.state.minute_buttons.append(minute_button)
+        self.state.hour_buttons.append(hour_button)
         return container
 
     def sync_unit_controls(self) -> None:
-        self.owner._updating_unit_toggles = True
+        self.state.updating_unit_toggles = True
         try:
-            for button in self.owner._unit_minute_buttons:
-                button.setChecked(not self.owner._graph_unit_hours)
-            for button in self.owner._unit_hour_buttons:
-                button.setChecked(self.owner._graph_unit_hours)
+            for button in self.state.minute_buttons:
+                button.setChecked(not self.state.graph_unit_hours)
+            for button in self.state.hour_buttons:
+                button.setChecked(self.state.graph_unit_hours)
         finally:
-            self.owner._updating_unit_toggles = False
+            self.state.updating_unit_toggles = False
 
     def set_graph_unit(self, hours: bool) -> None:
-        if self.owner._updating_unit_toggles:
+        if self.state.updating_unit_toggles:
             return
-        if self.owner._graph_unit_hours == hours:
+        if self.state.graph_unit_hours == hours:
             self.sync_unit_controls()
             return
 
         started_at = perf_counter()
-        self.owner._graph_unit_hours = hours
+        self.state.graph_unit_hours = hours
         self.sync_unit_controls()
 
         self.owner._set_debug_message(
@@ -101,8 +104,8 @@ class ReportGraphUnitController:
         )
 
     def graph_unit_label(self) -> str:
-        return "時間" if self.owner._graph_unit_hours else "分"
+        return "時間" if self.state.graph_unit_hours else "分"
 
     def seconds_to_graph_value(self, seconds: float) -> float:
-        divisor = 3600.0 if self.owner._graph_unit_hours else 60.0
+        divisor = 3600.0 if self.state.graph_unit_hours else 60.0
         return seconds / divisor

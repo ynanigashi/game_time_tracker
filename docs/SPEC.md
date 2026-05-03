@@ -680,6 +680,8 @@ GUI版メインウィンドウ。
 
 `ReportTabState` (`report_tab_state.py`) は `ReportDialog` のタブ更新状態とレポートキャッシュを保持する。`ReportDialog` には互換用の `_loaded_tabs` / `_dirty_tabs` / `_last_summary` などのプロパティを残すが、controller 側の更新は `ReportTabState` に寄せる。
 
+`ReportGraphUnitState` (`report_graph_unit_state.py`) はグラフ表示単位（分/時間）、単位トグル更新中フラグ、分/時間ボタン参照を保持する。`ReportGraphUnitController` はこの state を直接受け取り、単位状態の更新を owner private 属性に依存しない。
+
 | フィールド/メソッド | 説明 |
 |--------------------|------|
 | `loaded_tabs` / `dirty_tabs` | 遅延ロード済みタブと再読み込み対象タブ |
