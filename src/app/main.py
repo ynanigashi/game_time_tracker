@@ -36,7 +36,7 @@ from src.app.controllers import (
     TodayTimeOverlayWindow,
 )
 from src.app.alert_state import GameAlertState
-from src.app.cover_detector import Win32CoverDetector
+from src.app.cover_detector import CoverDetectorOps, Win32CoverDetector
 from src.app.dialog_state import DialogRefState
 from src.app.display_state import WindowDisplayState
 from src.app.lifecycle_state import AppLifecycleState
@@ -786,6 +786,28 @@ class MainWindow(QWidget):
                 self,
                 sample_ratios=OVERLAY_SAMPLE_RATIOS,
                 covered_points_threshold=OVERLAY_COVERED_POINTS_THRESHOLD,
+                ops=CoverDetectorOps(
+                    root_window=lambda hwnd: self._root_window(hwnd),
+                    window_handle_of=lambda widget: self._window_handle_of(widget),
+                    window_rect=lambda hwnd: self._window_rect(hwnd),
+                    rect_contains_point=lambda rect, x, y: self._rect_contains_point(
+                        rect,
+                        x,
+                        y,
+                    ),
+                    rects_intersect=lambda first, second: self._rects_intersect(
+                        first,
+                        second,
+                    ),
+                    window_at_point=lambda x, y: self._window_at_point(x, y),
+                    window_below=lambda hwnd: self._window_below(hwnd),
+                    global_rect_of_widget=lambda widget: self._global_rect_of_widget(
+                        widget
+                    ),
+                    sample_points_from_rect=lambda rect: self._sample_points_from_rect(
+                        rect
+                    ),
+                ),
             ),
             validator=lambda detector: detector.owner is self,
         )
