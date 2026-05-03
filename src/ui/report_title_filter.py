@@ -21,10 +21,13 @@ class ReportTitleFilterController:
         owner: object,
         state: ReportTitleFilterState,
         tab_state: ReportTabState,
+        *,
+        trend_tab: int,
     ) -> None:
         self.owner = owner
         self.state = state
         self.tab_state = tab_state
+        self.trend_tab = int(trend_tab)
 
     def selected_titles(self) -> List[str]:
         titles: List[str] = []
@@ -146,7 +149,7 @@ class ReportTitleFilterController:
 
         self.update_action_states()
         self.owner.refresh_trend()
-        self.owner._mark_tab_clean(self.owner._TREND_TAB)
+        self.owner._mark_tab_clean(self.trend_tab)
         elapsed_ms = (perf_counter() - started_at) * 1000
         action = "全選択" if checked else "全解除"
         self.owner._set_debug_message(f"タイトルを{action} ({elapsed_ms:.0f} ms)")

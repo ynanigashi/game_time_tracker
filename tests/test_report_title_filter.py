@@ -23,6 +23,7 @@ class ReportTitleFilterControllerTest(unittest.TestCase):
             owner,
             ReportTitleFilterState(),
             tab_state,
+            trend_tab=1,
         )
 
         self.assertIs(controller.load_title_filter_summary(), cached_summary)
@@ -43,6 +44,7 @@ class ReportTitleFilterControllerTest(unittest.TestCase):
             owner,
             ReportTitleFilterState(),
             tab_state,
+            trend_tab=1,
         )
 
         self.assertIs(controller.load_title_filter_summary(), summary)
