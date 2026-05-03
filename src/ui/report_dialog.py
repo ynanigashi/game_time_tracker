@@ -69,6 +69,7 @@ from src.ui.report_trend_selection import (
     filter_trend_series_by_indices,
     trend_selection_label,
 )
+from src.ui.report_trend_selection_state import ReportTrendSelectionState
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +177,7 @@ class ReportDialog(QDialog):
         self.chart_type_combo.currentIndexChanged.connect(self._request_summary_refresh)
 
         self._graph_unit_state = ReportGraphUnitState()
-        self._trend_selected_indices: Optional[Tuple[int, int]] = None
+        self._trend_selection_state = ReportTrendSelectionState()
         self.summary_unit_control = self._create_unit_toggle()
         self.trend_unit_control = self._create_unit_toggle()
         self._sync_unit_controls()
@@ -335,6 +336,27 @@ class ReportDialog(QDialog):
     @_title_filter_initialized.setter
     def _title_filter_initialized(self, value: bool) -> None:
         self._ensure_title_filter_state().initialized = bool(value)
+
+    def _ensure_trend_selection_state(self) -> ReportTrendSelectionState:
+        state = getattr(self, "_trend_selection_state", None)
+        if state is None:
+            state = ReportTrendSelectionState()
+            self._trend_selection_state = state
+        return state
+
+    @property
+    def _trend_selected_indices(self) -> Optional[Tuple[int, int]]:
+        return self._ensure_trend_selection_state().selected_indices
+
+    @_trend_selected_indices.setter
+    def _trend_selected_indices(self, value: Optional[Tuple[int, int]]) -> None:
+        if value is None:
+            self._ensure_trend_selection_state().selected_indices = None
+            return
+        self._ensure_trend_selection_state().selected_indices = (
+            int(value[0]),
+            int(value[1]),
+        )
 
     @staticmethod
     def _chart_fallback_message() -> str:
@@ -877,7 +899,10 @@ class ReportDialog(QDialog):
     def _get_trend_selection_controller(self) -> ReportTrendSelectionController:
         controller = getattr(self, "_trend_selection_controller", None)
         if controller is None:
-            controller = ReportTrendSelectionController(self)
+            controller = ReportTrendSelectionController(
+                self,
+                self._ensure_trend_selection_state(),
+            )
             self._trend_selection_controller = controller
         return controller
 

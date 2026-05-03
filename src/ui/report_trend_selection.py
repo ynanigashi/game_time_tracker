@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QTableWidgetItem
 
 from src.core.reporting import TrendSeries
 from src.core.time_utils import format_hms
+from src.ui.report_trend_selection_state import ReportTrendSelectionState
 
 
 def filter_trend_series_by_indices(
@@ -41,8 +42,9 @@ def trend_selection_label(series_list: List[TrendSeries]) -> str:
 class ReportTrendSelectionController:
     """Manage trend table range selection and chart zoom reset."""
 
-    def __init__(self, owner: object) -> None:
+    def __init__(self, owner: object, state: ReportTrendSelectionState) -> None:
         self.owner = owner
+        self.state = state
 
     def populate_trend_table(self, series_list: List[TrendSeries]) -> None:
         rows = [
@@ -68,8 +70,8 @@ class ReportTrendSelectionController:
     def populate_trend_selection(self, series_list: List[TrendSeries]) -> None:
         display_series = series_list
         selection_label = ""
-        if self.owner._trend_selected_indices is not None:
-            start_index, end_index = self.owner._trend_selected_indices
+        if self.state.selected_indices is not None:
+            start_index, end_index = self.state.selected_indices
             display_series = filter_trend_series_by_indices(
                 series_list,
                 start_index,
@@ -116,7 +118,7 @@ class ReportTrendSelectionController:
         if start_index == end_index:
             return
 
-        self.owner._trend_selected_indices = (
+        self.state.selected_indices = (
             min(start_index, end_index),
             max(start_index, end_index),
         )
@@ -125,8 +127,8 @@ class ReportTrendSelectionController:
         self.owner._set_debug_message("推移グラフの選択範囲で集計しました")
 
     def clear_trend_selection(self, *_args: object) -> None:
-        had_selection = self.owner._trend_selected_indices is not None
-        self.owner._trend_selected_indices = None
+        had_selection = self.state.selected_indices is not None
+        self.state.selected_indices = None
         self.reset_trend_chart_zoom()
         self.populate_trend_selection(
             self.owner._ensure_report_tab_state().last_trend_series or []
@@ -145,5 +147,5 @@ class ReportTrendSelectionController:
 
     def update_action_states(self) -> None:
         self.owner.clear_trend_selection_button.setEnabled(
-            self.owner._trend_selected_indices is not None
+            self.state.selected_indices is not None
         )

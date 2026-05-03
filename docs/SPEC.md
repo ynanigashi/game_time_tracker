@@ -686,6 +686,8 @@ GUI版メインウィンドウ。
 
 `ReportTitleFilterState` (`report_title_filter_state.py`) はタイトルフィルタ表の更新中フラグと初期化済みフラグを保持する。`ReportTitleFilterController` はこの state を直接受け取り、タイトルフィルタの UI 操作状態を owner private 属性に依存しない。
 
+`ReportTrendSelectionState` (`report_trend_selection_state.py`) は推移グラフの選択範囲インデックスを保持する。`ReportTrendSelectionController` はこの state を直接受け取り、選択範囲の更新を owner private 属性に依存しない。
+
 | フィールド/メソッド | 説明 |
 |--------------------|------|
 | `loaded_tabs` / `dirty_tabs` | 遅延ロード済みタブと再読み込み対象タブ |
