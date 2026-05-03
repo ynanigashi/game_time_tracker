@@ -31,3 +31,8 @@ from tests.helpers.main_window_factory import (
 
 # servicesモジュールにpygetwindowのスタブを設定
 services.gw = pygetwindow
+
+
+def stable_today_now() -> datetime:
+    """Return a same-day timestamp that does not cross midnight in tests."""
+    return datetime.combine(datetime.now().date(), time(12, 0, 0))

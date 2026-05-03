@@ -331,10 +331,11 @@ class TestMainWindowUIHelpers(unittest.TestCase):
         window.daily_stats.today_completed_seconds = 0.0
         game = models.GameEntry(game_title="TestGame",
                                 window_title="TestGame", is_playing=True)
-        game.start_time = datetime.now() - timedelta(minutes=10)
+        now = stable_today_now()
+        game.start_time = now - timedelta(minutes=10)
         window.inactive_games_cache = []
 
-        window._update_today_totals([game], datetime.now())
+        window._update_today_totals([game], now)
 
         # 10分以上表示される（HH:MM:SS.F形式）
         call_arg = window.w.today_time_display.setText.call_args[0][0]

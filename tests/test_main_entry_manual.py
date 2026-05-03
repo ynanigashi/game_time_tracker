@@ -89,7 +89,7 @@ class TestManualRecordSave(unittest.TestCase):
         window._sync_overlay = MagicMock()
         window._set_status = MagicMock()
 
-        end_time = datetime.now().replace(microsecond=0)
+        end_time = stable_today_now()
         start_time = end_time - timedelta(minutes=30)
         record = ManualPlayRecord(
             game=GameEntry(game_title="NTE", window_title="NTE"),

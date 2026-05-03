@@ -92,10 +92,11 @@ class TestUpdateTodayGamesList(unittest.TestCase):
 
         game = models.GameEntry(game_title="PlayingGame",
                                 window_title="PlayingGame", is_playing=True)
-        game.start_time = datetime.now() - timedelta(minutes=10)
+        now = stable_today_now()
+        game.start_time = now - timedelta(minutes=10)
         window.active_games_cache = [game]
 
-        window._update_today_games_list(datetime.now())
+        window._update_today_games_list(now)
 
         # テーブルが更新される（1ゲーム）
         window.w.today_games_table.setRowCount.assert_called_with(1)
@@ -127,10 +128,11 @@ class TestUpdateTodayGamesList(unittest.TestCase):
         # 同じゲームが現在10分プレイ中
         game = models.GameEntry(
             game_title="GameA", window_title="GameA", is_playing=True)
-        game.start_time = datetime.now() - timedelta(minutes=10)
+        now = stable_today_now()
+        game.start_time = now - timedelta(minutes=10)
         window.active_games_cache = [game]
 
-        window._update_today_games_list(datetime.now())
+        window._update_today_games_list(now)
 
         # 30 + 10 = 40分として表示
         self.assertIn("GameA: 40分", window.daily_stats.last_today_games_content)
@@ -365,17 +367,24 @@ class TestInactiveWindowDisappear(unittest.TestCase):
         window = self._create_mock_main_window()
 
         # 15分前から開始し、3分間非アクティブ状態
+        now = stable_today_now()
         game = models.GameEntry(game_title="TestGame",
                                 window_title="TestGame", is_playing=True)
-        game.start_time = datetime.now() - timedelta(minutes=15)
-        game.inactive_since = datetime.now() - timedelta(minutes=3)  # 3分間非アクティブ
+        game.start_time = now - timedelta(minutes=15)
+        game.inactive_since = now - timedelta(minutes=3)  # 3分間非アクティブ
         window.games = [game]
 
         # ウィンドウが消失
         window.scanner.get_titles.return_value = []
         window.scanner.get_foreground_title.return_value = None
 
-        window._scan_tick()
+        with patch.object(services, "datetime") as mock_datetime, patch.object(
+            models,
+            "datetime",
+        ) as mock_model_datetime:
+            mock_datetime.now.return_value = now
+            mock_model_datetime.now.return_value = now
+            window._scan_tick()
 
         # record()が呼ばれ、非アクティブ時間も含めた時間が記録される
         self.assertFalse(game.is_playing)
@@ -509,11 +518,12 @@ class TestUpdateTodayTotalsIntegration(unittest.TestCase):
         # 非アクティブゲーム: 10分
         inactive_game = models.GameEntry(
             game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
-        inactive_game.start_time = datetime.now() - timedelta(minutes=10)
+        now = stable_today_now()
+        inactive_game.start_time = now - timedelta(minutes=10)
         inactive_game.set_inactive()
         window.inactive_games_cache = [inactive_game]
 
-        window._update_today_totals([], datetime.now())
+        window._update_today_totals([], now)
 
         # 10分 = 00:10:xx
         call_arg = window.w.today_time_display.setText.call_args[0][0]

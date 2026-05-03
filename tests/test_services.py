@@ -28,6 +28,11 @@ from unittest.mock import MagicMock, patch
 services.gw = pygetwindow
 
 
+def stable_today_now() -> datetime:
+    """Return a same-day timestamp that does not cross midnight in tests."""
+    return datetime.combine(datetime.now().date(), time(12, 0, 0))
+
+
 class TestSessionRecorder(unittest.TestCase):
     def test_record_over_threshold_appends(self):
         handler = FakeLogHandler()
@@ -37,9 +42,16 @@ class TestSessionRecorder(unittest.TestCase):
             window_title="LongPlay",
             play_with_friends=True,
             is_playing=True)
-        game.start_time = datetime.now() - timedelta(minutes=6)
+        now = stable_today_now()
+        game.start_time = now - timedelta(minutes=6)
 
-        recorder.record(game)
+        with patch.object(services, "datetime") as mock_datetime, patch.object(
+            models,
+            "datetime",
+        ) as mock_model_datetime:
+            mock_datetime.now.return_value = now
+            mock_model_datetime.now.return_value = now
+            recorder.record(game)
 
         self.assertFalse(game.is_playing)
         self.assertIsNone(game.start_time)
@@ -635,9 +647,16 @@ class TestUpdateGameStatesIntegration(unittest.TestCase):
             window_title="TestGame",
             is_playing=True,
         )
-        game.start_time = datetime.now() - timedelta(minutes=10)
+        now = stable_today_now()
+        game.start_time = now - timedelta(minutes=10)
 
-        active, inactive = self._run_update_game_states([game], [], None)
+        with patch.object(services, "datetime") as mock_datetime, patch.object(
+            models,
+            "datetime",
+        ) as mock_model_datetime:
+            mock_datetime.now.return_value = now
+            mock_model_datetime.now.return_value = now
+            active, inactive = self._run_update_game_states([game], [], None)
 
         self.assertEqual(len(active), 0)
         self.assertEqual(len(inactive), 0)
