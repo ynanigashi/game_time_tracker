@@ -12,6 +12,24 @@ from src.ui.report_title_filter_state import ReportTitleFilterState
 
 
 class ReportTitleFilterControllerTest(unittest.TestCase):
+    def _create_controller(
+        self,
+        owner,
+        state,
+        tab_state,
+        **kwargs,
+    ):
+        defaults = {
+            "trend_tab": 1,
+            "cached_records": lambda: [],
+            "is_title_trend_mode": lambda: True,
+            "refresh_trend": lambda: None,
+            "mark_tab_clean": lambda _tab: None,
+            "set_debug_message": lambda _message: None,
+        }
+        defaults.update(kwargs)
+        return ReportTitleFilterController(owner, state, tab_state, **defaults)
+
     def test_load_summary_uses_injected_tab_state_cache(self):
         cached_summary = ReportSummary(rows=[], total_seconds=0, session_count=0)
         tab_state = ReportTabState(
@@ -19,11 +37,10 @@ class ReportTitleFilterControllerTest(unittest.TestCase):
             title_filter_summary=cached_summary,
         )
         owner = SimpleNamespace(log_handler=SimpleNamespace())
-        controller = ReportTitleFilterController(
+        controller = self._create_controller(
             owner,
             ReportTitleFilterState(),
             tab_state,
-            trend_tab=1,
         )
 
         self.assertIs(controller.load_title_filter_summary(), cached_summary)
@@ -40,11 +57,10 @@ class ReportTitleFilterControllerTest(unittest.TestCase):
         owner = SimpleNamespace(
             log_handler=SimpleNamespace(get_report_stats=get_report_stats)
         )
-        controller = ReportTitleFilterController(
+        controller = self._create_controller(
             owner,
             ReportTitleFilterState(),
             tab_state,
-            trend_tab=1,
         )
 
         self.assertIs(controller.load_title_filter_summary(), summary)

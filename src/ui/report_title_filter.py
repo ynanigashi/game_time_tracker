@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from time import perf_counter
-from typing import List, Tuple
+from typing import Callable, List, Tuple
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTableWidgetItem
@@ -23,11 +23,21 @@ class ReportTitleFilterController:
         tab_state: ReportTabState,
         *,
         trend_tab: int,
+        cached_records: Callable[[], List[dict]],
+        is_title_trend_mode: Callable[[], bool],
+        refresh_trend: Callable[[], None],
+        mark_tab_clean: Callable[[int], None],
+        set_debug_message: Callable[[str], None],
     ) -> None:
         self.owner = owner
         self.state = state
         self.tab_state = tab_state
         self.trend_tab = int(trend_tab)
+        self.cached_records = cached_records
+        self.is_title_trend_mode = is_title_trend_mode
+        self.refresh_trend = refresh_trend
+        self.mark_tab_clean = mark_tab_clean
+        self.set_debug_message = set_debug_message
 
     def selected_titles(self) -> List[str]:
         titles: List[str] = []
@@ -51,7 +61,7 @@ class ReportTitleFilterController:
         if callable(get_report_stats):
             summary = get_report_stats(start_date=None, end_date=None)
         else:
-            summary = build_game_report(self.owner._cached_records())
+            summary = build_game_report(self.cached_records())
         self.tab_state.title_filter_summary = summary
         return summary
 
@@ -83,10 +93,10 @@ class ReportTitleFilterController:
     def on_title_filter_changed(self, *_args: object) -> None:
         if self.state.updating:
             return
-        if not self.owner._is_title_trend_mode():
+        if not self.is_title_trend_mode():
             self.update_action_states()
             return
-        self.owner.refresh_trend()
+        self.refresh_trend()
         self.update_action_states()
 
     def title_filter_counts(self) -> Tuple[int, int]:
@@ -100,7 +110,7 @@ class ReportTitleFilterController:
         return total_count, checked_count
 
     def update_action_states(self) -> None:
-        title_mode = self.owner._is_title_trend_mode()
+        title_mode = self.is_title_trend_mode()
         self.owner.title_filter_label.setEnabled(title_mode)
         self.owner.title_filter_table.setEnabled(title_mode)
         total_count, checked_count = self.title_filter_counts()
@@ -113,21 +123,21 @@ class ReportTitleFilterController:
 
     def set_all_title_filters(self, checked: bool) -> None:
         started_at = perf_counter()
-        if not self.owner._is_title_trend_mode():
-            self.owner._set_debug_message("合計表示ではタイトル選択は使用しません")
+        if not self.is_title_trend_mode():
+            self.set_debug_message("合計表示ではタイトル選択は使用しません")
             self.update_action_states()
             return
         total_count, checked_count = self.title_filter_counts()
         if total_count == 0:
-            self.owner._set_debug_message("タイトルがありません")
+            self.set_debug_message("タイトルがありません")
             self.update_action_states()
             return
         if checked and checked_count == total_count:
-            self.owner._set_debug_message("タイトルはすでに全選択済みです")
+            self.set_debug_message("タイトルはすでに全選択済みです")
             self.update_action_states()
             return
         if not checked and checked_count == 0:
-            self.owner._set_debug_message("タイトルはすでに全解除済みです")
+            self.set_debug_message("タイトルはすでに全解除済みです")
             self.update_action_states()
             return
 
@@ -148,8 +158,8 @@ class ReportTitleFilterController:
             self.state.updating = False
 
         self.update_action_states()
-        self.owner.refresh_trend()
-        self.owner._mark_tab_clean(self.trend_tab)
+        self.refresh_trend()
+        self.mark_tab_clean(self.trend_tab)
         elapsed_ms = (perf_counter() - started_at) * 1000
         action = "全選択" if checked else "全解除"
-        self.owner._set_debug_message(f"タイトルを{action} ({elapsed_ms:.0f} ms)")
+        self.set_debug_message(f"タイトルを{action} ({elapsed_ms:.0f} ms)")
