@@ -726,7 +726,11 @@ class MainWindow(QWidget):
         """Return the task-tray controller."""
         return self._resolve_dependency(
             "_tray_controller",
-            factory=lambda: MainWindowTrayController(self, base_title=BASE_TITLE),
+            factory=lambda: MainWindowTrayController(
+                self,
+                base_title=BASE_TITLE,
+                action_state=self._ensure_tray_action_state(),
+            ),
             validator=lambda controller: controller.owner is self,
         )
 

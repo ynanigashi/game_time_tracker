@@ -8,6 +8,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QStyle, QSystemTrayIcon
 
 from src.infra.runtime_paths import runtime_path
+from src.app.tray_state import TrayActionState
 
 logger = logging.getLogger(__name__)
 
@@ -15,9 +16,16 @@ logger = logging.getLogger(__name__)
 class MainWindowTrayController:
     """Owns tray icon/menu creation and tray-driven window actions."""
 
-    def __init__(self, owner: "MainWindow", *, base_title: str) -> None:
+    def __init__(
+        self,
+        owner: "MainWindow",
+        *,
+        base_title: str,
+        action_state: TrayActionState,
+    ) -> None:
         self.owner = owner
         self.base_title = base_title
+        self.action_state = action_state
 
     def initialize_tray_icon(self) -> None:
         if not QSystemTrayIcon.isSystemTrayAvailable():
@@ -100,11 +108,11 @@ class MainWindowTrayController:
         )
         exit_action.triggered.connect(lambda _checked=False: self.owner._quit_application())
 
-        self.owner._tray_show_action = show_action
-        self.owner._tray_hide_action = hide_action
-        self.owner._tray_startup_show_action = startup_show_action
-        self.owner._tray_startup_hide_action = startup_hide_action
-        self.owner._tray_overlay_action = overlay_action
+        self.action_state.show_action = show_action
+        self.action_state.hide_action = hide_action
+        self.action_state.startup_show_action = startup_show_action
+        self.action_state.startup_hide_action = startup_hide_action
+        self.action_state.overlay_action = overlay_action
         self.owner.tray_menu = menu
         self.sync_tray_window_actions()
 
@@ -159,8 +167,8 @@ class MainWindowTrayController:
 
     def sync_tray_window_actions(self) -> None:
         is_window_visible = bool(getattr(self.owner, "isVisible", lambda: False)())
-        show_action = getattr(self.owner, "_tray_show_action", None)
-        hide_action = getattr(self.owner, "_tray_hide_action", None)
+        show_action = self.action_state.show_action
+        hide_action = self.action_state.hide_action
         if show_action is not None:
             set_visible = getattr(show_action, "setVisible", None)
             if callable(set_visible):
@@ -172,8 +180,8 @@ class MainWindowTrayController:
 
     def set_startup_window_visible(self, visible: bool) -> None:
         self.owner.startup_window_visible = bool(visible)
-        show_action = getattr(self.owner, "_tray_startup_show_action", None)
-        hide_action = getattr(self.owner, "_tray_startup_hide_action", None)
+        show_action = self.action_state.startup_show_action
+        hide_action = self.action_state.startup_hide_action
         if show_action is not None:
             show_action.setChecked(self.owner.startup_window_visible)
         if hide_action is not None:
