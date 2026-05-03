@@ -687,6 +687,56 @@ class TestOverlayMethods(unittest.TestCase):
         with patch('src.app.win32_helpers.get_foreground_hwnd', return_value=123):
             self.assertFalse(window._is_today_display_covered_by_foreground_window())
 
+    def test_visible_main_ignores_foreground_window_that_does_not_intersect_target(self):
+        """ゲームがTOPでも today 表示部と交差しなければ被覆扱いしない."""
+        window = self._create_mock_main_window()
+        window.isVisible = MagicMock(return_value=True)
+        target = MagicMock()
+        window._get_today_time_display = MagicMock(return_value=target)
+        window._global_rect_of_widget = MagicMock(return_value=(1600, 200, 1750, 240))
+        window._window_handle_of = MagicMock(return_value=100)
+        window._root_window = MagicMock(side_effect=lambda hwnd: hwnd)
+        window._is_own_window = MagicMock(return_value=False)
+        window._to_native_rect = MagicMock(side_effect=lambda rect: rect)
+        window._window_rect = MagicMock(side_effect=lambda hwnd: {
+            100: (1500, 100, 1900, 600),
+            200: (700, 0, 1400, 1000),
+        }.get(hwnd))
+        window._window_below = MagicMock(
+            side_effect=lambda hwnd: 100 if hwnd == 200 else 0
+        )
+
+        with patch("src.app.cover_detector.get_foreground_hwnd", return_value=200):
+            result = window._get_today_display_cover_state()
+
+        self.assertEqual(result, (False, "no_cover_above_main"))
+
+    def test_visible_main_detects_non_foreground_window_above_main_covering_target(self):
+        """foreground ではない別ウィンドウが today 表示部を覆っていれば検出する."""
+        window = self._create_mock_main_window()
+        window.isVisible = MagicMock(return_value=True)
+        target = MagicMock()
+        window._get_today_time_display = MagicMock(return_value=target)
+        window._global_rect_of_widget = MagicMock(return_value=(1600, 200, 1750, 240))
+        window._window_handle_of = MagicMock(return_value=100)
+        window._root_window = MagicMock(side_effect=lambda hwnd: hwnd)
+        window._is_own_window = MagicMock(return_value=False)
+        window._to_native_rect = MagicMock(side_effect=lambda rect: rect)
+        window._window_rect = MagicMock(side_effect=lambda hwnd: {
+            100: (1500, 100, 1900, 600),
+            200: (700, 0, 1400, 1000),
+            300: (1580, 180, 1760, 260),
+        }.get(hwnd))
+        window._window_below = MagicMock(side_effect=lambda hwnd: {
+            200: 300,
+            300: 100,
+        }.get(hwnd, 0))
+
+        with patch("src.app.cover_detector.get_foreground_hwnd", return_value=200):
+            result = window._get_today_display_cover_state()
+
+        self.assertEqual(result, (True, "covered_window_above_main"))
+
     def test_sample_points_from_rect_uses_25_75_offsets(self):
         """_sample_points_from_rectは中心+25/75%点を返す."""
         rect = (100, 200, 200, 300)  # width=100, height=100

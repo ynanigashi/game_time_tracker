@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Optional, Sequence, Tuple
 
-from src.app.win32_helpers import Point, Rect, is_own_process_window
+from src.app.win32_helpers import (
+    Point,
+    Rect,
+    get_foreground_hwnd,
+    is_own_process_window,
+)
 
 
 class Win32CoverDetector:
@@ -113,6 +118,35 @@ class Win32CoverDetector:
             return 0
         return hwnd
 
+    def find_covering_foreign_window_above_main(self, target_rect: Rect) -> int:
+        """Return a foreign top-level window above main that intersects target_rect."""
+        main_root = self.owner._root_window(self.owner._window_handle_of(self.owner))
+        if main_root == 0:
+            return 0
+
+        native_target_rect = self.owner._to_native_rect(target_rect)
+        hwnd = get_foreground_hwnd()
+        seen_roots: set[int] = set()
+        while hwnd:
+            root = self.owner._root_window(hwnd) or hwnd
+            if root in seen_roots:
+                break
+            seen_roots.add(root)
+
+            if root == main_root:
+                return 0
+
+            if not self.owner._is_own_window(root):
+                rect = self.owner._window_rect(root)
+                if rect is not None and (
+                    self.owner._rects_intersect(rect, target_rect)
+                    or self.owner._rects_intersect(rect, native_target_rect)
+                ):
+                    return root
+
+            hwnd = self.owner._window_below(root)
+        return 0
+
     def get_today_display_cover_state(self) -> Tuple[bool, str]:
         target = self.owner._get_today_time_display()
         if target is None:
@@ -121,6 +155,12 @@ class Win32CoverDetector:
         target_rect = self.owner._global_rect_of_widget(target)
         if target_rect is None:
             return False, "target_rect_missing"
+
+        if bool(getattr(self.owner, "isVisible", lambda: False)()):
+            covering_hwnd = self.find_covering_foreign_window_above_main(target_rect)
+            if covering_hwnd != 0:
+                return True, "covered_window_above_main"
+            return False, "no_cover_above_main"
 
         sample_points = self.owner._sample_points_from_rect(target_rect)
 
