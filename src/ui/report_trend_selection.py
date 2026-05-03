@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List
+from typing import Callable, List
 
 from PySide6.QtWidgets import QTableWidgetItem
 
@@ -48,10 +48,15 @@ class ReportTrendSelectionController:
         owner: object,
         state: ReportTrendSelectionState,
         tab_state: ReportTabState,
+        *,
+        trend_series_label: Callable[[], str],
+        set_debug_message: Callable[[str], None],
     ) -> None:
         self.owner = owner
         self.state = state
         self.tab_state = tab_state
+        self.trend_series_label = trend_series_label
+        self.set_debug_message = set_debug_message
 
     def populate_trend_table(self, series_list: List[TrendSeries]) -> None:
         rows = [
@@ -95,7 +100,7 @@ class ReportTrendSelectionController:
         prefix = f"選択範囲 {selection_label} / " if selection_label else ""
         self.owner.trend_summary_label.setText(
             f"{prefix}合計 {format_hms(total_seconds)} / "
-            f"{period_count} 期間 / {len(display_series)} {self.owner._trend_series_label()}"
+            f"{period_count} 期間 / {len(display_series)} {self.trend_series_label()}"
         )
         self.populate_trend_table(display_series)
 
@@ -131,7 +136,7 @@ class ReportTrendSelectionController:
         )
         self.populate_trend_selection(series_list)
         self.update_action_states()
-        self.owner._set_debug_message("推移グラフの選択範囲で集計しました")
+        self.set_debug_message("推移グラフの選択範囲で集計しました")
 
     def clear_trend_selection(self, *_args: object) -> None:
         had_selection = self.state.selected_indices is not None
@@ -142,7 +147,7 @@ class ReportTrendSelectionController:
         )
         self.update_action_states()
         if had_selection:
-            self.owner._set_debug_message("推移グラフの選択範囲を解除しました")
+            self.set_debug_message("推移グラフの選択範囲を解除しました")
 
     def reset_trend_chart_zoom(self) -> None:
         if self.owner.trend_chart_view is None:

@@ -928,6 +928,8 @@ class ReportDialog(QDialog):
                 self,
                 self._ensure_trend_selection_state(),
                 self._ensure_report_tab_state(),
+                trend_series_label=self._trend_series_label,
+                set_debug_message=self._set_debug_message,
             )
             self._trend_selection_controller = controller
         return controller

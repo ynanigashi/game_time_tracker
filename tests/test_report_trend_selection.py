@@ -34,12 +34,16 @@ class ReportTrendSelectionControllerTest(unittest.TestCase):
                 setRowCount=lambda rows: calls.__setitem__("rows", rows),
                 setItem=lambda *_args: None,
             ),
-            _trend_series_label=lambda: "系列",
-            _set_debug_message=lambda *_args, **_kwargs: None,
         )
         tab_state = ReportTabState(last_trend_series=self._series())
         state = ReportTrendSelectionState(selected_indices=(0, 1))
-        controller = ReportTrendSelectionController(owner, state, tab_state)
+        controller = ReportTrendSelectionController(
+            owner,
+            state,
+            tab_state,
+            trend_series_label=lambda: "系列",
+            set_debug_message=lambda _message: None,
+        )
 
         controller.clear_trend_selection()
 
