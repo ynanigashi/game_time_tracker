@@ -19,6 +19,7 @@ from src.app.overlay_window import (
     _WinMsg,
     sys,
 )
+from src.app.overlay_state import OverlayVisibilityLogState
 from src.app.win32_helpers import get_foreground_hwnd
 
 logger = logging.getLogger(__name__)
@@ -29,9 +30,7 @@ class MainWindowOverlayController:
 
     def __init__(self, owner: "MainWindow") -> None:
         self.owner = owner
-        self._last_overlay_should_show: Optional[bool] = None
-        self._last_overlay_reason: Optional[str] = None
-        self._last_overlay_log_monotonic: float = 0.0
+        self.visibility_log_state = OverlayVisibilityLogState()
 
     def initialize_overlay(self) -> None:
         """今日のプレイ時間オーバーレイを初期化する."""
@@ -228,11 +227,12 @@ class MainWindowOverlayController:
     def _log_overlay_visibility(self, should_show: bool, reason: str) -> None:
         """判定理由を状態変化時または定期的にINFO出力する。"""
         now = time.monotonic()
+        state = self.visibility_log_state
         state_changed = (
-            self._last_overlay_should_show != should_show
-            or self._last_overlay_reason != reason
+            state.last_should_show != should_show
+            or state.last_reason != reason
         )
-        should_log = state_changed or (now - self._last_overlay_log_monotonic >= 5.0)
+        should_log = state_changed or (now - state.last_log_monotonic >= 5.0)
         if not should_log:
             return
 
@@ -241,9 +241,9 @@ class MainWindowOverlayController:
             "show" if should_show else "hide",
             reason,
         )
-        self._last_overlay_should_show = should_show
-        self._last_overlay_reason = reason
-        self._last_overlay_log_monotonic = now
+        state.last_should_show = should_show
+        state.last_reason = reason
+        state.last_log_monotonic = now
 
     def sync_overlay_visibility(self) -> None:
         """表示条件に応じてオーバーレイを表示/非表示する."""
