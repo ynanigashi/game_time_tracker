@@ -41,6 +41,7 @@ from src.app.dialog_state import DialogRefState
 from src.app.display_state import WindowDisplayState
 from src.app.lifecycle_state import AppLifecycleState
 from src.app.session_state import GameSessionState
+from src.app.tray_state import TrayActionState
 from src.app.window_title_state import WindowTitleState
 from src.app.win32_helpers import (
     get_foreground_hwnd,
@@ -173,6 +174,7 @@ class MainWindow(QWidget):
         self.overlay_window: Optional[TodayTimeOverlayWindow] = None
         self.tray_icon: Optional[object] = None
         self.tray_menu: Optional[QMenu] = None
+        self.tray_action_state = TrayActionState()
         self.lifecycle_state = AppLifecycleState()
         current_display_mode = getattr(self, "display_mode", "max")
         current_mode_sizes = getattr(self, "mode_sizes", MODE_DEFAULT_SIZES)
@@ -428,6 +430,53 @@ class MainWindow(QWidget):
     @_force_startup_window_visible.setter
     def _force_startup_window_visible(self, value: bool) -> None:
         self._ensure_lifecycle_state().force_startup_window_visible = bool(value)
+
+    def _ensure_tray_action_state(self) -> TrayActionState:
+        state = getattr(self, "tray_action_state", None)
+        if state is None:
+            state = TrayActionState()
+            self.tray_action_state = state
+        return state
+
+    @property
+    def _tray_show_action(self) -> object:
+        return self._ensure_tray_action_state().show_action
+
+    @_tray_show_action.setter
+    def _tray_show_action(self, value: object) -> None:
+        self._ensure_tray_action_state().show_action = value
+
+    @property
+    def _tray_hide_action(self) -> object:
+        return self._ensure_tray_action_state().hide_action
+
+    @_tray_hide_action.setter
+    def _tray_hide_action(self, value: object) -> None:
+        self._ensure_tray_action_state().hide_action = value
+
+    @property
+    def _tray_startup_show_action(self) -> object:
+        return self._ensure_tray_action_state().startup_show_action
+
+    @_tray_startup_show_action.setter
+    def _tray_startup_show_action(self, value: object) -> None:
+        self._ensure_tray_action_state().startup_show_action = value
+
+    @property
+    def _tray_startup_hide_action(self) -> object:
+        return self._ensure_tray_action_state().startup_hide_action
+
+    @_tray_startup_hide_action.setter
+    def _tray_startup_hide_action(self, value: object) -> None:
+        self._ensure_tray_action_state().startup_hide_action = value
+
+    @property
+    def _tray_overlay_action(self) -> object:
+        return self._ensure_tray_action_state().overlay_action
+
+    @_tray_overlay_action.setter
+    def _tray_overlay_action(self, value: object) -> None:
+        self._ensure_tray_action_state().overlay_action = value
 
     def _initialize_tray_icon(self) -> None:
         """Create the tray icon and context menu used as the app's home."""
