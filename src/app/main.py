@@ -39,6 +39,7 @@ from src.app.alert_state import GameAlertState
 from src.app.cover_detector import Win32CoverDetector
 from src.app.dialog_state import DialogRefState
 from src.app.display_state import WindowDisplayState
+from src.app.lifecycle_state import AppLifecycleState
 from src.app.session_state import GameSessionState
 from src.app.window_title_state import WindowTitleState
 from src.app.win32_helpers import (
@@ -172,8 +173,7 @@ class MainWindow(QWidget):
         self.overlay_window: Optional[TodayTimeOverlayWindow] = None
         self.tray_icon: Optional[object] = None
         self.tray_menu: Optional[QMenu] = None
-        self._is_quitting = False
-        self._force_startup_window_visible = False
+        self.lifecycle_state = AppLifecycleState()
         current_display_mode = getattr(self, "display_mode", "max")
         current_mode_sizes = getattr(self, "mode_sizes", MODE_DEFAULT_SIZES)
         current_startup_window_visible = bool(
@@ -403,6 +403,31 @@ class MainWindow(QWidget):
     @_window_title_context_menu_connected.setter
     def _window_title_context_menu_connected(self, value: bool) -> None:
         self._ensure_window_title_state().context_menu_connected = bool(value)
+
+    def _ensure_lifecycle_state(self) -> AppLifecycleState:
+        state = getattr(self, "lifecycle_state", None)
+        if state is None:
+            state = AppLifecycleState()
+            self.lifecycle_state = state
+        return state
+
+    @property
+    def _is_quitting(self) -> bool:
+        if "lifecycle_state" not in self.__dict__:
+            return True
+        return self._ensure_lifecycle_state().is_quitting
+
+    @_is_quitting.setter
+    def _is_quitting(self, value: bool) -> None:
+        self._ensure_lifecycle_state().is_quitting = bool(value)
+
+    @property
+    def _force_startup_window_visible(self) -> bool:
+        return self._ensure_lifecycle_state().force_startup_window_visible
+
+    @_force_startup_window_visible.setter
+    def _force_startup_window_visible(self, value: bool) -> None:
+        self._ensure_lifecycle_state().force_startup_window_visible = bool(value)
 
     def _initialize_tray_icon(self) -> None:
         """Create the tray icon and context menu used as the app's home."""
