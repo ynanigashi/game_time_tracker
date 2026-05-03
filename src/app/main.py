@@ -740,6 +740,8 @@ class MainWindow(QWidget):
                 open_settings_dialog=self._open_settings_dialog,
                 quit_application=self._quit_application,
                 sync_tray_window_actions_callback=self._sync_tray_window_actions,
+                save_window_state=self._save_window_state,
+                sync_overlay=self._sync_overlay,
             ),
             validator=lambda controller: controller.owner is self,
         )

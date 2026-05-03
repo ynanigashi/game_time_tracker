@@ -53,6 +53,22 @@ class MainWindowTrayControllerTest(unittest.TestCase):
 
         self.assertEqual(calls, ["show", "report", ("startup", False), "sync"])
 
+    def test_set_tray_overlay_enabled_uses_injected_persistence_callbacks(self):
+        calls = []
+        owner = SimpleNamespace(tray_overlay_enabled=False)
+        controller = MainWindowTrayController(
+            owner,
+            base_title="Game Time Tracker",
+            action_state=TrayActionState(),
+            save_window_state=lambda: calls.append("save"),
+            sync_overlay=lambda: calls.append("overlay"),
+        )
+
+        controller.set_tray_overlay_enabled(True)
+
+        self.assertTrue(owner.tray_overlay_enabled)
+        self.assertEqual(calls, ["save", "overlay"])
+
 
 if __name__ == "__main__":
     unittest.main()

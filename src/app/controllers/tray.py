@@ -33,6 +33,8 @@ class MainWindowTrayController:
         open_settings_dialog: Callable[[], None] = lambda: None,
         quit_application: Callable[[], None] = lambda: None,
         sync_tray_window_actions_callback: Callable[[], None] = lambda: None,
+        save_window_state: Callable[[], None] = lambda: None,
+        sync_overlay: Callable[[], None] = lambda: None,
     ) -> None:
         self.owner = owner
         self.base_title = base_title
@@ -47,6 +49,8 @@ class MainWindowTrayController:
         self.open_settings_dialog_callback = open_settings_dialog
         self.quit_application_callback = quit_application
         self.sync_tray_window_actions_callback = sync_tray_window_actions_callback
+        self.save_window_state = save_window_state
+        self.sync_overlay = sync_overlay
 
     def initialize_tray_icon(self) -> None:
         if not QSystemTrayIcon.isSystemTrayAvailable():
@@ -183,10 +187,10 @@ class MainWindowTrayController:
             logger.debug("failed to align main window to overlay position", exc_info=True)
 
     def hide_main_window_to_tray(self) -> None:
-        self.owner._save_window_state()
+        self.save_window_state()
         self.owner.hide()
         self.sync_tray_window_actions()
-        self.owner._sync_overlay()
+        self.sync_overlay()
 
     def sync_tray_window_actions(self) -> None:
         is_window_visible = bool(getattr(self.owner, "isVisible", lambda: False)())
@@ -209,17 +213,17 @@ class MainWindowTrayController:
             show_action.setChecked(self.owner.startup_window_visible)
         if hide_action is not None:
             hide_action.setChecked(not self.owner.startup_window_visible)
-        self.owner._save_window_state()
+        self.save_window_state()
 
     def set_tray_overlay_enabled(self, enabled: bool) -> None:
         self.owner.tray_overlay_enabled = bool(enabled)
-        self.owner._save_window_state()
-        self.owner._sync_overlay()
+        self.save_window_state()
+        self.sync_overlay()
 
     def quit_application(self) -> None:
         self.owner._is_quitting = True
         self.owner._record_playing_games_before_close()
-        self.owner._save_window_state()
+        self.save_window_state()
         self.owner._close_overlay()
         tray_icon = getattr(self.owner, "tray_icon", None)
         if tray_icon is not None:
