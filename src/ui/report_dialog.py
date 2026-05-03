@@ -63,6 +63,7 @@ from src.ui.report_sync_messages import sync_result_message
 from src.ui.report_tab_refresh import ReportTabRefreshController
 from src.ui.report_tab_state import ReportTabState
 from src.ui.report_title_filter import ReportTitleFilterController
+from src.ui.report_title_filter_state import ReportTitleFilterState
 from src.ui.report_trend_selection import (
     ReportTrendSelectionController,
     filter_trend_series_by_indices,
@@ -231,8 +232,7 @@ class ReportDialog(QDialog):
             lambda _checked=False: self._set_all_title_filters(False)
         )
         self.title_filter_label = QLabel("タイトル", self)
-        self._updating_title_filter = False
-        self._title_filter_initialized = False
+        self._title_filter_state = ReportTitleFilterState()
         self.log_summary_label = QLabel("", self)
         self.log_table = self._create_table(
             ["ID", "PC", "No.", "開始", "終了", "タイトル", "フレンド"],
@@ -312,6 +312,29 @@ class ReportDialog(QDialog):
     @_last_trend_series.setter
     def _last_trend_series(self, value: Optional[List[TrendSeries]]) -> None:
         self._ensure_report_tab_state().last_trend_series = value
+
+    def _ensure_title_filter_state(self) -> ReportTitleFilterState:
+        state = getattr(self, "_title_filter_state", None)
+        if state is None:
+            state = ReportTitleFilterState()
+            self._title_filter_state = state
+        return state
+
+    @property
+    def _updating_title_filter(self) -> bool:
+        return self._ensure_title_filter_state().updating
+
+    @_updating_title_filter.setter
+    def _updating_title_filter(self, value: bool) -> None:
+        self._ensure_title_filter_state().updating = bool(value)
+
+    @property
+    def _title_filter_initialized(self) -> bool:
+        return self._ensure_title_filter_state().initialized
+
+    @_title_filter_initialized.setter
+    def _title_filter_initialized(self, value: bool) -> None:
+        self._ensure_title_filter_state().initialized = bool(value)
 
     @staticmethod
     def _chart_fallback_message() -> str:
@@ -600,7 +623,10 @@ class ReportDialog(QDialog):
     def _get_title_filter_controller(self) -> ReportTitleFilterController:
         controller = getattr(self, "_title_filter_controller", None)
         if controller is None:
-            controller = ReportTitleFilterController(self)
+            controller = ReportTitleFilterController(
+                self,
+                self._ensure_title_filter_state(),
+            )
             self._title_filter_controller = controller
         return controller
 

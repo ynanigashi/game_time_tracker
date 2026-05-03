@@ -684,6 +684,8 @@ GUI版メインウィンドウ。
 
 `ReportLogOperationState` (`report_log_operation_state.py`) はログ編集/削除の非同期実行に使う executor、future、polling timer、完了 callback を保持する。`ReportLogOperationController` はこの state を直接受け取り、非同期リソースの所有を `ReportDialog` から切り離す。
 
+`ReportTitleFilterState` (`report_title_filter_state.py`) はタイトルフィルタ表の更新中フラグと初期化済みフラグを保持する。`ReportTitleFilterController` はこの state を直接受け取り、タイトルフィルタの UI 操作状態を owner private 属性に依存しない。
+
 | フィールド/メソッド | 説明 |
 |--------------------|------|
 | `loaded_tabs` / `dirty_tabs` | 遅延ロード済みタブと再読み込み対象タブ |

@@ -9,13 +9,15 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTableWidgetItem
 
 from src.core.reporting import ReportSummary, build_game_report
+from src.ui.report_title_filter_state import ReportTitleFilterState
 
 
 class ReportTitleFilterController:
     """Manage title-filter checkboxes and refresh side effects."""
 
-    def __init__(self, owner: object) -> None:
+    def __init__(self, owner: object, state: ReportTitleFilterState) -> None:
         self.owner = owner
+        self.state = state
 
     def selected_titles(self) -> List[str]:
         titles: List[str] = []
@@ -47,11 +49,11 @@ class ReportTitleFilterController:
     def sync_title_filter(self, summary: ReportSummary) -> None:
         checked_titles = (
             set(self.owner._selected_titles())
-            if self.owner._title_filter_initialized
+            if self.state.initialized
             else {row.game_title for row in summary.rows}
         )
         table = self.owner.title_filter_table
-        self.owner._updating_title_filter = True
+        self.state.updating = True
         table.blockSignals(True)
         try:
             table.setRowCount(len(summary.rows))
@@ -65,12 +67,12 @@ class ReportTitleFilterController:
                 table.setItem(row_index, 0, item)
         finally:
             table.blockSignals(False)
-            self.owner._updating_title_filter = False
-            self.owner._title_filter_initialized = True
+            self.state.updating = False
+            self.state.initialized = True
             self.update_action_states()
 
     def on_title_filter_changed(self, *_args: object) -> None:
-        if self.owner._updating_title_filter:
+        if self.state.updating:
             return
         if not self.owner._is_title_trend_mode():
             self.update_action_states()
@@ -121,7 +123,7 @@ class ReportTitleFilterController:
             return
 
         table = self.owner.title_filter_table
-        self.owner._updating_title_filter = True
+        self.state.updating = True
         table.blockSignals(True)
         try:
             for row in range(table.rowCount()):
@@ -134,7 +136,7 @@ class ReportTitleFilterController:
                     )
         finally:
             table.blockSignals(False)
-            self.owner._updating_title_filter = False
+            self.state.updating = False
 
         self.update_action_states()
         self.owner.refresh_trend()
