@@ -22,10 +22,12 @@ class ReportLogOperationController:
         state: ReportLogOperationState,
         *,
         log_tab: int,
+        set_debug_message: Callable[..., None],
     ) -> None:
         self.owner = owner
         self.state = state
         self.log_tab = int(log_tab)
+        self.set_debug_message = set_debug_message
 
     def start_log_edit(self, record_id: str, values: List[object]) -> None:
         update_record = getattr(self.owner.log_handler, "update_record", None)
@@ -40,7 +42,7 @@ class ReportLogOperationController:
         self.start_log_operation(
             busy_message="ログ編集を保存中...",
             worker=lambda: update_record(record_id, values),
-            finish_callback=self.owner._finish_log_edit,
+            finish_callback=self.finish_log_edit,
         )
 
     def start_log_delete(self, record_id: str) -> None:
@@ -56,7 +58,7 @@ class ReportLogOperationController:
         self.start_log_operation(
             busy_message="ログを削除中...",
             worker=lambda: delete_record(record_id),
-            finish_callback=self.owner._finish_log_delete,
+            finish_callback=self.finish_log_delete,
         )
 
     def start_log_operation(
@@ -68,17 +70,17 @@ class ReportLogOperationController:
     ) -> None:
         future = self.state.future
         if future is not None and not future.done():
-            self.owner._set_debug_message("ログ操作中です。完了まで待ってください")
+            self._set_debug_message("ログ操作中です。完了まで待ってください")
             return
 
         self.owner.log_edit_button.setEnabled(False)
         self.owner.log_delete_button.setEnabled(False)
-        self.owner._set_debug_message(busy_message, process_events=True)
+        self._set_debug_message(busy_message, process_events=True)
         self.state.finish_callback = finish_callback
         self.state.future = self.state.executor.submit(worker)
         self.state.timer = QTimer(self.owner)
         self.state.timer.setInterval(100)
-        self.state.timer.timeout.connect(self.owner._check_log_edit_result)
+        self.state.timer.timeout.connect(self.check_log_edit_result)
         self.state.timer.start()
 
     def check_log_edit_result(self) -> None:
@@ -120,16 +122,16 @@ class ReportLogOperationController:
         self.owner.refresh_logs()
         self.owner._mark_tab_clean(self.log_tab)
         if getattr(result, "spreadsheet_updated", False):
-            self.owner._set_debug_message("ログを編集し、スプシにも反映しました")
+            self._set_debug_message("ログを編集し、スプシにも反映しました")
             return
 
         error_message = str(getattr(result, "error_message", "") or "")
         if error_message:
-            self.owner._set_debug_message(
+            self._set_debug_message(
                 f"ログを編集しました。スプシ反映は失敗しました: {error_message}"
             )
         else:
-            self.owner._set_debug_message(
+            self._set_debug_message(
                 "ログを編集しました。スプシ設定がないためローカルのみ更新しました"
             )
 
@@ -146,18 +148,26 @@ class ReportLogOperationController:
         self.owner.refresh_logs()
         self.owner._mark_tab_clean(self.log_tab)
         if getattr(result, "spreadsheet_deleted", False):
-            self.owner._set_debug_message("ログを削除し、スプシにも反映しました")
+            self._set_debug_message("ログを削除し、スプシにも反映しました")
             return
 
         error_message = str(getattr(result, "error_message", "") or "")
         if error_message:
-            self.owner._set_debug_message(
+            self._set_debug_message(
                 f"ログを削除しました。スプシ反映は失敗しました: {error_message}"
             )
         else:
-            self.owner._set_debug_message(
+            self._set_debug_message(
                 "ログを削除しました。スプシ設定がないためローカルのみ削除しました"
             )
 
     def close(self) -> None:
         self.state.shutdown()
+
+    def _set_debug_message(
+        self,
+        message: str,
+        *,
+        process_events: bool = False,
+    ) -> None:
+        self.set_debug_message(message, process_events=process_events)
