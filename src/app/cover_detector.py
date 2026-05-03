@@ -48,11 +48,17 @@ class Win32CoverDetector:
         *,
         sample_ratios: Sequence[Tuple[float, float]],
         covered_points_threshold: int,
+        target_widget_provider: Optional[Callable[[], object]] = None,
         ops: Optional[CoverDetectorOps] = None,
     ) -> None:
         self.owner = owner
         self.sample_ratios = tuple(sample_ratios)
         self.covered_points_threshold = int(covered_points_threshold)
+        self.target_widget_provider = target_widget_provider or getattr(
+            owner,
+            "_get_today_time_display",
+            lambda: None,
+        )
         self.ops = ops or CoverDetectorOps(
             sample_points_from_rect=lambda rect: sample_points_from_rect_with_ratios(
                 rect,
@@ -198,7 +204,7 @@ class Win32CoverDetector:
         return 0
 
     def get_today_display_cover_state(self) -> Tuple[bool, str]:
-        target = self.owner._get_today_time_display()
+        target = self.target_widget_provider()
         if target is None:
             return False, "target_missing"
 

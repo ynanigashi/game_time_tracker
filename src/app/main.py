@@ -786,6 +786,7 @@ class MainWindow(QWidget):
                 self,
                 sample_ratios=OVERLAY_SAMPLE_RATIOS,
                 covered_points_threshold=OVERLAY_COVERED_POINTS_THRESHOLD,
+                target_widget_provider=self._get_today_time_display,
                 ops=CoverDetectorOps(
                     root_window=lambda hwnd: self._root_window(hwnd),
                     window_handle_of=lambda widget: self._window_handle_of(widget),

@@ -1071,6 +1071,8 @@ class ReportDialog(QDialog):
                 self._ensure_log_operation_state(),
                 log_tab=self._LOG_TAB,
                 set_debug_message=self._set_debug_message,
+                mark_report_data_changed=self._mark_report_data_changed,
+                mark_tab_clean=self._mark_tab_clean,
             )
             self._log_operation_controller = controller
         return controller

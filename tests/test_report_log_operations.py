@@ -9,9 +9,7 @@ class ReportLogOperationControllerTest(unittest.TestCase):
     def test_finish_log_edit_uses_injected_debug_callback(self):
         calls = []
         owner = SimpleNamespace(
-            _mark_report_data_changed=lambda: calls.append("changed"),
             refresh_logs=lambda: calls.append("refresh"),
-            _mark_tab_clean=lambda tab: calls.append(("clean", tab)),
         )
         debug_messages = []
         controller = ReportLogOperationController(
@@ -19,6 +17,8 @@ class ReportLogOperationControllerTest(unittest.TestCase):
             ReportLogOperationState(),
             log_tab=2,
             set_debug_message=lambda message, **_kwargs: debug_messages.append(message),
+            mark_report_data_changed=lambda: calls.append("changed"),
+            mark_tab_clean=lambda tab: calls.append(("clean", tab)),
         )
 
         controller.finish_log_edit(

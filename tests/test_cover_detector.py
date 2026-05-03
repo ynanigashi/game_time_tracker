@@ -35,6 +35,25 @@ class Win32CoverDetectorTest(unittest.TestCase):
 
         self.assertEqual(detector.to_native_point(10, 20), (11, 22))
 
+    def test_target_widget_provider_is_used_for_cover_state(self):
+        detector = Win32CoverDetector(
+            SimpleNamespace(isVisible=lambda: False, overlay_window=None),
+            sample_ratios=((0.5, 0.5),),
+            covered_points_threshold=1,
+            target_widget_provider=lambda: "target",
+            ops=CoverDetectorOps(
+                global_rect_of_widget=lambda widget: (0, 0, 10, 10)
+                if widget == "target"
+                else None,
+                sample_points_from_rect=lambda _rect: [],
+            ),
+        )
+
+        self.assertEqual(
+            detector.get_today_display_cover_state(),
+            (False, "no_cover_detected"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

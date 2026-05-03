@@ -23,11 +23,15 @@ class ReportLogOperationController:
         *,
         log_tab: int,
         set_debug_message: Callable[..., None],
+        mark_report_data_changed: Callable[[], None],
+        mark_tab_clean: Callable[[int], None],
     ) -> None:
         self.owner = owner
         self.state = state
         self.log_tab = int(log_tab)
         self.set_debug_message = set_debug_message
+        self.mark_report_data_changed = mark_report_data_changed
+        self.mark_tab_clean = mark_tab_clean
 
     def start_log_edit(self, record_id: str, values: List[object]) -> None:
         update_record = getattr(self.owner.log_handler, "update_record", None)
@@ -118,9 +122,9 @@ class ReportLogOperationController:
             )
             return
 
-        self.owner._mark_report_data_changed()
+        self.mark_report_data_changed()
         self.owner.refresh_logs()
-        self.owner._mark_tab_clean(self.log_tab)
+        self.mark_tab_clean(self.log_tab)
         if getattr(result, "spreadsheet_updated", False):
             self._set_debug_message("ログを編集し、スプシにも反映しました")
             return
@@ -144,9 +148,9 @@ class ReportLogOperationController:
             )
             return
 
-        self.owner._mark_report_data_changed()
+        self.mark_report_data_changed()
         self.owner.refresh_logs()
-        self.owner._mark_tab_clean(self.log_tab)
+        self.mark_tab_clean(self.log_tab)
         if getattr(result, "spreadsheet_deleted", False):
             self._set_debug_message("ログを削除し、スプシにも反映しました")
             return
