@@ -16,9 +16,16 @@ logger = logging.getLogger(__name__)
 class ReportLogOperationController:
     """Run play-log edit/delete operations without blocking the dialog."""
 
-    def __init__(self, owner: object, state: ReportLogOperationState) -> None:
+    def __init__(
+        self,
+        owner: object,
+        state: ReportLogOperationState,
+        *,
+        log_tab: int,
+    ) -> None:
         self.owner = owner
         self.state = state
+        self.log_tab = int(log_tab)
 
     def start_log_edit(self, record_id: str, values: List[object]) -> None:
         update_record = getattr(self.owner.log_handler, "update_record", None)
@@ -111,7 +118,7 @@ class ReportLogOperationController:
 
         self.owner._mark_report_data_changed()
         self.owner.refresh_logs()
-        self.owner._mark_tab_clean(self.owner._LOG_TAB)
+        self.owner._mark_tab_clean(self.log_tab)
         if getattr(result, "spreadsheet_updated", False):
             self.owner._set_debug_message("ログを編集し、スプシにも反映しました")
             return
@@ -137,7 +144,7 @@ class ReportLogOperationController:
 
         self.owner._mark_report_data_changed()
         self.owner.refresh_logs()
-        self.owner._mark_tab_clean(self.owner._LOG_TAB)
+        self.owner._mark_tab_clean(self.log_tab)
         if getattr(result, "spreadsheet_deleted", False):
             self.owner._set_debug_message("ログを削除し、スプシにも反映しました")
             return
