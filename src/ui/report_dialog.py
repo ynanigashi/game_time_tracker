@@ -395,6 +395,15 @@ class ReportDialog(QDialog):
                 self._ensure_report_tab_state(),
                 summary_tab=self._SUMMARY_TAB,
                 trend_tab=self._TREND_TAB,
+                unit_toggle_style=self._UNIT_TOGGLE_STYLE,
+                set_debug_message=self._set_debug_message,
+                current_tab_index=self._current_tab_index,
+                refresh_summary=self.refresh_summary,
+                populate_chart=self._populate_chart,
+                refresh_trend_tab=self.refresh_trend_tab,
+                populate_trend_chart=self._populate_trend_chart,
+                mark_tab_clean=self._mark_tab_clean,
+                mark_tab_dirty=self._mark_tab_dirty,
             )
             self._graph_unit_controller = controller
         return controller

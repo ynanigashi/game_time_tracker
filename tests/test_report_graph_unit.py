@@ -15,21 +15,7 @@ class ReportGraphUnitControllerTest(unittest.TestCase):
             "dirty": [],
             "clean": [],
         }
-        owner = SimpleNamespace(
-            _UNIT_TOGGLE_STYLE="",
-            _current_tab_index=lambda: 0,
-            _set_debug_message=lambda *_args, **_kwargs: None,
-            refresh_summary=lambda: calls.__setitem__(
-                "summary_refresh",
-                calls["summary_refresh"] + 1,
-            ),
-            _populate_chart=lambda _summary: calls.__setitem__(
-                "populate_chart",
-                calls["populate_chart"] + 1,
-            ),
-            _mark_tab_clean=lambda tab: calls["clean"].append(tab),
-            _mark_tab_dirty=lambda tab: calls["dirty"].append(tab),
-        )
+        owner = SimpleNamespace()
         tab_state = ReportTabState(
             last_summary=ReportSummary(rows=[], total_seconds=0, session_count=0)
         )
@@ -39,6 +25,21 @@ class ReportGraphUnitControllerTest(unittest.TestCase):
             tab_state,
             summary_tab=0,
             trend_tab=1,
+            unit_toggle_style="",
+            set_debug_message=lambda *_args, **_kwargs: None,
+            current_tab_index=lambda: 0,
+            refresh_summary=lambda: calls.__setitem__(
+                "summary_refresh",
+                calls["summary_refresh"] + 1,
+            ),
+            populate_chart=lambda _summary: calls.__setitem__(
+                "populate_chart",
+                calls["populate_chart"] + 1,
+            ),
+            refresh_trend_tab=lambda: None,
+            populate_trend_chart=lambda _series: None,
+            mark_tab_clean=lambda tab: calls["clean"].append(tab),
+            mark_tab_dirty=lambda tab: calls["dirty"].append(tab),
         )
 
         controller.set_graph_unit(True)

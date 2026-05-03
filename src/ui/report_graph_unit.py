@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from time import perf_counter
+from typing import Callable
 
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
@@ -24,12 +25,30 @@ class ReportGraphUnitController:
         *,
         summary_tab: int,
         trend_tab: int,
+        unit_toggle_style: str,
+        set_debug_message: Callable[..., None],
+        current_tab_index: Callable[[], int],
+        refresh_summary: Callable[[], None],
+        populate_chart: Callable[[object], None],
+        refresh_trend_tab: Callable[[], None],
+        populate_trend_chart: Callable[[object], None],
+        mark_tab_clean: Callable[[int], None],
+        mark_tab_dirty: Callable[[int], None],
     ) -> None:
         self.owner = owner
         self.state = state
         self.tab_state = tab_state
         self.summary_tab = int(summary_tab)
         self.trend_tab = int(trend_tab)
+        self.unit_toggle_style = unit_toggle_style
+        self.set_debug_message = set_debug_message
+        self.current_tab_index = current_tab_index
+        self.refresh_summary = refresh_summary
+        self.populate_chart = populate_chart
+        self.refresh_trend_tab = refresh_trend_tab
+        self.populate_trend_chart = populate_trend_chart
+        self.mark_tab_clean = mark_tab_clean
+        self.mark_tab_dirty = mark_tab_dirty
 
     def create_unit_toggle(self) -> QWidget:
         container = QWidget(self.owner)
@@ -44,14 +63,10 @@ class ReportGraphUnitController:
         for button in (minute_button, hour_button):
             button.setCheckable(True)
             button.setMinimumWidth(54)
-            button.setStyleSheet(self.owner._UNIT_TOGGLE_STYLE)
+            button.setStyleSheet(self.unit_toggle_style)
 
-        minute_button.clicked.connect(
-            lambda _checked=False: self.owner._set_graph_unit(False)
-        )
-        hour_button.clicked.connect(
-            lambda _checked=False: self.owner._set_graph_unit(True)
-        )
+        minute_button.clicked.connect(lambda _checked=False: self.set_graph_unit(False))
+        hour_button.clicked.connect(lambda _checked=False: self.set_graph_unit(True))
 
         layout.addWidget(minute_button)
         layout.addWidget(hour_button)
@@ -80,36 +95,36 @@ class ReportGraphUnitController:
         self.state.graph_unit_hours = hours
         self.sync_unit_controls()
 
-        self.owner._set_debug_message(
+        self.set_debug_message(
             f"グラフ単位を{self.graph_unit_label()}に切替中...",
             process_events=True,
         )
         try:
-            current_tab = self.owner._current_tab_index()
+            current_tab = self.current_tab_index()
             if current_tab == self.summary_tab:
                 if self.tab_state.last_summary is None:
-                    self.owner.refresh_summary()
+                    self.refresh_summary()
                 else:
-                    self.owner._populate_chart(self.tab_state.last_summary)
-                self.owner._mark_tab_clean(self.summary_tab)
-                self.owner._mark_tab_dirty(self.trend_tab)
+                    self.populate_chart(self.tab_state.last_summary)
+                self.mark_tab_clean(self.summary_tab)
+                self.mark_tab_dirty(self.trend_tab)
             elif current_tab == self.trend_tab:
                 if self.tab_state.last_trend_series is None:
-                    self.owner.refresh_trend_tab()
+                    self.refresh_trend_tab()
                 else:
-                    self.owner._populate_trend_chart(self.tab_state.last_trend_series)
-                self.owner._mark_tab_clean(self.trend_tab)
-                self.owner._mark_tab_dirty(self.summary_tab)
+                    self.populate_trend_chart(self.tab_state.last_trend_series)
+                self.mark_tab_clean(self.trend_tab)
+                self.mark_tab_dirty(self.summary_tab)
             else:
-                self.owner._mark_tab_dirty(self.summary_tab)
-                self.owner._mark_tab_dirty(self.trend_tab)
+                self.mark_tab_dirty(self.summary_tab)
+                self.mark_tab_dirty(self.trend_tab)
         except Exception:
             logger.exception("Failed to redraw report charts after unit toggle")
-            self.owner._set_debug_message("単位切替中にエラーが発生しました")
+            self.set_debug_message("単位切替中にエラーが発生しました")
             return
 
         elapsed_ms = (perf_counter() - started_at) * 1000
-        self.owner._set_debug_message(
+        self.set_debug_message(
             f"グラフ単位を{self.graph_unit_label()}に切替 "
             f"({elapsed_ms:.0f} ms)"
         )
