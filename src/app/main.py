@@ -41,6 +41,7 @@ from src.app.dialog_state import DialogRefState
 from src.app.display_state import WindowDisplayState
 from src.app.lifecycle_state import AppLifecycleState
 from src.app.session_state import GameSessionState
+from src.app.timer_state import TimerState
 from src.app.tray_state import TrayActionState
 from src.app.window_title_state import WindowTitleState
 from src.app.win32_helpers import (
@@ -174,6 +175,7 @@ class MainWindow(QWidget):
         self.overlay_window: Optional[TodayTimeOverlayWindow] = None
         self.tray_icon: Optional[object] = None
         self.tray_menu: Optional[QMenu] = None
+        self.timer_state = TimerState()
         self.tray_action_state = TrayActionState()
         self.lifecycle_state = AppLifecycleState()
         current_display_mode = getattr(self, "display_mode", "max")
@@ -477,6 +479,29 @@ class MainWindow(QWidget):
     @_tray_overlay_action.setter
     def _tray_overlay_action(self, value: object) -> None:
         self._ensure_tray_action_state().overlay_action = value
+
+    def _ensure_timer_state(self) -> TimerState:
+        state = getattr(self, "timer_state", None)
+        if state is None:
+            state = TimerState()
+            self.timer_state = state
+        return state
+
+    @property
+    def _scan_timer(self) -> object:
+        return self._ensure_timer_state().scan_timer
+
+    @_scan_timer.setter
+    def _scan_timer(self, value: object) -> None:
+        self._ensure_timer_state().scan_timer = value
+
+    @property
+    def _ui_timer(self) -> object:
+        return self._ensure_timer_state().ui_timer
+
+    @_ui_timer.setter
+    def _ui_timer(self, value: object) -> None:
+        self._ensure_timer_state().ui_timer = value
 
     def _initialize_tray_icon(self) -> None:
         """Create the tray icon and context menu used as the app's home."""

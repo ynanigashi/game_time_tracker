@@ -652,6 +652,8 @@ GUI版メインウィンドウ。
 
 `TrayActionState` (`tray_state.py`) はトレイメニューの表示/非表示、起動時表示、オーバーレイ action 参照を保持する。既存の呼び出し互換性のため `MainWindow` には `_tray_*_action` のプロパティを残す。
 
+`TimerState` (`timer_state.py`) は scan/ui 更新用 `QTimer` 参照を保持する。既存の呼び出し互換性のため `MainWindow` には `_scan_timer` / `_ui_timer` のプロパティを残す。
+
 | クラス | 役割 | 主要メソッド |
 |--------|------|--------------|
 | `GameSessionState` (`session_state.py`) | ゲーム一覧、active/inactive キャッシュ、最新ウィンドウタイトルの実行時状態を保持 | `update_scan_result()` |
@@ -661,6 +663,7 @@ GUI版メインウィンドウ。
 | `WindowTitleState` (`window_title_state.py`) | ウィンドウタイトル一覧のクリック/右クリック接続フラグを保持 | dataclass |
 | `AppLifecycleState` (`lifecycle_state.py`) | 完全終了中フラグと起動直後のウィンドウ表示強制フラグを保持 | dataclass |
 | `TrayActionState` (`tray_state.py`) | トレイメニュー action 参照を保持 | dataclass |
+| `TimerState` (`timer_state.py`) | scan/ui 更新用 `QTimer` 参照を保持 | dataclass |
 | `MainWindowUiController` (`controllers/ui.py`) | `active/session/today/windows` のUI更新を担当 | `update_session_times()`, `update_today_totals()`, `update_today_games_list()` |
 | `MainWindowDisplayController` (`controllers/display.py`) | `min/mid/max` 表示モードの可視性・サイズ制約・ジオメトリ適用を担当 | `apply_display_mode()`, `apply_mode_geometry()`, `next_display_mode()` |
 | `MainWindowStateController` (`controllers/window_state.py`) | ウィンドウ状態、起動時表示設定、トレイ用オーバーレイ設定/位置の読み書きとリサイズ記録を担当 | `load_all()`, `load_startup_window_visible()`, `load_tray_overlay_enabled()`, `load_overlay_position()`, `save()`, `record_resize()` |
