@@ -20,6 +20,19 @@ class MainWindowDialogController:
         game_catalog_dialog_cls: Callable[..., object],
         settings_dialog_cls: Callable[..., object],
         state: DialogRefState,
+        get_report_button: Callable[[], object],
+        get_manual_record_button: Callable[[], object],
+        open_report_dialog_callback: Callable[[], None],
+        open_manual_record_dialog_callback: Callable[[], None],
+        set_status: Callable[[str], None],
+        active_games_provider: Callable[[], list],
+        update_today_totals: Callable[[list, datetime], float],
+        update_today_games_list: Callable[[datetime], None],
+        update_overtime_alert: Callable[[float], None],
+        sync_overlay: Callable[[], None],
+        on_settings_saved_callback: Callable[[], None],
+        on_game_catalog_saved_callback: Callable[[], None],
+        init_components: Callable[[], None],
     ) -> None:
         self.owner = owner
         self.report_dialog_cls = report_dialog_cls
@@ -27,31 +40,44 @@ class MainWindowDialogController:
         self.game_catalog_dialog_cls = game_catalog_dialog_cls
         self.settings_dialog_cls = settings_dialog_cls
         self.state = state
+        self.get_report_button = get_report_button
+        self.get_manual_record_button = get_manual_record_button
+        self.open_report_dialog_callback = open_report_dialog_callback
+        self.open_manual_record_dialog_callback = open_manual_record_dialog_callback
+        self.set_status = set_status
+        self.active_games_provider = active_games_provider
+        self.update_today_totals = update_today_totals
+        self.update_today_games_list = update_today_games_list
+        self.update_overtime_alert = update_overtime_alert
+        self.sync_overlay = sync_overlay
+        self.on_settings_saved_callback = on_settings_saved_callback
+        self.on_game_catalog_saved_callback = on_game_catalog_saved_callback
+        self.init_components = init_components
 
     def initialize_report_button(self) -> None:
-        button = self.owner._get_report_button()
+        button = self.get_report_button()
         if button is None:
             return
 
         if self.state.report_button_connected:
             try:
-                button.clicked.disconnect(self.owner._open_report_dialog)
+                button.clicked.disconnect(self.open_report_dialog_callback)
             except (TypeError, RuntimeError):
                 pass
-        button.clicked.connect(self.owner._open_report_dialog)
+        button.clicked.connect(self.open_report_dialog_callback)
         self.state.report_button_connected = True
 
     def initialize_manual_record_button(self) -> None:
-        button = self.owner._get_manual_record_button()
+        button = self.get_manual_record_button()
         if button is None:
             return
 
         if self.state.manual_record_button_connected:
             try:
-                button.clicked.disconnect(self.owner._open_manual_record_dialog)
+                button.clicked.disconnect(self.open_manual_record_dialog_callback)
             except (TypeError, RuntimeError):
                 pass
-        button.clicked.connect(self.owner._open_manual_record_dialog)
+        button.clicked.connect(self.open_manual_record_dialog_callback)
         self.state.manual_record_button_connected = True
 
     def open_report_dialog(self) -> None:
@@ -77,7 +103,7 @@ class MainWindowDialogController:
         if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
             dialog = self.manual_record_dialog_cls(
                 self.owner,
-                on_save=self.owner._save_manual_record,
+                on_save=self.save_manual_record,
                 games=self.owner.games,
             )
             self.state.manual_record_dialog = dialog
@@ -92,13 +118,13 @@ class MainWindowDialogController:
             record.end_time,
         )
         if recorded_seconds is None:
-            self.owner._set_status(
+            self.set_status(
                 f"{record.game.game_title}縺ｮ謇句・蜉幄ｨ倬鹸繧剃ｿ晏ｭ倥〒縺阪∪縺帙ｓ縺ｧ縺励◆"
             )
             return False
 
         self.refresh_after_manual_record()
-        self.owner._set_status(
+        self.set_status(
             f"{record.game.game_title}縺ｮ繝励Ξ繧､譎る俣繧呈焔蜈･蜉帙〒險倬鹸縺励∪縺励◆"
         )
         return True
@@ -106,13 +132,10 @@ class MainWindowDialogController:
     def refresh_after_manual_record(self) -> None:
         self.reload_today_stats()
         now = datetime.now()
-        total_seconds = self.owner._update_today_totals(
-            self.owner.active_games_cache,
-            now,
-        )
-        self.owner._update_today_games_list(now)
-        self.owner._update_overtime_alert(total_seconds)
-        self.owner._sync_overlay()
+        total_seconds = self.update_today_totals(self.active_games_provider(), now)
+        self.update_today_games_list(now)
+        self.update_overtime_alert(total_seconds)
+        self.sync_overlay()
 
     def reload_today_stats(self) -> None:
         game_minutes, completed_seconds = self.owner.recorder.log_handler.get_today_stats()
@@ -123,7 +146,10 @@ class MainWindowDialogController:
     def open_settings_dialog(self) -> None:
         dialog = self.state.settings_dialog
         if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
-            dialog = self.settings_dialog_cls(self.owner, on_saved=self.owner._on_settings_saved)
+            dialog = self.settings_dialog_cls(
+                self.owner,
+                on_saved=self.on_settings_saved_callback,
+            )
             self.state.settings_dialog = dialog
 
         self._show_dialog(dialog)
@@ -134,7 +160,7 @@ class MainWindowDialogController:
         if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
             dialog = self.game_catalog_dialog_cls(
                 self.owner,
-                on_saved=self.owner._on_game_catalog_saved,
+                on_saved=self.on_game_catalog_saved_callback,
             )
             self.state.game_catalog_dialog = dialog
             created_dialog = True
@@ -155,13 +181,13 @@ class MainWindowDialogController:
         dialog.activateWindow()
 
     def on_game_catalog_saved(self) -> None:
-        self.owner._set_status("\u30b2\u30fc\u30e0\u60c5\u5831\u3092\u4fdd\u5b58\u3057\u307e\u3057\u305f\u3002")
-        self.owner._init_components()
+        self.set_status("\u30b2\u30fc\u30e0\u60c5\u5831\u3092\u4fdd\u5b58\u3057\u307e\u3057\u305f\u3002")
+        self.init_components()
 
     def on_settings_saved(self) -> None:
         self.owner.setDisabled(False)
-        self.owner._set_status("\u8a2d\u5b9a\u3092\u4fdd\u5b58\u3057\u307e\u3057\u305f\u3002")
-        self.owner._init_components()
+        self.set_status("\u8a2d\u5b9a\u3092\u4fdd\u5b58\u3057\u307e\u3057\u305f\u3002")
+        self.init_components()
 
     @staticmethod
     def _show_dialog(dialog: object) -> None:
