@@ -682,6 +682,8 @@ GUI版メインウィンドウ。
 
 `ReportGraphUnitState` (`report_graph_unit_state.py`) はグラフ表示単位（分/時間）、単位トグル更新中フラグ、分/時間ボタン参照を保持する。`ReportGraphUnitController` はこの state を直接受け取り、単位状態の更新を owner private 属性に依存しない。
 
+`ReportLogOperationState` (`report_log_operation_state.py`) はログ編集/削除の非同期実行に使う executor、future、polling timer、完了 callback を保持する。`ReportLogOperationController` はこの state を直接受け取り、非同期リソースの所有を `ReportDialog` から切り離す。
+
 | フィールド/メソッド | 説明 |
 |--------------------|------|
 | `loaded_tabs` / `dirty_tabs` | 遅延ロード済みタブと再読み込み対象タブ |

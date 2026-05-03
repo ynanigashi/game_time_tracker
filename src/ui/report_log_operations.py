@@ -8,14 +8,17 @@ from typing import Callable, List
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QMessageBox
 
+from src.ui.report_log_operation_state import ReportLogOperationState
+
 logger = logging.getLogger(__name__)
 
 
 class ReportLogOperationController:
     """Run play-log edit/delete operations without blocking the dialog."""
 
-    def __init__(self, owner: object) -> None:
+    def __init__(self, owner: object, state: ReportLogOperationState) -> None:
         self.owner = owner
+        self.state = state
 
     def start_log_edit(self, record_id: str, values: List[object]) -> None:
         update_record = getattr(self.owner.log_handler, "update_record", None)
@@ -56,7 +59,7 @@ class ReportLogOperationController:
         worker: Callable[[], object],
         finish_callback: Callable[[object], None],
     ) -> None:
-        future = self.owner._log_edit_future
+        future = self.state.future
         if future is not None and not future.done():
             self.owner._set_debug_message("ログ操作中です。完了まで待ってください")
             return
@@ -64,36 +67,36 @@ class ReportLogOperationController:
         self.owner.log_edit_button.setEnabled(False)
         self.owner.log_delete_button.setEnabled(False)
         self.owner._set_debug_message(busy_message, process_events=True)
-        self.owner._log_edit_finish_callback = finish_callback
-        self.owner._log_edit_future = self.owner._log_edit_executor.submit(worker)
-        self.owner._log_edit_timer = QTimer(self.owner)
-        self.owner._log_edit_timer.setInterval(100)
-        self.owner._log_edit_timer.timeout.connect(self.owner._check_log_edit_result)
-        self.owner._log_edit_timer.start()
+        self.state.finish_callback = finish_callback
+        self.state.future = self.state.executor.submit(worker)
+        self.state.timer = QTimer(self.owner)
+        self.state.timer.setInterval(100)
+        self.state.timer.timeout.connect(self.owner._check_log_edit_result)
+        self.state.timer.start()
 
     def check_log_edit_result(self) -> None:
-        future = self.owner._log_edit_future
+        future = self.state.future
         if future is None or not future.done():
             return
 
-        if self.owner._log_edit_timer is not None:
-            self.owner._log_edit_timer.stop()
-            self.owner._log_edit_timer.deleteLater()
-            self.owner._log_edit_timer = None
-        self.owner._log_edit_future = None
+        if self.state.timer is not None:
+            self.state.timer.stop()
+            self.state.timer.deleteLater()
+            self.state.timer = None
+        self.state.future = None
         self.owner.log_edit_button.setEnabled(True)
         self.owner.log_delete_button.setEnabled(True)
 
         try:
             result = future.result()
         except Exception as exc:
-            self.owner._log_edit_finish_callback = None
+            self.state.finish_callback = None
             logger.exception("Failed to complete play log operation")
             QMessageBox.warning(self.owner, "ログ編集エラー", str(exc))
             return
 
-        finish_callback = self.owner._log_edit_finish_callback
-        self.owner._log_edit_finish_callback = None
+        finish_callback = self.state.finish_callback
+        self.state.finish_callback = None
         if finish_callback is not None:
             finish_callback(result)
 
@@ -150,8 +153,4 @@ class ReportLogOperationController:
             )
 
     def close(self) -> None:
-        if self.owner._log_edit_timer is not None:
-            self.owner._log_edit_timer.stop()
-            self.owner._log_edit_timer = None
-        self.owner._log_edit_finish_callback = None
-        self.owner._log_edit_executor.shutdown(wait=False, cancel_futures=True)
+        self.state.shutdown()

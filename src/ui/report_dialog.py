@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import logging
-from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from time import perf_counter
 from typing import Callable, List, Optional, Tuple
 
-from PySide6.QtCore import QDate, QTimer, Qt
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -54,6 +53,7 @@ from src.ui.report_date_ranges import RECENT_PERIOD_DAYS, date_range_for_period
 from src.ui.report_graph_unit import ReportGraphUnitController
 from src.ui.report_graph_unit_state import ReportGraphUnitState
 from src.ui.report_log_operations import ReportLogOperationController
+from src.ui.report_log_operation_state import ReportLogOperationState
 from src.ui.report_log_table import ReportLogTableController, bool_text
 from src.ui.report_summary_table import (
     ReportSummaryTableController,
@@ -142,13 +142,7 @@ class ReportDialog(QDialog):
                 self._LOG_TAB,
             }
         )
-        self._log_edit_executor = ThreadPoolExecutor(
-            max_workers=1,
-            thread_name_prefix="play-log-edit",
-        )
-        self._log_edit_future: Optional[Future] = None
-        self._log_edit_timer: Optional[QTimer] = None
-        self._log_edit_finish_callback: Optional[Callable[[object], None]] = None
+        self._log_operation_state = ReportLogOperationState()
         self.setWindowTitle("プレイレポート")
         self.resize(820, 560)
 
@@ -1000,9 +994,19 @@ class ReportDialog(QDialog):
     def _get_log_operation_controller(self) -> ReportLogOperationController:
         controller = getattr(self, "_log_operation_controller", None)
         if controller is None:
-            controller = ReportLogOperationController(self)
+            controller = ReportLogOperationController(
+                self,
+                self._ensure_log_operation_state(),
+            )
             self._log_operation_controller = controller
         return controller
+
+    def _ensure_log_operation_state(self) -> ReportLogOperationState:
+        state = getattr(self, "_log_operation_state", None)
+        if state is None:
+            state = ReportLogOperationState()
+            self._log_operation_state = state
+        return state
 
     def _start_log_edit(self, record_id: str, values: List[object]) -> None:
         self._get_log_operation_controller().start_log_edit(record_id, values)
