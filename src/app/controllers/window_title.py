@@ -22,16 +22,26 @@ class MainWindowTitleController:
         *,
         qmenu_cls: Callable[..., object],
         state: WindowTitleState,
+        get_window_list_widget: Callable[[], Optional[QWidget]],
+        on_item_clicked: Callable[[object], None],
+        show_context_menu: Callable[[object], None],
+        open_game_catalog_dialog: Callable[..., None],
+        set_status: Callable[[str], None],
     ) -> None:
         self.owner = owner
         self.qmenu_cls = qmenu_cls
         self.state = state
+        self.get_window_list_widget_callback = get_window_list_widget
+        self.on_item_clicked_callback = on_item_clicked
+        self.show_context_menu_callback = show_context_menu
+        self.open_game_catalog_dialog = open_game_catalog_dialog
+        self.set_status = set_status
 
     def get_window_list_widget(self) -> Optional[QWidget]:
-        return getattr(self.owner.w, "window_list", None)
+        return self.get_window_list_widget_callback()
 
     def initialize_window_title_copy(self) -> None:
-        window_list = self.owner._get_window_list_widget()
+        window_list = self.get_window_list_widget()
         if window_list is None:
             return
 
@@ -39,7 +49,7 @@ class MainWindowTitleController:
             item_clicked_signal = getattr(window_list, "itemClicked", None)
             if item_clicked_signal is not None:
                 try:
-                    item_clicked_signal.connect(self.owner._on_window_title_item_clicked)
+                    item_clicked_signal.connect(self.on_item_clicked_callback)
                     self.state.copy_connected = True
                 except Exception:
                     logger.debug(
@@ -48,7 +58,7 @@ class MainWindowTitleController:
                     )
 
         if not self.state.context_menu_connected:
-            self.owner._initialize_window_title_context_menu(window_list)
+            self.initialize_window_title_context_menu(window_list)
 
         if self.state.copy_connected or self.state.context_menu_connected:
             set_tooltip = getattr(window_list, "setToolTip", None)
@@ -76,7 +86,7 @@ class MainWindowTitleController:
                 logger.debug("ウィンドウタイトル右クリック設定に失敗", exc_info=True)
 
         try:
-            signal.connect(self.owner._show_window_title_context_menu)
+            signal.connect(self.show_context_menu_callback)
         except Exception:
             logger.debug("ウィンドウタイトル右クリックシグナルの接続に失敗", exc_info=True)
             return
@@ -96,15 +106,15 @@ class MainWindowTitleController:
             logger.debug("ウィンドウタイトルテキストの取得に失敗", exc_info=True)
             return
 
-        self.owner._copy_text_to_clipboard(text)
+        self.copy_text_to_clipboard(text)
 
     def show_window_title_context_menu(self, position: object) -> None:
-        window_list = self.owner._get_window_list_widget()
+        window_list = self.get_window_list_widget()
         if window_list is None:
             return
 
-        item = self.owner._window_title_item_at(window_list, position)
-        title = self.owner._text_from_window_title_item(item)
+        item = self.window_title_item_at(window_list, position)
+        title = self.text_from_window_title_item(item)
         if not title:
             return
 
@@ -115,7 +125,7 @@ class MainWindowTitleController:
         global_position = map_to_global(position) if callable(map_to_global) else position
         selected_action = menu.exec(global_position)
         if selected_action is add_action:
-            self.owner._open_game_catalog_dialog(initial_window_title=title)
+            self.open_game_catalog_dialog(initial_window_title=title)
 
     @staticmethod
     def window_title_item_at(window_list: QWidget, position: object) -> object:
@@ -165,4 +175,4 @@ class MainWindowTitleController:
         except Exception:
             logger.debug("クリップボードへのコピーに失敗", exc_info=True)
             return
-        self.owner._set_status("\u30a6\u30a3\u30f3\u30c9\u30a6\u30bf\u30a4\u30c8\u30eb\u3092\u30b3\u30d4\u30fc\u3057\u307e\u3057\u305f")
+        self.set_status("\u30a6\u30a3\u30f3\u30c9\u30a6\u30bf\u30a4\u30c8\u30eb\u3092\u30b3\u30d4\u30fc\u3057\u307e\u3057\u305f")

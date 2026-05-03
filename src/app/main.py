@@ -777,6 +777,11 @@ class MainWindow(QWidget):
                 self,
                 qmenu_cls=QMenu,
                 state=self._ensure_window_title_state(),
+                get_window_list_widget=lambda: getattr(self.w, "window_list", None),
+                on_item_clicked=self._on_window_title_item_clicked,
+                show_context_menu=self._show_window_title_context_menu,
+                open_game_catalog_dialog=self._open_game_catalog_dialog,
+                set_status=self._set_status,
             ),
             validator=lambda controller: (
                 controller.owner is self

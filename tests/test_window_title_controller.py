@@ -17,15 +17,16 @@ class MainWindowTitleControllerTest(unittest.TestCase):
         )
         state = WindowTitleState()
         owner = SimpleNamespace(
-            w=SimpleNamespace(window_list=window_list),
-            _get_window_list_widget=lambda: window_list,
-            _on_window_title_item_clicked=lambda _item: None,
-            _initialize_window_title_context_menu=lambda _list: None,
         )
         controller = MainWindowTitleController(
             owner,
             qmenu_cls=object,
             state=state,
+            get_window_list_widget=lambda: window_list,
+            on_item_clicked=lambda _item: None,
+            show_context_menu=lambda _position: None,
+            open_game_catalog_dialog=lambda **_kwargs: None,
+            set_status=lambda _message: None,
         )
 
         controller.initialize_window_title_copy()
