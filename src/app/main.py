@@ -744,8 +744,12 @@ class MainWindow(QWidget):
                 manual_record_dialog_cls=ManualRecordDialog,
                 game_catalog_dialog_cls=GameCatalogDialog,
                 settings_dialog_cls=SettingsDialog,
+                state=self._ensure_dialog_state(),
             ),
-            validator=lambda controller: controller.owner is self,
+            validator=lambda controller: (
+                controller.owner is self
+                and controller.state is self._ensure_dialog_state()
+            ),
         )
 
     def _get_context_menu_controller(self) -> MainWindowContextMenuController:

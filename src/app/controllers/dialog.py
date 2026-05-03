@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Callable
 
+from src.app.dialog_state import DialogRefState
+
 
 class MainWindowDialogController:
     """Owns non-modal dialogs and dialog-driven refresh flows."""
@@ -17,47 +19,49 @@ class MainWindowDialogController:
         manual_record_dialog_cls: Callable[..., object],
         game_catalog_dialog_cls: Callable[..., object],
         settings_dialog_cls: Callable[..., object],
+        state: DialogRefState,
     ) -> None:
         self.owner = owner
         self.report_dialog_cls = report_dialog_cls
         self.manual_record_dialog_cls = manual_record_dialog_cls
         self.game_catalog_dialog_cls = game_catalog_dialog_cls
         self.settings_dialog_cls = settings_dialog_cls
+        self.state = state
 
     def initialize_report_button(self) -> None:
         button = self.owner._get_report_button()
         if button is None:
             return
 
-        if getattr(self.owner, "_report_button_connected", False):
+        if self.state.report_button_connected:
             try:
                 button.clicked.disconnect(self.owner._open_report_dialog)
             except (TypeError, RuntimeError):
                 pass
         button.clicked.connect(self.owner._open_report_dialog)
-        self.owner._report_button_connected = True
+        self.state.report_button_connected = True
 
     def initialize_manual_record_button(self) -> None:
         button = self.owner._get_manual_record_button()
         if button is None:
             return
 
-        if getattr(self.owner, "_manual_record_button_connected", False):
+        if self.state.manual_record_button_connected:
             try:
                 button.clicked.disconnect(self.owner._open_manual_record_dialog)
             except (TypeError, RuntimeError):
                 pass
         button.clicked.connect(self.owner._open_manual_record_dialog)
-        self.owner._manual_record_button_connected = True
+        self.state.manual_record_button_connected = True
 
     def open_report_dialog(self) -> None:
         if not hasattr(self.owner, "recorder"):
             return
 
-        dialog = getattr(self.owner, "_report_dialog", None)
+        dialog = self.state.report_dialog
         if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
             dialog = self.report_dialog_cls(self.owner.recorder.log_handler, self.owner)
-            self.owner._report_dialog = dialog
+            self.state.report_dialog = dialog
 
         self._show_dialog(dialog)
 
@@ -69,14 +73,14 @@ class MainWindowDialogController:
         self._show_dialog(dialog)
 
     def get_or_create_manual_record_dialog(self) -> object:
-        dialog = getattr(self.owner, "_manual_record_dialog", None)
+        dialog = self.state.manual_record_dialog
         if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
             dialog = self.manual_record_dialog_cls(
                 self.owner,
                 on_save=self.owner._save_manual_record,
                 games=self.owner.games,
             )
-            self.owner._manual_record_dialog = dialog
+            self.state.manual_record_dialog = dialog
         else:
             dialog.set_games(self.owner.games)
         return dialog
@@ -117,22 +121,22 @@ class MainWindowDialogController:
         self.owner.daily_stats.last_today_games_content = ""
 
     def open_settings_dialog(self) -> None:
-        dialog = getattr(self.owner, "_settings_dialog", None)
+        dialog = self.state.settings_dialog
         if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
             dialog = self.settings_dialog_cls(self.owner, on_saved=self.owner._on_settings_saved)
-            self.owner._settings_dialog = dialog
+            self.state.settings_dialog = dialog
 
         self._show_dialog(dialog)
 
     def open_game_catalog_dialog(self, *, initial_window_title: str = "") -> None:
-        dialog = getattr(self.owner, "_game_catalog_dialog", None)
+        dialog = self.state.game_catalog_dialog
         created_dialog = False
         if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
             dialog = self.game_catalog_dialog_cls(
                 self.owner,
                 on_saved=self.owner._on_game_catalog_saved,
             )
-            self.owner._game_catalog_dialog = dialog
+            self.state.game_catalog_dialog = dialog
             created_dialog = True
 
         dialog.show()
