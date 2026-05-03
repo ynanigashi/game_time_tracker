@@ -791,8 +791,14 @@ class MainWindow(QWidget):
         """Return the overtime-alert controller."""
         return self._resolve_dependency(
             "_overtime_alert_controller",
-            factory=lambda: MainWindowOvertimeAlertController(self),
-            validator=lambda controller: controller.owner is self,
+            factory=lambda: MainWindowOvertimeAlertController(
+                self,
+                self._ensure_alert_state(),
+            ),
+            validator=lambda controller: (
+                controller.owner is self
+                and controller.state is self._ensure_alert_state()
+            ),
         )
 
     def _init_components(self) -> None:
