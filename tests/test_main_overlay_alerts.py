@@ -711,6 +711,30 @@ class TestOverlayMethods(unittest.TestCase):
 
         self.assertEqual(result, (False, "no_cover_above_main"))
 
+    def test_visible_main_uses_native_target_rect_for_z_order_intersection(self):
+        """DPI差で論理座標だけが交差しても被覆扱いしない."""
+        window = self._create_mock_main_window()
+        window.isVisible = MagicMock(return_value=True)
+        target = MagicMock()
+        window._get_today_time_display = MagicMock(return_value=target)
+        window._global_rect_of_widget = MagicMock(return_value=(1000, 200, 1150, 240))
+        window._window_handle_of = MagicMock(return_value=100)
+        window._root_window = MagicMock(side_effect=lambda hwnd: hwnd)
+        window._is_own_window = MagicMock(return_value=False)
+        window._to_native_rect = MagicMock(return_value=(1600, 200, 1750, 240))
+        window._window_rect = MagicMock(side_effect=lambda hwnd: {
+            100: (1500, 100, 1900, 600),
+            200: (900, 0, 1400, 1000),
+        }.get(hwnd))
+        window._window_below = MagicMock(
+            side_effect=lambda hwnd: 100 if hwnd == 200 else 0
+        )
+
+        with patch("src.app.cover_detector.get_foreground_hwnd", return_value=200):
+            result = window._get_today_display_cover_state()
+
+        self.assertEqual(result, (False, "no_cover_above_main"))
+
     def test_visible_main_detects_non_foreground_window_above_main_covering_target(self):
         """foreground ではない別ウィンドウが today 表示部を覆っていれば検出する."""
         window = self._create_mock_main_window()

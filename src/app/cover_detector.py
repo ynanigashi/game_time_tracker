@@ -138,9 +138,9 @@ class Win32CoverDetector:
 
             if not self.owner._is_own_window(root):
                 rect = self.owner._window_rect(root)
-                if rect is not None and (
-                    self.owner._rects_intersect(rect, target_rect)
-                    or self.owner._rects_intersect(rect, native_target_rect)
+                if rect is not None and self.owner._rects_intersect(
+                    rect,
+                    native_target_rect,
                 ):
                     return root
 
