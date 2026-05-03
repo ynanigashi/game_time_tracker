@@ -795,7 +795,13 @@ class ReportDialog(QDialog):
     def _get_summary_table_controller(self) -> ReportSummaryTableController:
         controller = getattr(self, "_summary_table_controller", None)
         if controller is None:
-            controller = ReportSummaryTableController(self)
+            controller = ReportSummaryTableController(
+                self,
+                color_swatch_factory=lambda title: create_color_swatch(
+                    self.table,
+                    title,
+                ),
+            )
             self._summary_table_controller = controller
         return controller
 
@@ -1024,9 +1030,6 @@ class ReportDialog(QDialog):
     @classmethod
     def _color_name_for_title(cls, title: str) -> str:
         return color_name_for_title(title)
-
-    def _create_color_swatch(self, title: str) -> QWidget:
-        return create_color_swatch(self.table, title)
 
     def _build_bar_chart(self, summary: ReportSummary) -> object:
         return self._get_chart_builder().build_bar_chart(summary)

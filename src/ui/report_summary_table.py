@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QTableWidgetItem
+from typing import Callable
+
+from PySide6.QtWidgets import QTableWidgetItem, QWidget
 
 from src.core.reporting import ReportSummary
 from src.core.time_utils import format_hms
@@ -18,8 +20,14 @@ def summary_label_text(summary: ReportSummary) -> str:
 class ReportSummaryTableController:
     """Populate the game summary label and table."""
 
-    def __init__(self, owner: object) -> None:
+    def __init__(
+        self,
+        owner: object,
+        *,
+        color_swatch_factory: Callable[[str], QWidget],
+    ) -> None:
         self.owner = owner
+        self.color_swatch_factory = color_swatch_factory
 
     def populate_summary(self, summary: ReportSummary) -> None:
         self.owner.summary_label.setText(summary_label_text(summary))
@@ -38,7 +46,7 @@ class ReportSummaryTableController:
             table.setCellWidget(
                 row_index,
                 0,
-                self.owner._create_color_swatch(row.game_title),
+                self.color_swatch_factory(row.game_title),
             )
 
             values = [
