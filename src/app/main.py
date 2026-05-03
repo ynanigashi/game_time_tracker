@@ -40,6 +40,7 @@ from src.app.cover_detector import Win32CoverDetector
 from src.app.dialog_state import DialogRefState
 from src.app.display_state import WindowDisplayState
 from src.app.session_state import GameSessionState
+from src.app.window_title_state import WindowTitleState
 from src.app.win32_helpers import (
     get_foreground_hwnd,
     global_rect_of_widget,
@@ -196,10 +197,8 @@ class MainWindow(QWidget):
             enabled=current_overtime_alert_enabled,
             thresholds_minutes=OVERTIME_ALERT_THRESHOLDS_MINUTES,
         )
-        self._overtime_alert_toggle_connected = False
         self.dialog_state = DialogRefState()
-        self._window_title_copy_connected = False
-        self._window_title_context_menu_connected = False
+        self.window_title_state = WindowTitleState()
 
     def _ensure_session_state(self) -> GameSessionState:
         state = getattr(self, "session_state", None)
@@ -265,6 +264,14 @@ class MainWindow(QWidget):
     @_overtime_alert_tracker.setter
     def _overtime_alert_tracker(self, value: OvertimeAlertTracker) -> None:
         self._ensure_alert_state().overtime_alert_tracker = value
+
+    @property
+    def _overtime_alert_toggle_connected(self) -> bool:
+        return self._ensure_alert_state().toggle_connected
+
+    @_overtime_alert_toggle_connected.setter
+    def _overtime_alert_toggle_connected(self, value: bool) -> None:
+        self._ensure_alert_state().toggle_connected = bool(value)
 
     def _ensure_display_state(self) -> WindowDisplayState:
         state = getattr(self, "display_state", None)
@@ -373,6 +380,29 @@ class MainWindow(QWidget):
     @_manual_record_button_connected.setter
     def _manual_record_button_connected(self, value: bool) -> None:
         self._ensure_dialog_state().manual_record_button_connected = bool(value)
+
+    def _ensure_window_title_state(self) -> WindowTitleState:
+        state = getattr(self, "window_title_state", None)
+        if state is None:
+            state = WindowTitleState()
+            self.window_title_state = state
+        return state
+
+    @property
+    def _window_title_copy_connected(self) -> bool:
+        return self._ensure_window_title_state().copy_connected
+
+    @_window_title_copy_connected.setter
+    def _window_title_copy_connected(self, value: bool) -> None:
+        self._ensure_window_title_state().copy_connected = bool(value)
+
+    @property
+    def _window_title_context_menu_connected(self) -> bool:
+        return self._ensure_window_title_state().context_menu_connected
+
+    @_window_title_context_menu_connected.setter
+    def _window_title_context_menu_connected(self, value: bool) -> None:
+        self._ensure_window_title_state().context_menu_connected = bool(value)
 
     def _initialize_tray_icon(self) -> None:
         """Create the tray icon and context menu used as the app's home."""

@@ -14,6 +14,7 @@ class GameAlertState:
 
     overtime_alert_enabled: bool
     overtime_alert_tracker: OvertimeAlertTracker
+    toggle_connected: bool = False
 
     @classmethod
     def create(

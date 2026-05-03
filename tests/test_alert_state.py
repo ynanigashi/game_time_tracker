@@ -14,6 +14,7 @@ class GameAlertStateTest(unittest.TestCase):
         self.assertEqual(state.overtime_alert_tracker.thresholds_minutes, (45, 50))
         self.assertEqual(state.overtime_alert_tracker.alerted_threshold_minutes, set())
         self.assertFalse(state.overtime_alert_tracker.initialized)
+        self.assertFalse(state.toggle_connected)
 
     def test_create_copies_threshold_sequence(self):
         thresholds = [45, 50]

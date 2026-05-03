@@ -646,12 +646,15 @@ GUI版メインウィンドウ。
 
 `DialogRefState` (`dialog_state.py`) は再利用するダイアログ参照と、レポート/手入力ボタンの接続済みフラグを保持する。既存の呼び出し互換性のため `MainWindow` には `_report_dialog` / `_game_catalog_dialog` / `_manual_record_dialog` / `_settings_dialog` / `_report_button_connected` / `_manual_record_button_connected` のプロパティを残す。
 
+`WindowTitleState` (`window_title_state.py`) は現在ウィンドウタイトル一覧のクリック/右クリックシグナル接続済みフラグを保持する。既存の呼び出し互換性のため `MainWindow` には `_window_title_copy_connected` / `_window_title_context_menu_connected` のプロパティを残す。
+
 | クラス | 役割 | 主要メソッド |
 |--------|------|--------------|
 | `GameSessionState` (`session_state.py`) | ゲーム一覧、active/inactive キャッシュ、最新ウィンドウタイトルの実行時状態を保持 | `update_scan_result()` |
 | `GameAlertState` (`alert_state.py`) | 時間超過防止アラートの有効状態と閾値到達トラッカーを保持 | `create()` |
 | `WindowDisplayState` (`display_state.py`) | 表示モード、モード別サイズ、起動時表示、トレイ用オーバーレイ設定/位置を保持 | `create()` |
 | `DialogRefState` (`dialog_state.py`) | 再利用するダイアログ参照とダイアログボタン接続フラグを保持 | dataclass |
+| `WindowTitleState` (`window_title_state.py`) | ウィンドウタイトル一覧のクリック/右クリック接続フラグを保持 | dataclass |
 | `MainWindowUiController` (`controllers/ui.py`) | `active/session/today/windows` のUI更新を担当 | `update_session_times()`, `update_today_totals()`, `update_today_games_list()` |
 | `MainWindowDisplayController` (`controllers/display.py`) | `min/mid/max` 表示モードの可視性・サイズ制約・ジオメトリ適用を担当 | `apply_display_mode()`, `apply_mode_geometry()`, `next_display_mode()` |
 | `MainWindowStateController` (`controllers/window_state.py`) | ウィンドウ状態、起動時表示設定、トレイ用オーバーレイ設定/位置の読み書きとリサイズ記録を担当 | `load_all()`, `load_startup_window_visible()`, `load_tray_overlay_enabled()`, `load_overlay_position()`, `save()`, `record_resize()` |
