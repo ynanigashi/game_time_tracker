@@ -35,6 +35,7 @@ from src.app.controllers import (
     OvertimeAlertTracker,
     TodayTimeOverlayWindow,
 )
+from src.app.alert_state import GameAlertState
 from src.app.cover_detector import Win32CoverDetector
 from src.app.session_state import GameSessionState
 from src.app.win32_helpers import (
@@ -170,8 +171,12 @@ class MainWindow(QWidget):
         self.tray_menu: Optional[QMenu] = None
         self._is_quitting = False
         self._force_startup_window_visible = False
-        self.overtime_alert_enabled = bool(
+        current_overtime_alert_enabled = bool(
             getattr(self, "overtime_alert_enabled", DEFAULT_OVERTIME_ALERT_ENABLED)
+        )
+        self.alert_state = GameAlertState.create(
+            enabled=current_overtime_alert_enabled,
+            thresholds_minutes=OVERTIME_ALERT_THRESHOLDS_MINUTES,
         )
         self.startup_window_visible = bool(
             getattr(self, "startup_window_visible", False)
@@ -186,10 +191,6 @@ class MainWindow(QWidget):
         self._game_catalog_dialog: Optional[GameCatalogDialog] = None
         self._manual_record_dialog: Optional[ManualRecordDialog] = None
         self._settings_dialog: Optional[SettingsDialog] = None
-        self._overtime_alert_tracker = OvertimeAlertTracker(
-            thresholds_minutes=OVERTIME_ALERT_THRESHOLDS_MINUTES,
-            alerted_threshold_minutes=set(),
-        )
         self._window_title_copy_connected = False
         self._window_title_context_menu_connected = False
 
@@ -231,6 +232,32 @@ class MainWindow(QWidget):
     @latest_window_titles.setter
     def latest_window_titles(self, value: Sequence[str]) -> None:
         self._ensure_session_state().latest_window_titles = list(value)
+
+    def _ensure_alert_state(self) -> GameAlertState:
+        state = getattr(self, "alert_state", None)
+        if state is None:
+            state = GameAlertState.create(
+                enabled=DEFAULT_OVERTIME_ALERT_ENABLED,
+                thresholds_minutes=OVERTIME_ALERT_THRESHOLDS_MINUTES,
+            )
+            self.alert_state = state
+        return state
+
+    @property
+    def overtime_alert_enabled(self) -> bool:
+        return self._ensure_alert_state().overtime_alert_enabled
+
+    @overtime_alert_enabled.setter
+    def overtime_alert_enabled(self, value: bool) -> None:
+        self._ensure_alert_state().overtime_alert_enabled = bool(value)
+
+    @property
+    def _overtime_alert_tracker(self) -> OvertimeAlertTracker:
+        return self._ensure_alert_state().overtime_alert_tracker
+
+    @_overtime_alert_tracker.setter
+    def _overtime_alert_tracker(self, value: OvertimeAlertTracker) -> None:
+        self._ensure_alert_state().overtime_alert_tracker = value
 
     def _initialize_tray_icon(self) -> None:
         """Create the tray icon and context menu used as the app's home."""
