@@ -747,7 +747,13 @@ class ReportDialog(QDialog):
     def _get_tab_refresh_controller(self) -> ReportTabRefreshController:
         controller = getattr(self, "_tab_refresh_controller", None)
         if controller is None:
-            controller = ReportTabRefreshController(self)
+            controller = ReportTabRefreshController(
+                self,
+                self._ensure_report_tab_state(),
+                summary_tab=self._SUMMARY_TAB,
+                trend_tab=self._TREND_TAB,
+                log_tab=self._LOG_TAB,
+            )
             self._tab_refresh_controller = controller
         return controller
 
