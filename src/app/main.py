@@ -37,6 +37,7 @@ from src.app.controllers import (
 )
 from src.app.alert_state import GameAlertState
 from src.app.cover_detector import Win32CoverDetector
+from src.app.display_state import WindowDisplayState
 from src.app.session_state import GameSessionState
 from src.app.win32_helpers import (
     get_foreground_hwnd,
@@ -171,18 +172,28 @@ class MainWindow(QWidget):
         self.tray_menu: Optional[QMenu] = None
         self._is_quitting = False
         self._force_startup_window_visible = False
+        current_display_mode = getattr(self, "display_mode", "max")
+        current_mode_sizes = getattr(self, "mode_sizes", MODE_DEFAULT_SIZES)
+        current_startup_window_visible = bool(
+            getattr(self, "startup_window_visible", False)
+        )
+        current_tray_overlay_enabled = bool(
+            getattr(self, "tray_overlay_enabled", False)
+        )
+        current_overlay_position = getattr(self, "overlay_position", None)
+        self.display_state = WindowDisplayState.create(
+            display_mode=current_display_mode,
+            mode_sizes=current_mode_sizes,
+            startup_window_visible=current_startup_window_visible,
+            tray_overlay_enabled=current_tray_overlay_enabled,
+            overlay_position=current_overlay_position,
+        )
         current_overtime_alert_enabled = bool(
             getattr(self, "overtime_alert_enabled", DEFAULT_OVERTIME_ALERT_ENABLED)
         )
         self.alert_state = GameAlertState.create(
             enabled=current_overtime_alert_enabled,
             thresholds_minutes=OVERTIME_ALERT_THRESHOLDS_MINUTES,
-        )
-        self.startup_window_visible = bool(
-            getattr(self, "startup_window_visible", False)
-        )
-        self.tray_overlay_enabled = bool(
-            getattr(self, "tray_overlay_enabled", False)
         )
         self._overtime_alert_toggle_connected = False
         self._report_button_connected = False
@@ -258,6 +269,59 @@ class MainWindow(QWidget):
     @_overtime_alert_tracker.setter
     def _overtime_alert_tracker(self, value: OvertimeAlertTracker) -> None:
         self._ensure_alert_state().overtime_alert_tracker = value
+
+    def _ensure_display_state(self) -> WindowDisplayState:
+        state = getattr(self, "display_state", None)
+        if state is None:
+            state = WindowDisplayState.create()
+            self.display_state = state
+        return state
+
+    @property
+    def display_mode(self) -> str:
+        return self._ensure_display_state().display_mode
+
+    @display_mode.setter
+    def display_mode(self, value: str) -> None:
+        self._ensure_display_state().display_mode = str(value)
+
+    @property
+    def mode_sizes(self) -> Dict[str, Tuple[int, int]]:
+        return self._ensure_display_state().mode_sizes
+
+    @mode_sizes.setter
+    def mode_sizes(self, value: Dict[str, Tuple[int, int]]) -> None:
+        self._ensure_display_state().mode_sizes = {
+            str(mode): (int(size[0]), int(size[1]))
+            for mode, size in value.items()
+        }
+
+    @property
+    def startup_window_visible(self) -> bool:
+        return self._ensure_display_state().startup_window_visible
+
+    @startup_window_visible.setter
+    def startup_window_visible(self, value: bool) -> None:
+        self._ensure_display_state().startup_window_visible = bool(value)
+
+    @property
+    def tray_overlay_enabled(self) -> bool:
+        return self._ensure_display_state().tray_overlay_enabled
+
+    @tray_overlay_enabled.setter
+    def tray_overlay_enabled(self, value: bool) -> None:
+        self._ensure_display_state().tray_overlay_enabled = bool(value)
+
+    @property
+    def overlay_position(self) -> Optional[Tuple[int, int]]:
+        return self._ensure_display_state().overlay_position
+
+    @overlay_position.setter
+    def overlay_position(self, value: Optional[Tuple[int, int]]) -> None:
+        if value is None:
+            self._ensure_display_state().overlay_position = None
+            return
+        self._ensure_display_state().overlay_position = (int(value[0]), int(value[1]))
 
     def _initialize_tray_icon(self) -> None:
         """Create the tray icon and context menu used as the app's home."""

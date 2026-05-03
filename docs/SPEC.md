@@ -642,10 +642,13 @@ GUI版メインウィンドウ。
 
 `GameAlertState` (`alert_state.py`) は時間超過防止アラートの有効フラグと閾値到達トラッカーを保持する。既存の呼び出し互換性のため `MainWindow` には `overtime_alert_enabled` / `_overtime_alert_tracker` のプロパティを残し、controller からは従来通り `_is_overtime_alert_enabled()` と `_get_overtime_alert_tracker()` 経由で参照する。
 
+`WindowDisplayState` (`display_state.py`) は表示モード、モード別サイズ、起動時ウィンドウ表示、トレイ用オーバーレイ設定/位置を保持する。既存の呼び出し互換性のため `MainWindow` には `display_mode` / `mode_sizes` / `startup_window_visible` / `tray_overlay_enabled` / `overlay_position` のプロパティを残す。
+
 | クラス | 役割 | 主要メソッド |
 |--------|------|--------------|
 | `GameSessionState` (`session_state.py`) | ゲーム一覧、active/inactive キャッシュ、最新ウィンドウタイトルの実行時状態を保持 | `update_scan_result()` |
 | `GameAlertState` (`alert_state.py`) | 時間超過防止アラートの有効状態と閾値到達トラッカーを保持 | `create()` |
+| `WindowDisplayState` (`display_state.py`) | 表示モード、モード別サイズ、起動時表示、トレイ用オーバーレイ設定/位置を保持 | `create()` |
 | `MainWindowUiController` (`controllers/ui.py`) | `active/session/today/windows` のUI更新を担当 | `update_session_times()`, `update_today_totals()`, `update_today_games_list()` |
 | `MainWindowDisplayController` (`controllers/display.py`) | `min/mid/max` 表示モードの可視性・サイズ制約・ジオメトリ適用を担当 | `apply_display_mode()`, `apply_mode_geometry()`, `next_display_mode()` |
 | `MainWindowStateController` (`controllers/window_state.py`) | ウィンドウ状態、起動時表示設定、トレイ用オーバーレイ設定/位置の読み書きとリサイズ記録を担当 | `load_all()`, `load_startup_window_visible()`, `load_tray_overlay_enabled()`, `load_overlay_position()`, `save()`, `record_resize()` |
