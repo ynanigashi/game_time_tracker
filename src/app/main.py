@@ -353,20 +353,35 @@ class MainWindow(
         return self._resolve_dependency(
             "_overlay_controller",
             factory=lambda: MainWindowOverlayController(
-                self,
                 overlay_window_provider=lambda: self._get_overlay_window(),
                 set_overlay_window=lambda window: setattr(
                     self,
                     "overlay_window",
                     window,
                 ),
+                set_overlay_position=lambda position: setattr(
+                    self,
+                    "overlay_position",
+                    position,
+                ),
+                get_overlay_position=lambda: self.overlay_position,
                 today_time_display_provider=lambda: self._get_today_time_display(),
                 save_window_state=lambda: self._save_window_state(),
                 has_playing_games=lambda: self._has_playing_games(),
                 today_display_cover_state=lambda: self._get_today_display_cover_state(),
                 is_own_window=lambda hwnd: self._is_own_window(hwnd),
+                is_main_window_visible=lambda: bool(
+                    getattr(self, "isVisible", lambda: False)()
+                ),
+                is_main_window_active=lambda: bool(
+                    getattr(self, "isActiveWindow", lambda: False)()
+                ),
+                own_window_provider=lambda: self,
+                window_geometry=self.geometry,
+                move_window=self.move,
+                get_tray_overlay_enabled=lambda: bool(self.tray_overlay_enabled),
             ),
-            validator=lambda controller: controller.owner is self,
+            validator=lambda controller: controller.own_window_provider() is self,
         )
 
     def _get_tray_controller(self) -> MainWindowTrayController:

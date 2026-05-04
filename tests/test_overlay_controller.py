@@ -14,7 +14,6 @@ class MainWindowOverlayControllerTest(unittest.TestCase):
         overlay = SimpleNamespace(set_today_text=lambda text: calls.append(text))
         today_display = SimpleNamespace(text=lambda: "00:10:00")
         controller = MainWindowOverlayController(
-            SimpleNamespace(),
             overlay_window_provider=lambda: overlay,
             today_time_display_provider=lambda: today_display,
         )
@@ -27,7 +26,6 @@ class MainWindowOverlayControllerTest(unittest.TestCase):
         calls = []
         overlay = SimpleNamespace(close=lambda: calls.append("close"))
         controller = MainWindowOverlayController(
-            SimpleNamespace(),
             overlay_window_provider=lambda: overlay,
             set_overlay_window=lambda window: calls.append(("set", window)),
         )
@@ -39,7 +37,6 @@ class MainWindowOverlayControllerTest(unittest.TestCase):
     def test_save_overlay_position_uses_injected_save_callback(self):
         calls = []
         controller = MainWindowOverlayController(
-            SimpleNamespace(),
             save_window_state=lambda: calls.append("save"),
         )
 
@@ -49,7 +46,8 @@ class MainWindowOverlayControllerTest(unittest.TestCase):
 
     def test_visibility_uses_injected_playing_and_cover_callbacks(self):
         controller = MainWindowOverlayController(
-            SimpleNamespace(isVisible=lambda: True, isActiveWindow=lambda: False),
+            is_main_window_visible=lambda: True,
+            is_main_window_active=lambda: False,
             has_playing_games=lambda: True,
             today_display_cover_state=lambda: (True, "covered"),
         )
@@ -58,7 +56,7 @@ class MainWindowOverlayControllerTest(unittest.TestCase):
 
     def test_visibility_hides_when_injected_playing_callback_is_false(self):
         controller = MainWindowOverlayController(
-            SimpleNamespace(isVisible=lambda: True),
+            is_main_window_visible=lambda: True,
             has_playing_games=lambda: False,
             today_display_cover_state=lambda: (True, "covered"),
         )

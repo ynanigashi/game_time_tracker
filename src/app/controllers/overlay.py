@@ -30,24 +30,28 @@ class MainWindowOverlayController:
 
     def __init__(
         self,
-        owner: "MainWindow",
         *,
         overlay_window_provider: Optional[Callable[[], object]] = None,
         set_overlay_window: Optional[Callable[[object], None]] = None,
+        set_overlay_position: Optional[Callable[[Tuple[int, int]], None]] = None,
+        get_overlay_position: Optional[Callable[[], Optional[Tuple[int, int]]]] = None,
         today_time_display_provider: Optional[Callable[[], object]] = None,
         save_window_state: Optional[Callable[[], None]] = None,
         has_playing_games: Optional[Callable[[], bool]] = None,
         today_display_cover_state: Optional[Callable[[], Tuple[bool, str]]] = None,
         is_own_window: Optional[Callable[[int], bool]] = None,
+        is_main_window_visible: Optional[Callable[[], bool]] = None,
+        is_main_window_active: Optional[Callable[[], bool]] = None,
+        own_window_provider: Optional[Callable[[], object]] = None,
+        window_geometry: Optional[Callable[[], object]] = None,
+        move_window: Optional[Callable[[int, int], None]] = None,
+        get_tray_overlay_enabled: Optional[Callable[[], bool]] = None,
     ) -> None:
-        self.owner = owner
         self.visibility_log_state = OverlayVisibilityLogState()
-        self.overlay_window_provider = overlay_window_provider or (
-            lambda: getattr(self.owner, "overlay_window", None)
-        )
-        self.set_overlay_window = set_overlay_window or (
-            lambda window: setattr(self.owner, "overlay_window", window)
-        )
+        self.overlay_window_provider = overlay_window_provider or (lambda: None)
+        self.set_overlay_window = set_overlay_window or (lambda _window: None)
+        self.set_overlay_position = set_overlay_position or (lambda _position: None)
+        self.get_overlay_position = get_overlay_position or (lambda: None)
         self.today_time_display_provider = today_time_display_provider or (
             lambda: None
         )
@@ -55,6 +59,12 @@ class MainWindowOverlayController:
         self.has_playing_games = has_playing_games or (lambda: False)
         self.today_display_cover_state = today_display_cover_state
         self.is_own_window = is_own_window
+        self.is_main_window_visible = is_main_window_visible or (lambda: False)
+        self.is_main_window_active = is_main_window_active or (lambda: False)
+        self.own_window_provider = own_window_provider or (lambda: None)
+        self.window_geometry = window_geometry or (lambda: None)
+        self.move_window = move_window or (lambda _x, _y: None)
+        self.get_tray_overlay_enabled = get_tray_overlay_enabled or (lambda: False)
 
     def initialize_overlay(self) -> None:
         """今日のプレイ時間オーバーレイを初期化する."""
@@ -75,10 +85,10 @@ class MainWindowOverlayController:
             self.set_overlay_window(None)
 
     def _on_overlay_moved(self, x: int, y: int) -> None:
-        self.owner.overlay_position = (int(x), int(y))
+        self.set_overlay_position((int(x), int(y)))
 
     def _on_overlay_dragged(self, x: int, y: int) -> None:
-        if not bool(getattr(self.owner, "isVisible", lambda: False)()):
+        if not bool(self.is_main_window_visible()):
             return
         self._move_owner_today_display_to(int(x), int(y))
 
@@ -88,11 +98,10 @@ class MainWindowOverlayController:
             return
         try:
             top_left = target.mapToGlobal(target.rect().topLeft())
-            geometry = self.owner.geometry()
-            move = getattr(self.owner, "move", None)
-            if not callable(move):
+            geometry = self.window_geometry()
+            if geometry is None:
                 return
-            move(
+            self.move_window(
                 int(geometry.x()) + int(x) - int(top_left.x()),
                 int(geometry.y()) + int(y) - int(top_left.y()),
             )
@@ -120,7 +129,7 @@ class MainWindowOverlayController:
             return
 
         try:
-            if bool(getattr(self.owner, "isVisible", lambda: False)()):
+            if bool(self.is_main_window_visible()):
                 target = self.today_time_display_provider()
                 if target is None:
                     return
@@ -139,7 +148,7 @@ class MainWindowOverlayController:
 
             overlay_width = max(1, int(getattr(overlay_window, "width", lambda: OVERLAY_FALLBACK_WIDTH)()))
             overlay_height = max(1, int(getattr(overlay_window, "height", lambda: OVERLAY_FALLBACK_HEIGHT)()))
-            manual_position = getattr(self.owner, "overlay_position", None)
+            manual_position = self.get_overlay_position()
             if manual_position is not None:
                 x, y = manual_position
                 x, y = self._clamp_overlay_position(int(x), int(y), overlay_width, overlay_height)
@@ -194,7 +203,7 @@ class MainWindowOverlayController:
 
     def _evaluate_overlay_visibility(self) -> Tuple[bool, str]:
         """オーバーレイ表示可否と理由を返す."""
-        if bool(getattr(self.owner, "isVisible", lambda: False)()):
+        if bool(self.is_main_window_visible()):
             if not self.has_playing_games():
                 return False, "no_playing_game"
             if self._is_own_window_foreground():
@@ -205,11 +214,11 @@ class MainWindowOverlayController:
                     return (True, reason) if covered else (False, reason)
                 except Exception:
                     logger.debug("今日のプレイ時間被覆判定に失敗", exc_info=True)
-            elif bool(getattr(self.owner, "isActiveWindow", lambda: False)()):
+            elif bool(self.is_main_window_active()):
                 return False, "main_window_foreground"
             return True, "main_window_background"
 
-        if not bool(getattr(self.owner, "tray_overlay_enabled", False)):
+        if not bool(self.get_tray_overlay_enabled()):
             return False, "tray_overlay_disabled"
         if not self.has_playing_games():
             return False, "no_playing_game"
@@ -217,12 +226,12 @@ class MainWindowOverlayController:
 
     def _is_own_window_foreground(self) -> bool:
         """Return whether the foreground window belongs to this app."""
-        if bool(getattr(self.owner, "isActiveWindow", lambda: False)()):
+        if bool(self.is_main_window_active()):
             return True
 
         try:
             active_window = QApplication.activeWindow()
-            if active_window is self.owner:
+            if active_window is self.own_window_provider():
                 return True
         except Exception:
             logger.debug("Qt active window 判定に失敗", exc_info=True)
@@ -281,7 +290,7 @@ class MainWindowOverlayController:
 
     def _hide_visible_overlay_before_cover_check(self, overlay_window: QWidget) -> None:
         """Avoid treating the overlay itself as a cover while the main window is visible."""
-        if not bool(getattr(self.owner, "isVisible", lambda: False)()):
+        if not bool(self.is_main_window_visible()):
             return
         if not bool(getattr(overlay_window, "isVisible", lambda: False)()):
             return
