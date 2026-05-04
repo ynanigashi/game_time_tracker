@@ -29,6 +29,40 @@ class PlayLogStore(SQLiteBaseStore):
     """Persist play session logs locally in SQLite."""
 
     SCHEMA_VERSION = 3
+    SCHEMA_STATEMENTS = (
+        """
+        CREATE TABLE IF NOT EXISTS play_records (
+            record_id TEXT PRIMARY KEY,
+            device_id TEXT NOT NULL,
+            record_index INTEGER NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            title TEXT NOT NULL,
+            play_with_friends TEXT NOT NULL,
+            backed_up INTEGER NOT NULL DEFAULT 0,
+            sync_action TEXT NOT NULL DEFAULT 'append',
+            deleted INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+    )
+    INDEX_STATEMENTS = (
+        """
+        CREATE INDEX IF NOT EXISTS idx_play_records_index
+        ON play_records(record_index)
+        """,
+    )
+    LEGACY_COLUMN_STATEMENTS = {
+        "sync_action": """
+            ALTER TABLE play_records
+            ADD COLUMN sync_action TEXT NOT NULL DEFAULT 'append'
+        """,
+        "deleted": """
+            ALTER TABLE play_records
+            ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0
+        """,
+    }
     _INDEX_KEYS = ("index", "record_index", "No", "no")
     _FRIENDS_KEYS = ("play_with_friends", "with_friends")
 
@@ -50,55 +84,17 @@ class PlayLogStore(SQLiteBaseStore):
         )
 
     def _ensure_schema(self, conn: sqlite3.Connection) -> None:
-        existing = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='play_records'"
-        ).fetchone()
-        if existing is not None:
-            columns = {
-                row["name"]
-                for row in conn.execute("PRAGMA table_info(play_records)").fetchall()
-            }
+        if self._table_exists(conn, "play_records"):
+            columns = self._table_columns(conn, "play_records")
             if "record_id" not in columns:
                 self._migrate_legacy_schema(conn)
                 return
-            if "sync_action" not in columns:
-                conn.execute(
-                    """
-                    ALTER TABLE play_records
-                    ADD COLUMN sync_action TEXT NOT NULL DEFAULT 'append'
-                    """
-                )
-            if "deleted" not in columns:
-                conn.execute(
-                    """
-                    ALTER TABLE play_records
-                    ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0
-                    """
-                )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS play_records (
-                record_id TEXT PRIMARY KEY,
-                device_id TEXT NOT NULL,
-                record_index INTEGER NOT NULL,
-                start_time TEXT NOT NULL,
-                end_time TEXT NOT NULL,
-                title TEXT NOT NULL,
-                play_with_friends TEXT NOT NULL,
-                backed_up INTEGER NOT NULL DEFAULT 0,
-                sync_action TEXT NOT NULL DEFAULT 'append',
-                deleted INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            self._add_missing_columns(
+                conn,
+                "play_records",
+                self.LEGACY_COLUMN_STATEMENTS,
             )
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_play_records_index
-            ON play_records(record_index)
-            """
-        )
+        super()._ensure_schema(conn)
 
     def _migrate_legacy_schema(self, conn: sqlite3.Connection) -> None:
         device_id = self.device_id
@@ -155,12 +151,7 @@ class PlayLogStore(SQLiteBaseStore):
         )
         conn.execute("DROP TABLE play_records")
         conn.execute("ALTER TABLE play_records_new RENAME TO play_records")
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_play_records_index
-            ON play_records(record_index)
-            """
-        )
+        self._execute_statements(conn, self.INDEX_STATEMENTS)
 
     @staticmethod
     def _serialize_bool(value: Any) -> str:

@@ -41,27 +41,24 @@ class GameCatalogStore(SQLiteBaseStore):
     """Persist editable game definitions locally in SQLite."""
 
     SCHEMA_VERSION = 1
+    SCHEMA_STATEMENTS = (
+        """
+        CREATE TABLE IF NOT EXISTS games (
+            id TEXT PRIMARY KEY,
+            game_title TEXT NOT NULL,
+            window_title TEXT NOT NULL,
+            play_with_friends INTEGER NOT NULL DEFAULT 0,
+            is_browser_game INTEGER NOT NULL DEFAULT 0,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            deleted_at TEXT
+        )
+        """,
+    )
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
         super().__init__(db_path or default_game_catalog_db_file())
-
-    @staticmethod
-    def _ensure_schema(conn: sqlite3.Connection) -> None:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS games (
-                id TEXT PRIMARY KEY,
-                game_title TEXT NOT NULL,
-                window_title TEXT NOT NULL,
-                play_with_friends INTEGER NOT NULL DEFAULT 0,
-                is_browser_game INTEGER NOT NULL DEFAULT 0,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                deleted_at TEXT
-            )
-            """
-        )
 
     @staticmethod
     def _bool_to_int(value: Any) -> int:
