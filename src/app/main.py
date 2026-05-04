@@ -382,8 +382,8 @@ class MainWindow(
                 get_tray_overlay_enabled=lambda: bool(self.tray_overlay_enabled),
             ),
             validator=lambda controller: (
-                controller.overlay_window_provider()
-                is getattr(self, "overlay_window", None)
+                getattr(controller.window_geometry, "__self__", None) is self
+                and getattr(controller.move_window, "__self__", None) is self
             ),
         )
 

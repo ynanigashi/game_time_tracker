@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
 
 if TYPE_CHECKING:
     from src.core.domain import ScanResult
     from src.core.models import GameEntry
+
+logger = logging.getLogger(__name__)
 
 
 class MainWindowScanActions:
@@ -91,6 +94,10 @@ class MainWindowScanActions:
             game_minutes, _ = self.recorder.log_handler.get_today_stats()
             return game_minutes
         except Exception:
+            logger.warning(
+                "failed to load today's game minutes",
+                exc_info=True,
+            )
             return {}
 
     def _update_today_games_list(self, now: datetime) -> None:
@@ -107,4 +114,8 @@ class MainWindowScanActions:
             _, completed_seconds = self.recorder.log_handler.get_today_stats()
             return completed_seconds
         except Exception:
+            logger.warning(
+                "failed to load today's completed play seconds",
+                exc_info=True,
+            )
             return 0.0
