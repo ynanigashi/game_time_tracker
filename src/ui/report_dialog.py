@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Callable, List, Optional, Tuple
 
 from PySide6.QtCore import QDate, Qt
@@ -28,7 +28,6 @@ from src.core.reporting import (
     TrendPoint,
     TrendSeries,
 )
-from src.core.time_utils import GSS_DATETIME_FORMAT
 from src.core.time_utils import format_hms
 from src.ui.report_charts import (
     CHARTS_AVAILABLE,
@@ -762,85 +761,13 @@ class ReportDialog(QDialog):
         self._get_log_table_controller().apply_selected_log_row()
 
     def _edit_selected_log_record(self, *_args: object) -> None:
-        row = self._selected_log_row()
-        if row < 0:
-            QMessageBox.warning(self, "ログ編集エラー", "編集するレコードを選択してください")
-            return
-
-        record_id = self._log_table_text(row, 0).strip()
-        if not record_id:
-            QMessageBox.warning(self, "ログ編集エラー", "レコードIDが見つかりません")
-            return
-
-        start_time = self.log_start_time_edit.text().strip()
-        end_time = self.log_end_time_edit.text().strip()
-        title = self.log_title_edit.text().strip()
-        if not title:
-            QMessageBox.warning(self, "ログ編集エラー", "タイトルを入力してください")
-            return
-
-        try:
-            start = datetime.strptime(start_time, GSS_DATETIME_FORMAT)
-            end = datetime.strptime(end_time, GSS_DATETIME_FORMAT)
-        except ValueError:
-            QMessageBox.warning(
-                self,
-                "ログ編集エラー",
-                "日時は YYYY/MM/DD HH:MM:SS 形式で入力してください",
-            )
-            return
-        if end <= start:
-            QMessageBox.warning(self, "ログ編集エラー", "終了時刻は開始時刻より後にしてください")
-            return
-
-        update_record = getattr(self.log_handler, "update_record", None)
-        if not callable(update_record):
-            QMessageBox.warning(self, "ログ編集エラー", "このログハンドラは編集に対応していません")
-            return
-
-        values = [
-            int(self._log_table_text(row, 2)),
-            start_time,
-            end_time,
-            title,
-            self.log_friends_check.isChecked(),
-        ]
-        self._start_log_edit(record_id, values)
+        self._get_log_operation_controller().edit_selected_log_record(*_args)
 
     def _delete_selected_log_record(self, *_args: object) -> None:
-        row = self._selected_log_row()
-        if row < 0:
-            QMessageBox.warning(self, "ログ削除エラー", "削除するレコードを選択してください")
-            return
-
-        record_id = self._log_table_text(row, 0).strip()
-        if not record_id:
-            QMessageBox.warning(self, "ログ削除エラー", "レコードIDが見つかりません")
-            return
-
-        if not self._confirm_delete_log_record(row):
-            return
-
-        self._start_log_delete(record_id)
+        self._get_log_operation_controller().delete_selected_log_record(*_args)
 
     def _confirm_delete_log_record(self, row: int) -> bool:
-        question = getattr(QMessageBox, "question", None)
-        standard_button = getattr(QMessageBox, "StandardButton", None)
-        yes = getattr(standard_button, "Yes", None)
-        no = getattr(standard_button, "No", None)
-        if not callable(question) or yes is None or no is None:
-            return True
-
-        title = self._log_table_text(row, 5)
-        start_time = self._log_table_text(row, 3)
-        selected = question(
-            self,
-            "ログ削除",
-            f"このログを削除しますか？\n{start_time} / {title}",
-            yes | no,
-            no,
-        )
-        return selected == yes
+        return self._get_log_operation_controller().confirm_delete_log_record(row)
 
     def _get_log_operation_controller(self) -> ReportLogOperationController:
         controller = getattr(self, "_log_operation_controller", None)
