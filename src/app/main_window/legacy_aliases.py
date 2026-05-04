@@ -1,4 +1,10 @@
-"""Explicit legacy aliases for MainWindow private APIs."""
+"""Temporary legacy aliases for MainWindow private APIs.
+
+This file exists only to keep legacy ``window._foo()`` callers green during the
+phase 2 to phase 3 migration. It MUST be removed before phase 3 is merged.
+Remaining callers are MainWindow lifecycle methods, collaborator-to-collaborator
+callbacks routed through the owner, and MainWindow-focused tests.
+"""
 
 from __future__ import annotations
 

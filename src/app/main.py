@@ -196,8 +196,6 @@ class MainWindow(QWidget):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Hide to tray or save state before application exit."""
-        if "_state_access" not in self.__dict__:
-            self._initialize_collaborators()
         if not bool(self._is_quitting):
             self._hide_main_window_to_tray()
             ignore = getattr(event, "ignore", None)
@@ -266,8 +264,6 @@ class MainWindow(QWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """Handle mouse clicks for context menu and display mode cycling."""
-        if "_actions" not in self.__dict__:
-            self._initialize_collaborators()
         if self._should_show_context_menu(event):
             self._show_context_menu(event)
             super().mousePressEvent(event)
