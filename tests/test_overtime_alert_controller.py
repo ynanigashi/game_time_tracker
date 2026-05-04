@@ -1,5 +1,4 @@
 import unittest
-from types import SimpleNamespace
 
 from tests.test_stubs import install_stubs
 
@@ -10,7 +9,7 @@ from src.app.controllers.overtime_alert import MainWindowOvertimeAlertController
 
 
 class MainWindowOvertimeAlertControllerTest(unittest.TestCase):
-    def _create_controller(self, owner, state, **overrides):
+    def _create_controller(self, state, **overrides):
         defaults = {
             "toggle_provider": lambda: None,
             "on_toggle_changed": lambda _checked: None,
@@ -20,12 +19,11 @@ class MainWindowOvertimeAlertControllerTest(unittest.TestCase):
             "sync_overlay": lambda: None,
         }
         defaults.update(overrides)
-        return MainWindowOvertimeAlertController(owner, state, **defaults)
+        return MainWindowOvertimeAlertController(state, **defaults)
 
     def test_enabled_and_tracker_use_injected_state(self):
-        owner = SimpleNamespace()
         state = GameAlertState.create(enabled=False, thresholds_minutes=(45,))
-        controller = self._create_controller(owner, state)
+        controller = self._create_controller(state)
 
         self.assertFalse(controller.is_enabled())
         controller.set_enabled(True)
@@ -37,7 +35,6 @@ class MainWindowOvertimeAlertControllerTest(unittest.TestCase):
         calls = []
         state = GameAlertState.create(enabled=False, thresholds_minutes=(45,))
         controller = self._create_controller(
-            SimpleNamespace(),
             state,
             active_games_provider=lambda: ["active"],
             inactive_games_provider=lambda: ["inactive"],

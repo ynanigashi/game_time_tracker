@@ -448,8 +448,9 @@ class MainWindow(
         return self._resolve_dependency(
             "_context_menu_controller",
             factory=lambda: MainWindowContextMenuController(
-                self,
+                parent_widget=self,
                 display_modes=DISPLAY_MODES,
+                display_mode_provider=lambda: self.display_mode,
                 set_display_mode=self._set_display_mode,
                 open_manual_record_dialog=self._open_manual_record_dialog,
                 open_report_dialog=self._open_report_dialog,
@@ -457,7 +458,7 @@ class MainWindow(
                 open_settings_dialog=self._open_settings_dialog,
                 quit_application=self._quit_application,
             ),
-            validator=lambda controller: controller.owner is self,
+            validator=lambda controller: controller.parent_widget is self,
         )
 
     def _get_window_title_controller(self) -> MainWindowTitleController:
@@ -465,7 +466,6 @@ class MainWindow(
         return self._resolve_dependency(
             "_window_title_controller",
             factory=lambda: MainWindowTitleController(
-                self,
                 qmenu_cls=QMenu,
                 state=self._ensure_window_title_state(),
                 get_window_list_widget=lambda: getattr(self.w, "window_list", None),
@@ -475,8 +475,7 @@ class MainWindow(
                 set_status=self._set_status,
             ),
             validator=lambda controller: (
-                controller.owner is self
-                and controller.state is self._ensure_window_title_state()
+                controller.state is self._ensure_window_title_state()
             ),
         )
 
@@ -520,7 +519,7 @@ class MainWindow(
         return self._resolve_dependency(
             "_scan_controller",
             factory=lambda: MainWindowScanController(
-                self,
+                state_tracker=getattr(self, "state_tracker", None),
                 games_provider=lambda: self.games,
                 scan_result_updater=lambda active, inactive, titles: (
                     self._ensure_session_state().update_scan_result(
@@ -536,7 +535,9 @@ class MainWindow(
                 load_today_game_minutes=self._load_today_game_minutes,
                 get_today_stats=self.recorder.log_handler.get_today_stats,
             ),
-            validator=lambda controller: controller.owner is self,
+            validator=lambda controller: (
+                controller.state_tracker is getattr(self, "state_tracker", None)
+            ),
         )
 
     def _get_overtime_alert_controller(self) -> MainWindowOvertimeAlertController:
@@ -544,7 +545,6 @@ class MainWindow(
         return self._resolve_dependency(
             "_overtime_alert_controller",
             factory=lambda: MainWindowOvertimeAlertController(
-                self,
                 self._ensure_alert_state(),
                 toggle_provider=self._get_overtime_alert_toggle,
                 on_toggle_changed=self._on_overtime_alert_toggled,
@@ -560,8 +560,7 @@ class MainWindow(
                 sync_overlay=self._sync_overlay,
             ),
             validator=lambda controller: (
-                controller.owner is self
-                and controller.state is self._ensure_alert_state()
+                controller.state is self._ensure_alert_state()
             ),
         )
 

@@ -64,7 +64,6 @@ class MainWindowOvertimeAlertController:
 
     def __init__(
         self,
-        owner: "MainWindow",
         state: GameAlertState,
         *,
         toggle_provider: Callable[[], object],
@@ -77,7 +76,6 @@ class MainWindowOvertimeAlertController:
         ],
         sync_overlay: Callable[[], None],
     ) -> None:
-        self.owner = owner
         self.state = state
         self.toggle_provider = toggle_provider
         self.on_toggle_changed = on_toggle_changed

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Protocol, Sequence, Tuple
 
 from src.core.adapters import Messages
 from src.core.models import GameEntry
@@ -12,13 +12,27 @@ from src.core.domain import ScanResult
 logger = logging.getLogger(__name__)
 
 
+class ScanStateTracker(Protocol):
+    """Minimal scan dependency required by MainWindowScanController."""
+
+    def scan(
+        self,
+        *,
+        games: Sequence[GameEntry],
+        window_titles: List[str],
+        foreground_title: Optional[str],
+        load_today_game_minutes_callback: Callable[[], Dict[str, float]],
+    ) -> ScanResult:
+        ...
+
+
 class MainWindowScanController:
     """Coordinates scan result application and scan-related cached stats."""
 
     def __init__(
         self,
-        owner: "MainWindow",
         *,
+        state_tracker: Optional[ScanStateTracker],
         games_provider: Callable[[], Sequence[GameEntry]],
         scan_result_updater: Callable[
             [Sequence[GameEntry], Sequence[GameEntry], List[str]],
@@ -31,7 +45,7 @@ class MainWindowScanController:
         load_today_game_minutes: Callable[[], Dict[str, float]],
         get_today_stats: Callable[[], Tuple[Dict[str, float], float]],
     ) -> None:
-        self.owner = owner
+        self.state_tracker = state_tracker
         self.games_provider = games_provider
         self.scan_result_updater = scan_result_updater
         self.update_active_list_callback = update_active_list
@@ -46,7 +60,9 @@ class MainWindowScanController:
         window_titles: List[str],
         foreground_title: Optional[str],
     ) -> ScanResult:
-        return self.owner.state_tracker.scan(
+        if self.state_tracker is None:
+            raise RuntimeError("state_tracker is required to scan games")
+        return self.state_tracker.scan(
             games=self.games_provider(),
             window_titles=window_titles,
             foreground_title=foreground_title,
