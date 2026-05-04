@@ -65,23 +65,23 @@ class MainWindowWin32Ops(MainWindowCollaborator):
 
     def _is_own_window(self, hwnd: int) -> bool:
         """Return whether HWND belongs to this app or its overlay."""
-        return self._owner._get_cover_detector().is_own_window(hwnd)
+        return self._controllers._get_cover_detector().is_own_window(hwnd)
 
     def _native_scale_factor(self) -> float:
         """Estimate logical-to-native coordinate scaling."""
-        return self._owner._get_cover_detector().native_scale_factor()
+        return self._controllers._get_cover_detector().native_scale_factor()
 
     def _to_native_point(self, x: int, y: int) -> Point:
         """Convert a logical point to Win32 native coordinates."""
-        return self._owner._get_cover_detector().to_native_point(x, y)
+        return self._controllers._get_cover_detector().to_native_point(x, y)
 
     def _to_native_rect(self, rect: Rect) -> Rect:
         """Convert a logical rectangle to Win32 native coordinates."""
-        return self._owner._get_cover_detector().to_native_rect(rect)
+        return self._controllers._get_cover_detector().to_native_rect(rect)
 
     def _foreground_rect_if_foreign(self) -> Optional[Rect]:
         """Return the foreground rectangle when it belongs to a foreign window."""
-        return self._owner._get_cover_detector().foreground_rect_if_foreign(
+        return self._controllers._get_cover_detector().foreground_rect_if_foreign(
             get_foreground_hwnd()
         )
 
@@ -93,7 +93,7 @@ class MainWindowWin32Ops(MainWindowCollaborator):
         expected_root_hwnd: Optional[int] = None,
     ) -> int:
         """Return a foreign HWND that covers a point, if any."""
-        return self._owner._get_cover_detector().find_covering_foreign_window_at_point(
+        return self._controllers._get_cover_detector().find_covering_foreign_window_at_point(
             x,
             y,
             expected_root_hwnd=expected_root_hwnd,
@@ -101,8 +101,8 @@ class MainWindowWin32Ops(MainWindowCollaborator):
 
     def _get_today_display_cover_state(self) -> Tuple[bool, str]:
         """Return cover state and reason for today_time_display."""
-        return self._owner._get_cover_detector().get_today_display_cover_state()
+        return self._controllers._get_cover_detector().get_today_display_cover_state()
 
     def _is_today_display_covered_by_foreground_window(self) -> bool:
         """Return whether today_time_display is covered by a foreign window."""
-        return self._owner._get_cover_detector().is_today_display_covered()
+        return self._controllers._get_cover_detector().is_today_display_covered()

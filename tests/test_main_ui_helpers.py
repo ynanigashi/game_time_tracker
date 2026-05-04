@@ -96,7 +96,7 @@ class TestMainWindowDirectMethods(unittest.TestCase):
             include_latest_window_titles=True,
             display_mode='mid',
         )
-        window._load_today_game_minutes = MagicMock(return_value={})
+        window._scan_ops._load_today_game_minutes = MagicMock(return_value={})
         return window
 
     def test_update_game_states_returns_active_when_foreground(self):
@@ -104,13 +104,13 @@ class TestMainWindowDirectMethods(unittest.TestCase):
         window = self._create_mock_main_window()
         game = models.GameEntry(game_title="TestGame",
                                 window_title="TestGame", is_playing=False)
-        window.games = [game]
+        window._state_access.games = [game]
 
         result = window.state_tracker.scan(
-            games=window.games,
+            games=window._state_access.games,
             window_titles=["TestGame Window"],
             foreground_title="TestGame Window",
-            load_today_game_minutes_callback=window._load_today_game_minutes
+            load_today_game_minutes_callback=window._scan_ops._load_today_game_minutes
         )
 
         self.assertEqual(len(result.active_games), 1)
@@ -123,13 +123,13 @@ class TestMainWindowDirectMethods(unittest.TestCase):
         game = models.GameEntry(game_title="TestGame",
                                 window_title="TestGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=10)
-        window.games = [game]
+        window._state_access.games = [game]
 
         result = window.state_tracker.scan(
-            games=window.games,
+            games=window._state_access.games,
             window_titles=["TestGame Window", "Other Window"],
             foreground_title="Other Window",
-            load_today_game_minutes_callback=window._load_today_game_minutes
+            load_today_game_minutes_callback=window._scan_ops._load_today_game_minutes
         )
 
         self.assertEqual(len(result.active_games), 0)
@@ -142,13 +142,13 @@ class TestMainWindowDirectMethods(unittest.TestCase):
         game = models.GameEntry(game_title="TestGame",
                                 window_title="TestGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=10)
-        window.games = [game]
+        window._state_access.games = [game]
 
         result = window.state_tracker.scan(
-            games=window.games,
+            games=window._state_access.games,
             window_titles=[],  # ウィンドウ消失
             foreground_title=None,
-            load_today_game_minutes_callback=window._load_today_game_minutes
+            load_today_game_minutes_callback=window._scan_ops._load_today_game_minutes
         )
 
         self.assertEqual(len(result.active_games), 0)
@@ -165,13 +165,13 @@ class TestMainWindowDirectMethods(unittest.TestCase):
                                 window_title="TestGame", is_playing=True)
         game.start_time = fixed_now - timedelta(minutes=15)
         game.inactive_since = fixed_now - timedelta(minutes=6)
-        window.games = [game]
+        window._state_access.games = [game]
 
         result = window.state_tracker.scan(
-            games=window.games,
+            games=window._state_access.games,
             window_titles=["TestGame Window", "Other Window"],
             foreground_title="Other Window",
-            load_today_game_minutes_callback=window._load_today_game_minutes
+            load_today_game_minutes_callback=window._scan_ops._load_today_game_minutes
         )
 
         self.assertEqual(len(result.active_games), 0)
@@ -186,20 +186,20 @@ class TestMainWindowDirectMethods(unittest.TestCase):
         window.setWindowTitle = MagicMock()
         game = models.GameEntry(game_title="TestGame",
                                 window_title="TestGame", is_playing=False)
-        window.games = [game]
+        window._state_access.games = [game]
         window.scanner.get_titles.return_value = ["TestGame Window"]
         window.scanner.get_foreground_title.return_value = "TestGame Window"
 
-        window._scan_tick()
+        window._scan_ops._scan_tick()
 
-        self.assertEqual(window.latest_window_titles, ["TestGame Window"])
-        self.assertEqual(len(window.active_games_cache), 1)
+        self.assertEqual(window._state_access.latest_window_titles, ["TestGame Window"])
+        self.assertEqual(len(window._state_access.active_games_cache), 1)
 
     def test_scan_tick_clears_table_on_day_change_direct(self):
         """_scan_tickは日付変更時にtoday_games_tableをクリア（実メソッド呼び出し）."""
         window = self._create_mock_main_window()
         window.setWindowTitle = MagicMock()
-        window.games = [models.GameEntry(
+        window._state_access.games = [models.GameEntry(
             game_title="TestGame", window_title="TestGame")]
         window.scanner.get_titles.return_value = []
         window.scanner.get_foreground_title.return_value = None
@@ -207,16 +207,16 @@ class TestMainWindowDirectMethods(unittest.TestCase):
         # 日付変更を模擬
         window.daily_stats.check_day_change = MagicMock(return_value=True)
 
-        window._scan_tick()
+        window._scan_ops._scan_tick()
 
         window.w.today_games_table.setRowCount.assert_called_with(0)
 
     def test_scan_tick_returns_early_when_no_games(self):
         """_scan_tickはゲームがない場合早期リターン."""
         window = self._create_mock_main_window()
-        window.games = []
+        window._state_access.games = []
 
-        window._scan_tick()
+        window._scan_ops._scan_tick()
 
         # get_titlesが呼ばれていない
         window.scanner.get_titles.assert_not_called()
@@ -224,17 +224,17 @@ class TestMainWindowDirectMethods(unittest.TestCase):
     def test_ui_tick_calls_update_methods(self):
         """_ui_tickはUI更新メソッドを呼び出す."""
         window = self._create_mock_main_window()
-        window._update_session_times = MagicMock()
-        window._update_today_totals = MagicMock(return_value=0.0)
-        window._update_today_games_list = MagicMock()
-        window._update_overtime_alert = MagicMock()
+        window._scan_ops._update_session_times = MagicMock()
+        window._scan_ops._update_today_totals = MagicMock(return_value=0.0)
+        window._scan_ops._update_today_games_list = MagicMock()
+        window._actions._update_overtime_alert = MagicMock()
 
         window._ui_tick()
 
-        window._update_session_times.assert_called_once()
-        window._update_today_totals.assert_called_once()
-        window._update_today_games_list.assert_called_once()
-        window._update_overtime_alert.assert_called_once()
+        window._scan_ops._update_session_times.assert_called_once()
+        window._scan_ops._update_today_totals.assert_called_once()
+        window._scan_ops._update_today_games_list.assert_called_once()
+        window._actions._update_overtime_alert.assert_called_once()
 
 class TestMainWindowUIHelpers(unittest.TestCase):
     """UI更新ヘルパーメソッドの直接テスト."""
@@ -252,7 +252,7 @@ class TestMainWindowUIHelpers(unittest.TestCase):
         game = models.GameEntry(game_title="TestGame",
                                 window_title="TestGame", is_playing=True)
 
-        window._update_active_list([game], [])
+        window._scan_ops._update_active_list([game], [])
 
         window.w.active_display.setText.assert_called_once_with("TestGame")
 
@@ -263,7 +263,7 @@ class TestMainWindowUIHelpers(unittest.TestCase):
                                 window_title="TestGame", is_playing=True)
         game.set_inactive()
 
-        window._update_active_list([], [game])
+        window._scan_ops._update_active_list([], [game])
 
         window.w.active_display.setText.assert_called_once_with("TestGame - 停止中")
 
@@ -271,7 +271,7 @@ class TestMainWindowUIHelpers(unittest.TestCase):
         """_update_active_listは空の場合「---」を表示."""
         window = self._create_mock_main_window()
 
-        window._update_active_list([], [])
+        window._scan_ops._update_active_list([], [])
 
         window.w.active_display.setText.assert_called_once_with("---")
 
@@ -284,7 +284,7 @@ class TestMainWindowUIHelpers(unittest.TestCase):
             game_title="Game2", window_title="Game2", is_playing=True)
         game2.set_inactive()
 
-        window._update_active_list([game1], [game2])
+        window._scan_ops._update_active_list([game1], [game2])
 
         window.w.active_display.setText.assert_called_once_with("Game1 / Game2 - 停止中")
 
@@ -297,9 +297,9 @@ class TestMainWindowUIHelpers(unittest.TestCase):
         game2 = models.GameEntry(
             game_title="Game2", window_title="Game2", is_playing=True)
         game2.start_time = datetime.now() - timedelta(minutes=5)
-        window.inactive_games_cache = []
+        window._state_access.inactive_games_cache = []
 
-        window._update_session_times([game1, game2], datetime.now())
+        window._scan_ops._update_session_times([game1, game2], datetime.now())
 
         # 10分が表示される（HH:MM:SS.F形式 = 00:10:xx.x）
         call_arg = window.w.session_time_display.setText.call_args[0][0]
@@ -308,9 +308,9 @@ class TestMainWindowUIHelpers(unittest.TestCase):
     def test_update_session_times_shows_dash_when_empty(self):
         """_update_session_timesは空の場合「---」を表示."""
         window = self._create_mock_main_window()
-        window.inactive_games_cache = []
+        window._state_access.inactive_games_cache = []
 
-        window._update_session_times([], datetime.now())
+        window._scan_ops._update_session_times([], datetime.now())
 
         window.w.session_time_display.setText.assert_called_once_with("---")
 
@@ -318,9 +318,9 @@ class TestMainWindowUIHelpers(unittest.TestCase):
         """_update_today_totalsはトータル時間を更新."""
         window = self._create_mock_main_window()
         window.daily_stats.today_completed_seconds = 3600.0  # 1時間
-        window.inactive_games_cache = []
+        window._state_access.inactive_games_cache = []
 
-        window._update_today_totals([], datetime.now())
+        window._scan_ops._update_today_totals([], datetime.now())
 
         call_arg = window.w.today_time_display.setText.call_args[0][0]
         self.assertTrue(call_arg.startswith("01:00:"))
@@ -333,9 +333,9 @@ class TestMainWindowUIHelpers(unittest.TestCase):
                                 window_title="TestGame", is_playing=True)
         now = stable_today_now()
         game.start_time = now - timedelta(minutes=10)
-        window.inactive_games_cache = []
+        window._state_access.inactive_games_cache = []
 
-        window._update_today_totals([game], now)
+        window._scan_ops._update_today_totals([game], now)
 
         # 10分以上表示される（HH:MM:SS.F形式）
         call_arg = window.w.today_time_display.setText.call_args[0][0]
@@ -345,7 +345,7 @@ class TestMainWindowUIHelpers(unittest.TestCase):
         """_update_window_listはリストをクリアしてウィンドウを追加."""
         window = self._create_mock_main_window()
 
-        window._update_window_list(["Window1", "Window2"])
+        window._scan_ops._update_window_list(["Window1", "Window2"])
 
         window.w.window_list.clear.assert_called_once()
         self.assertEqual(window.w.window_list.addItem.call_count, 2)
@@ -353,7 +353,7 @@ class TestMainWindowUIHelpers(unittest.TestCase):
     def test_on_window_title_item_clicked_copies_to_clipboard(self):
         """ウィンドウタイトル行クリックでクリップボードへコピーする."""
         window = self._create_mock_main_window()
-        window._set_status = MagicMock()
+        window._actions._set_status = MagicMock()
         item = MagicMock()
         item.text.return_value = "Game Window Title"
         clipboard = MagicMock()
@@ -364,33 +364,33 @@ class TestMainWindowUIHelpers(unittest.TestCase):
             return_value=clipboard,
             create=True,
         ):
-            window._on_window_title_item_clicked(item)
+            window._tray_title_ops._on_window_title_item_clicked(item)
 
         clipboard.setText.assert_called_once_with("Game Window Title")
-        window._set_status.assert_called_once_with("ウィンドウタイトルをコピーしました")
+        window._actions._set_status.assert_called_once_with("ウィンドウタイトルをコピーしました")
 
     def test_initialize_window_title_copy_connects_item_clicked(self):
         """_initialize_window_title_copyはitemClickedシグナルを接続する."""
         window = self._create_mock_main_window()
-        window._window_title_copy_connected = False
-        window._window_title_context_menu_connected = False
+        window._state_access._window_title_copy_connected = False
+        window._state_access._window_title_context_menu_connected = False
         window.w.window_list.itemClicked = MagicMock()
         window.w.window_list.customContextMenuRequested = MagicMock()
         window.w.window_list.setContextMenuPolicy = MagicMock()
         window.w.window_list.setToolTip = MagicMock()
 
-        window._initialize_window_title_copy()
+        window._tray_title_ops._initialize_window_title_copy()
 
         window.w.window_list.itemClicked.connect.assert_called_once_with(
-            window._on_window_title_item_clicked
+            window._tray_title_ops._on_window_title_item_clicked
         )
         window.w.window_list.customContextMenuRequested.connect.assert_called_once_with(
-            window._show_window_title_context_menu
+            window._tray_title_ops._show_window_title_context_menu
         )
         window.w.window_list.setContextMenuPolicy.assert_called_once()
         window.w.window_list.setToolTip.assert_called_once()
-        self.assertTrue(window._window_title_copy_connected)
-        self.assertTrue(window._window_title_context_menu_connected)
+        self.assertTrue(window._state_access._window_title_copy_connected)
+        self.assertTrue(window._state_access._window_title_context_menu_connected)
 
     def test_window_title_context_menu_opens_game_catalog_with_title(self):
         """ウィンドウタイトル右クリックメニューからゲーム管理を開く."""
@@ -399,17 +399,17 @@ class TestMainWindowUIHelpers(unittest.TestCase):
         item.text.return_value = "Game Window Title"
         window.w.window_list.itemAt.return_value = item
         window.w.window_list.mapToGlobal.side_effect = lambda pos: pos
-        window._open_game_catalog_dialog = MagicMock()
+        window._actions._open_game_catalog_dialog = MagicMock()
         action = object()
         menu = MagicMock()
         menu.addAction.return_value = action
         menu.exec.return_value = action
 
         with patch("src.app.main_window.controller_methods.QMenu", return_value=menu):
-            window._show_window_title_context_menu(object())
+            window._tray_title_ops._show_window_title_context_menu(object())
 
         menu.addAction.assert_called_once_with("ゲーム一覧に追加")
-        window._open_game_catalog_dialog.assert_called_once_with(
+        window._actions._open_game_catalog_dialog.assert_called_once_with(
             initial_window_title="Game Window Title"
         )
 
@@ -419,7 +419,7 @@ class TestMainWindowUIHelpers(unittest.TestCase):
         dialog = MagicMock()
 
         with patch("src.app.main_window.controller_methods.GameCatalogDialog", return_value=dialog):
-            window._open_game_catalog_dialog()
+            window._actions._open_game_catalog_dialog()
 
         dialog.sync_on_open.assert_called_once()
         self.assertLess(
@@ -433,12 +433,12 @@ class TestMainWindowUIHelpers(unittest.TestCase):
     def test_update_today_games_list_clears_when_empty(self):
         """_update_today_games_listは空のとき最終コンテンツを更新."""
         window = self._create_mock_main_window()
-        window.active_games_cache = []
-        window.inactive_games_cache = []
+        window._state_access.active_games_cache = []
+        window._state_access.inactive_games_cache = []
         window.daily_stats.today_game_minutes_cache = {}
         window.daily_stats.last_today_games_content = "old_content"
 
-        window._update_today_games_list(datetime.now())
+        window._scan_ops._update_today_games_list(datetime.now())
 
         self.assertEqual(window.daily_stats.last_today_games_content, "")
         window.w.today_games_table.setRowCount.assert_called_with(0)
