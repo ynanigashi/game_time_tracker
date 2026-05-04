@@ -34,7 +34,6 @@ from src.app.main_constants import (
     POLL_INTERVAL_SECONDS,
     UI_REFRESH_INTERVAL_SECONDS,
 )
-from src.app.main_window.legacy_aliases import method_aliases, state_aliases
 from src.app.main_window.action_methods import MainWindowActions
 from src.app.main_window.controller_methods import MainWindowControllerRegistry
 from src.app.main_window.scan_methods import MainWindowScanOps
@@ -93,9 +92,6 @@ TDependency = TypeVar("TDependency")
 
 class MainWindow(QWidget):
     """Main application window."""
-
-    locals().update(state_aliases())
-    locals().update(method_aliases())
 
     def __init__(self) -> None:
         super().__init__()
@@ -180,32 +176,32 @@ class MainWindow(QWidget):
     def _start_background_timers(self) -> None:
         """Start background refresh timers."""
         # Keep timer objects alive to prevent garbage collection.
-        self._state_access._scan_timer = self._start_timer(
+        self._state_access._scan_timer = self._actions._start_timer(
             POLL_INTERVAL_SECONDS,
-            self._scan_tick,
+            self._scan_ops._scan_tick,
         )
-        self._state_access._ui_timer = self._start_timer(
+        self._state_access._ui_timer = self._actions._start_timer(
             UI_REFRESH_INTERVAL_SECONDS,
             self._ui_tick,
         )
 
     def _run_initial_refresh(self) -> None:
         """Run the first scan and UI refresh."""
-        self._scan_tick()
+        self._scan_ops._scan_tick()
         self._ui_tick()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Hide to tray or save state before application exit."""
-        if not bool(self._is_quitting):
-            self._hide_main_window_to_tray()
+        if not bool(self._state_access._is_quitting):
+            self._tray_title_ops._hide_main_window_to_tray()
             ignore = getattr(event, "ignore", None)
             if callable(ignore):
                 ignore()
             return
 
-        self._record_playing_games_before_close()
-        self._save_window_state()
-        self._close_overlay()
+        self._actions._record_playing_games_before_close()
+        self._actions._save_window_state()
+        self._actions._close_overlay()
         super().closeEvent(event)
 
     def _ensure_daily_stats(self) -> DailyStatsTracker:
@@ -264,28 +260,28 @@ class MainWindow(QWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """Handle mouse clicks for context menu and display mode cycling."""
-        if self._should_show_context_menu(event):
-            self._show_context_menu(event)
+        if self._actions._should_show_context_menu(event):
+            self._actions._show_context_menu(event)
             super().mousePressEvent(event)
             return
-        if self._should_cycle_display_mode(event):
-            self._cycle_display_mode()
+        if self._actions._should_cycle_display_mode(event):
+            self._actions._cycle_display_mode()
         super().mousePressEvent(event)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         """Record the current mode size on resize."""
-        self._record_current_mode_size()
+        self._actions._record_current_mode_size()
         super().resizeEvent(event)
 
     def _ui_tick(self) -> None:
         """Refresh displayed play time and overlay state."""
         now = datetime.now()
         active_games = self._state_access.active_games_cache
-        self._update_session_times(active_games, now)
-        total_seconds = self._update_today_totals(active_games, now)
-        self._update_today_games_list(now)
-        self._update_overtime_alert(total_seconds)
-        self._sync_overlay()
+        self._scan_ops._update_session_times(active_games, now)
+        total_seconds = self._scan_ops._update_today_totals(active_games, now)
+        self._scan_ops._update_today_games_list(now)
+        self._actions._update_overtime_alert(total_seconds)
+        self._actions._sync_overlay()
 
 
 def main() -> None:

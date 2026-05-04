@@ -24,7 +24,7 @@ class TestUpdateTodayGamesList(unittest.TestCase):
         }
         window.daily_stats.last_today_games_content = ""
 
-        window._update_today_games_list(datetime.now())
+        window._scan_ops._update_today_games_list(datetime.now())
 
         # テーブルが更新される
         window.w.today_games_table.setRowCount.assert_called_with(2)
@@ -41,7 +41,7 @@ class TestUpdateTodayGamesList(unittest.TestCase):
         }
         window.daily_stats.last_today_games_content = ""
 
-        window._update_today_games_list(datetime.now())
+        window._scan_ops._update_today_games_list(datetime.now())
 
         # setItemの呼び出し順で確認
         calls = window.w.today_games_table.setItem.call_args_list
@@ -64,7 +64,7 @@ class TestUpdateTodayGamesList(unittest.TestCase):
         # 既に同じ内容がセットされている
         window.daily_stats.last_today_games_content = "GameA: 60分"
 
-        window._update_today_games_list(datetime.now())
+        window._scan_ops._update_today_games_list(datetime.now())
 
         # 更新されない
         window.w.today_games_table.setRowCount.assert_not_called()
@@ -77,7 +77,7 @@ class TestUpdateTodayGamesList(unittest.TestCase):
         }
         window.daily_stats.last_today_games_content = "GameA: 60分"
 
-        window._update_today_games_list(datetime.now())
+        window._scan_ops._update_today_games_list(datetime.now())
 
         # 更新される
         window.w.today_games_table.setRowCount.assert_called_with(1)
@@ -94,9 +94,9 @@ class TestUpdateTodayGamesList(unittest.TestCase):
                                 window_title="PlayingGame", is_playing=True)
         now = stable_today_now()
         game.start_time = now - timedelta(minutes=10)
-        window.active_games_cache = [game]
+        window._state_access.active_games_cache = [game]
 
-        window._update_today_games_list(now)
+        window._scan_ops._update_today_games_list(now)
 
         # テーブルが更新される（1ゲーム）
         window.w.today_games_table.setRowCount.assert_called_with(1)
@@ -110,9 +110,9 @@ class TestUpdateTodayGamesList(unittest.TestCase):
         game = models.GameEntry(game_title="ShortPlayingGame",
                                 window_title="ShortPlayingGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=3)
-        window.active_games_cache = [game]
+        window._state_access.active_games_cache = [game]
 
-        window._update_today_games_list(datetime.now())
+        window._scan_ops._update_today_games_list(datetime.now())
 
         # 空なのでクリアされる
         self.assertEqual(window.daily_stats.last_today_games_content, "")
@@ -130,9 +130,9 @@ class TestUpdateTodayGamesList(unittest.TestCase):
             game_title="GameA", window_title="GameA", is_playing=True)
         now = stable_today_now()
         game.start_time = now - timedelta(minutes=10)
-        window.active_games_cache = [game]
+        window._state_access.active_games_cache = [game]
 
-        window._update_today_games_list(now)
+        window._scan_ops._update_today_games_list(now)
 
         # 30 + 10 = 40分として表示
         self.assertIn("GameA: 40分", window.daily_stats.last_today_games_content)
@@ -156,7 +156,7 @@ class TestLoadTodayDataExceptionHandling(unittest.TestCase):
         window.recorder = services.SessionRecorder(
             log_handler=mock_handler, min_play_minutes=5)
 
-        result = window._load_today_game_minutes()
+        result = window._scan_ops._load_today_game_minutes()
 
         self.assertEqual(result, {})
 
@@ -169,7 +169,7 @@ class TestLoadTodayDataExceptionHandling(unittest.TestCase):
         window.recorder = services.SessionRecorder(
             log_handler=mock_handler, min_play_minutes=5)
 
-        result = window._load_today_completed_seconds()
+        result = window._scan_ops._load_today_completed_seconds()
 
         self.assertEqual(result, 0.0)
 
@@ -183,7 +183,7 @@ class TestLoadTodayDataExceptionHandling(unittest.TestCase):
         window.recorder = services.SessionRecorder(
             log_handler=mock_handler, min_play_minutes=5)
 
-        result = window._load_today_game_minutes()
+        result = window._scan_ops._load_today_game_minutes()
 
         # パース失敗レコードはスキップされる
         self.assertEqual(result, {})
@@ -197,7 +197,7 @@ class TestLoadTodayDataExceptionHandling(unittest.TestCase):
         window.recorder = services.SessionRecorder(
             log_handler=mock_handler, min_play_minutes=5)
 
-        result = window._load_today_completed_seconds()
+        result = window._scan_ops._load_today_completed_seconds()
 
         self.assertEqual(result, 0.0)
 
@@ -222,7 +222,7 @@ class TestLoadTodayDataExceptionHandling(unittest.TestCase):
         window.recorder = services.SessionRecorder(
             log_handler=handler, min_play_minutes=5)
 
-        result = window._load_today_game_minutes()
+        result = window._scan_ops._load_today_game_minutes()
 
         # 昨日のレコードは含まれない
         self.assertEqual(result, {})
@@ -242,7 +242,7 @@ class TestScanTickStatusSwitch(unittest.TestCase):
 
         window._status = ""
         attach_window_title_stubs(window)
-        window._load_today_game_minutes = MagicMock(return_value={})
+        window._scan_ops._load_today_game_minutes = MagicMock(return_value={})
         return window
 
     def _mock_set_status(self, window):
@@ -256,31 +256,31 @@ class TestScanTickStatusSwitch(unittest.TestCase):
     def test_status_playing_when_active_games(self):
         """アクティブゲームがある場合はプレイ時間計測中."""
         window = self._create_mock_main_window()
-        window._set_status = self._mock_set_status(window)
+        window._actions._set_status = self._mock_set_status(window)
 
         game = models.GameEntry(game_title="TestGame",
                                 window_title="TestGame", is_playing=False)
-        window.games = [game]
+        window._state_access.games = [game]
         window.scanner.get_titles.return_value = ["TestGame Window"]
         window.scanner.get_foreground_title.return_value = "TestGame Window"
 
-        window._scan_tick()
+        window._scan_ops._scan_tick()
 
         self.assertEqual(window._status, 'プレイ時間計測中')
 
     def test_status_playing_when_inactive_games(self):
         """非アクティブゲーム（停止中）がある場合もプレイ時間計測中."""
         window = self._create_mock_main_window()
-        window._set_status = self._mock_set_status(window)
+        window._actions._set_status = self._mock_set_status(window)
 
         game = models.GameEntry(game_title="TestGame",
                                 window_title="TestGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=10)
-        window.games = [game]
+        window._state_access.games = [game]
         window.scanner.get_titles.return_value = ["TestGame Window", "Other Window"]
         window.scanner.get_foreground_title.return_value = "Other Window"  # 非フォアグラウンド
 
-        window._scan_tick()
+        window._scan_ops._scan_tick()
 
         # inactive_gamesが存在するのでプレイ時間計測中
         self.assertEqual(window._status, 'プレイ時間計測中')
@@ -288,38 +288,38 @@ class TestScanTickStatusSwitch(unittest.TestCase):
     def test_status_no_game_when_no_active_or_inactive(self):
         """アクティブ/非アクティブゲームがない場合は「プレイ中のゲームなし」."""
         window = self._create_mock_main_window()
-        window._set_status = self._mock_set_status(window)
+        window._actions._set_status = self._mock_set_status(window)
 
         game = models.GameEntry(game_title="TestGame",
                                 window_title="TestGame", is_playing=False)
-        window.games = [game]
+        window._state_access.games = [game]
         window.scanner.get_titles.return_value = ["Other Window"]  # ゲームウィンドウなし
         window.scanner.get_foreground_title.return_value = "Other Window"
 
-        window._scan_tick()
+        window._scan_ops._scan_tick()
 
         self.assertEqual(window._status, main.Messages.NO_GAME_PLAYING)
 
     def test_status_switches_from_playing_to_no_game(self):
         """プレイ中から未プレイへの切替."""
         window = self._create_mock_main_window()
-        window._set_status = self._mock_set_status(window)
+        window._actions._set_status = self._mock_set_status(window)
 
         game = models.GameEntry(game_title="TestGame",
                                 window_title="TestGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=10)
-        window.games = [game]
+        window._state_access.games = [game]
 
         # 最初はゲームがフォアグラウンド
         window.scanner.get_titles.return_value = ["TestGame Window"]
         window.scanner.get_foreground_title.return_value = "TestGame Window"
-        window._scan_tick()
+        window._scan_ops._scan_tick()
         self.assertEqual(window._status, 'プレイ時間計測中')
 
         # 次にゲームウィンドウが消える
         window.scanner.get_titles.return_value = []
         window.scanner.get_foreground_title.return_value = None
-        window._scan_tick()
+        window._scan_ops._scan_tick()
         self.assertEqual(window._status, main.Messages.NO_GAME_PLAYING)
 
 class TestInactiveWindowDisappear(unittest.TestCase):
@@ -329,12 +329,13 @@ class TestInactiveWindowDisappear(unittest.TestCase):
         """モックされたMainWindowを作成."""
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
+        window._initialize_collaborators()
 
-        window.games = []
+        window._state_access.games = []
         window.browsers = ['Chrome']
-        window.active_games_cache = []
-        window.inactive_games_cache = []
-        window.latest_window_titles = []
+        window._state_access.active_games_cache = []
+        window._state_access.inactive_games_cache = []
+        window._state_access.latest_window_titles = []
         window.daily_stats = domain.DailyStatsTracker()
         window.recorder = services.SessionRecorder(
             log_handler=FakeLogHandler(), min_play_minutes=5)
@@ -358,7 +359,7 @@ class TestInactiveWindowDisappear(unittest.TestCase):
         window.setWindowTitle = MagicMock()
 
         # _load_today_game_minutesをモック
-        window._load_today_game_minutes = MagicMock(return_value={})
+        window._scan_ops._load_today_game_minutes = MagicMock(return_value={})
 
         return window
 
@@ -372,7 +373,7 @@ class TestInactiveWindowDisappear(unittest.TestCase):
                                 window_title="TestGame", is_playing=True)
         game.start_time = now - timedelta(minutes=15)
         game.inactive_since = now - timedelta(minutes=3)  # 3分間非アクティブ
-        window.games = [game]
+        window._state_access.games = [game]
 
         # ウィンドウが消失
         window.scanner.get_titles.return_value = []
@@ -384,7 +385,7 @@ class TestInactiveWindowDisappear(unittest.TestCase):
         ) as mock_model_datetime:
             mock_datetime.now.return_value = now
             mock_model_datetime.now.return_value = now
-            window._scan_tick()
+            window._scan_ops._scan_tick()
 
         # record()が呼ばれ、非アクティブ時間も含めた時間が記録される
         self.assertFalse(game.is_playing)
@@ -400,19 +401,19 @@ class TestInactiveWindowDisappear(unittest.TestCase):
         game = models.GameEntry(game_title="TestGame",
                                 window_title="TestGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=10)
-        window.games = [game]
+        window._state_access.games = [game]
 
         # 非アクティブ状態（3分経過）
         window.scanner.get_titles.return_value = ["TestGame Window", "Other Window"]
         window.scanner.get_foreground_title.return_value = "Other Window"
-        window._scan_tick()
+        window._scan_ops._scan_tick()
 
         self.assertTrue(game.is_inactive())
         self.assertIsNotNone(game.inactive_since)
 
         # 再度フォアグラウンドに
         window.scanner.get_foreground_title.return_value = "TestGame Window"
-        window._scan_tick()
+        window._scan_ops._scan_tick()
 
         # セッション継続、inactive_sinceがクリアされる
         self.assertTrue(game.is_playing)
@@ -428,11 +429,12 @@ class TestUpdateSessionTimesWithInactive(unittest.TestCase):
         """モックされたMainWindowを作成."""
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
+        window._initialize_collaborators()
 
-        window.games = []
+        window._state_access.games = []
         window.browsers = ['Chrome']
-        window.active_games_cache = []
-        window.inactive_games_cache = []
+        window._state_access.active_games_cache = []
+        window._state_access.inactive_games_cache = []
         window.daily_stats = domain.DailyStatsTracker()
         window.recorder = services.SessionRecorder(
             log_handler=FakeLogHandler(), min_play_minutes=5)
@@ -456,10 +458,10 @@ class TestUpdateSessionTimesWithInactive(unittest.TestCase):
             game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
         inactive_game.start_time = datetime.now() - timedelta(minutes=15)
         inactive_game.set_inactive()
-        window.inactive_games_cache = [inactive_game]
+        window._state_access.inactive_games_cache = [inactive_game]
 
         # 実メソッドを呼び出し
-        window._update_session_times([active_game], datetime.now())
+        window._scan_ops._update_session_times([active_game], datetime.now())
 
         # 15分が表示される（HH:MM:SS.F形式 = 00:15:xx.x）
         call_arg = window.w.session_time_display.setText.call_args[0][0]
@@ -473,9 +475,9 @@ class TestUpdateSessionTimesWithInactive(unittest.TestCase):
             game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
         inactive_game.start_time = datetime.now() - timedelta(minutes=20)
         inactive_game.set_inactive()
-        window.inactive_games_cache = [inactive_game]
+        window._state_access.inactive_games_cache = [inactive_game]
 
-        window._update_session_times([], datetime.now())
+        window._scan_ops._update_session_times([], datetime.now())
 
         call_arg = window.w.session_time_display.setText.call_args[0][0]
         self.assertTrue(call_arg.startswith("00:20:") or call_arg.startswith("00:19:"))
@@ -483,9 +485,9 @@ class TestUpdateSessionTimesWithInactive(unittest.TestCase):
     def test_empty_both_shows_dash(self):
         """active_gamesとinactive_games_cacheが両方空なら---."""
         window = self._create_mock_main_window()
-        window.inactive_games_cache = []
+        window._state_access.inactive_games_cache = []
 
-        window._update_session_times([], datetime.now())
+        window._scan_ops._update_session_times([], datetime.now())
 
         window.w.session_time_display.setText.assert_called_with('---')
 
@@ -496,11 +498,12 @@ class TestUpdateTodayTotalsIntegration(unittest.TestCase):
         """モックされたMainWindowを作成."""
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
+        window._initialize_collaborators()
 
-        window.games = []
+        window._state_access.games = []
         window.browsers = ['Chrome']
-        window.active_games_cache = []
-        window.inactive_games_cache = []
+        window._state_access.active_games_cache = []
+        window._state_access.inactive_games_cache = []
         window.daily_stats = domain.DailyStatsTracker()
         window.recorder = services.SessionRecorder(
             log_handler=FakeLogHandler(), min_play_minutes=5)
@@ -521,9 +524,9 @@ class TestUpdateTodayTotalsIntegration(unittest.TestCase):
         now = stable_today_now()
         inactive_game.start_time = now - timedelta(minutes=10)
         inactive_game.set_inactive()
-        window.inactive_games_cache = [inactive_game]
+        window._state_access.inactive_games_cache = [inactive_game]
 
-        window._update_today_totals([], now)
+        window._scan_ops._update_today_totals([], now)
 
         # 10分 = 00:10:xx
         call_arg = window.w.today_time_display.setText.call_args[0][0]
@@ -546,7 +549,7 @@ class TestUpdateTodayTotalsIntegration(unittest.TestCase):
         # 今日の経過時間を計算（現在時刻から0:00を引く）
         expected_seconds = (now - today_start).total_seconds()
 
-        window._update_today_totals([game], now)
+        window._scan_ops._update_today_totals([game], now)
 
         # 今日0:00からの時間が表示される（5分以上なら）
         if expected_seconds >= main.MIN_PLAY_MINUTES * main.SECONDS_PER_MINUTE:
@@ -563,7 +566,7 @@ class TestUpdateTodayTotalsIntegration(unittest.TestCase):
                                 window_title="ShortGame", is_playing=True)
         game.start_time = datetime.now() - timedelta(minutes=3)
 
-        window._update_today_totals([game], datetime.now())
+        window._scan_ops._update_today_totals([game], datetime.now())
 
         # 完了分の1時間のみ = 01:00:xx
         call_arg = window.w.today_time_display.setText.call_args[0][0]
@@ -585,9 +588,9 @@ class TestUpdateTodayTotalsIntegration(unittest.TestCase):
             game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
         inactive_game.start_time = now - timedelta(minutes=20)
         inactive_game.set_inactive()
-        window.inactive_games_cache = [inactive_game]
+        window._state_access.inactive_games_cache = [inactive_game]
 
-        window._update_today_totals([active_game], now)
+        window._scan_ops._update_today_totals([active_game], now)
 
         # 30 + 10 + 20 = 60分 = 01:00:xx
         call_arg = window.w.today_time_display.setText.call_args[0][0]
@@ -614,10 +617,10 @@ class TestUpdateTodayGamesListWithInactive(unittest.TestCase):
             game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
         inactive_game.start_time = now - timedelta(minutes=15)
         inactive_game.set_inactive()
-        window.inactive_games_cache = [inactive_game]
-        window.active_games_cache = []
+        window._state_access.inactive_games_cache = [inactive_game]
+        window._state_access.active_games_cache = []
 
-        window._update_today_games_list(now)
+        window._scan_ops._update_today_games_list(now)
 
         # テーブル更新される
         window.w.today_games_table.setRowCount.assert_called_with(1)
@@ -634,16 +637,16 @@ class TestUpdateTodayGamesListWithInactive(unittest.TestCase):
         active_game = models.GameEntry(
             game_title="ActiveGame", window_title="ActiveGame", is_playing=True)
         active_game.start_time = now - timedelta(minutes=10)
-        window.active_games_cache = [active_game]
+        window._state_access.active_games_cache = [active_game]
 
         # 非アクティブゲーム: 20分
         inactive_game = models.GameEntry(
             game_title="InactiveGame", window_title="InactiveGame", is_playing=True)
         inactive_game.start_time = now - timedelta(minutes=20)
         inactive_game.set_inactive()
-        window.inactive_games_cache = [inactive_game]
+        window._state_access.inactive_games_cache = [inactive_game]
 
-        window._update_today_games_list(now)
+        window._scan_ops._update_today_games_list(now)
 
         # 2ゲーム表示
         window.w.today_games_table.setRowCount.assert_called_with(2)
@@ -665,10 +668,10 @@ class TestUpdateTodayGamesListWithInactive(unittest.TestCase):
             game_title="GameA", window_title="GameA", is_playing=True)
         inactive_game.start_time = now - timedelta(minutes=15)
         inactive_game.set_inactive()
-        window.inactive_games_cache = [inactive_game]
-        window.active_games_cache = []
+        window._state_access.inactive_games_cache = [inactive_game]
+        window._state_access.active_games_cache = []
 
-        window._update_today_games_list(now)
+        window._scan_ops._update_today_games_list(now)
 
         # 30 + 15 = 45分
         self.assertIn("GameA: 45分", window.daily_stats.last_today_games_content)
@@ -709,7 +712,7 @@ class TestLoadTodayGameMinutesParseNone(unittest.TestCase):
         window.recorder = services.SessionRecorder(
             log_handler=handler, min_play_minutes=5)
 
-        result = window._load_today_game_minutes()
+        result = window._scan_ops._load_today_game_minutes()
 
         # 正常レコードのみ含まれる
         self.assertIn('GoodRecord', result)
@@ -741,7 +744,7 @@ class TestLoadTodayGameMinutesParseNone(unittest.TestCase):
         window.recorder = services.SessionRecorder(
             log_handler=handler, min_play_minutes=5)
 
-        result = window._load_today_game_minutes()
+        result = window._scan_ops._load_today_game_minutes()
 
         self.assertIn('GoodRecord2', result)
         self.assertNotIn('BadRecord2', result)
@@ -773,7 +776,7 @@ class TestLoadTodayGameMinutesParseNone(unittest.TestCase):
         window.recorder = services.SessionRecorder(
             log_handler=handler, min_play_minutes=5)
 
-        result = window._load_today_game_minutes()
+        result = window._scan_ops._load_today_game_minutes()
 
         self.assertIn('GoodFormat', result)
         self.assertNotIn('BadFormat', result)
@@ -798,7 +801,7 @@ class TestLoadTodayGameMinutesParseNone(unittest.TestCase):
         window.recorder = services.SessionRecorder(
             log_handler=handler, min_play_minutes=5)
 
-        result = window._load_today_game_minutes()
+        result = window._scan_ops._load_today_game_minutes()
 
         self.assertIn('ValidRecord', result)
 
@@ -808,7 +811,7 @@ class TestUpdateSessionTimesStartTimeNone(unittest.TestCase):
     def _create_mock_main_window(self):
         """モックされたMainWindowを作成."""
         window = create_mock_main_window(include_state_tracker=False)
-        window.inactive_games_cache = []
+        window._state_access.inactive_games_cache = []
         window.w.session_time_display = MagicMock()
         return window
 
@@ -821,7 +824,7 @@ class TestUpdateSessionTimesStartTimeNone(unittest.TestCase):
             game_title="NoneGame", window_title="NoneGame", is_playing=True)
         game_none.start_time = None  # 明示的にNone
 
-        window._update_session_times([game_none], datetime.now())
+        window._scan_ops._update_session_times([game_none], datetime.now())
 
         # 0秒 = 00:00:00.0
         call_arg = window.w.session_time_display.setText.call_args[0][0]
@@ -841,7 +844,7 @@ class TestUpdateSessionTimesStartTimeNone(unittest.TestCase):
             game_title="ValidGame", window_title="ValidGame", is_playing=True)
         game_valid.start_time = datetime.now() - timedelta(minutes=10)
 
-        window._update_session_times([game_none, game_valid], datetime.now())
+        window._scan_ops._update_session_times([game_none, game_valid], datetime.now())
 
         # 10分が表示される（Noneは0なので最大値は10分）
         call_arg = window.w.session_time_display.setText.call_args[0][0]
@@ -858,7 +861,7 @@ class TestUpdateSessionTimesStartTimeNone(unittest.TestCase):
             game_title="Game2", window_title="Game2", is_playing=True)
         game2.start_time = None
 
-        window._update_session_times([game1, game2], datetime.now())
+        window._scan_ops._update_session_times([game1, game2], datetime.now())
 
         # 0秒
         call_arg = window.w.session_time_display.setText.call_args[0][0]
