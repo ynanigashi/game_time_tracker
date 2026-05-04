@@ -15,16 +15,12 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
     QDialog,
-    QFormLayout,
-    QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
     QTableWidget,
-    QTabWidget,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -32,9 +28,6 @@ from src.core.reporting import (
     ReportSummary,
     TrendPoint,
     TrendSeries,
-    build_game_report,
-    build_play_time_trend,
-    build_play_time_trend_by_title,
 )
 from src.core.time_utils import GSS_DATETIME_FORMAT
 from src.core.time_utils import format_hms
@@ -43,15 +36,14 @@ from src.ui.report_charts import (
     CHARTS_IMPORT_ERROR,
     GAME_COLORS,
     ReportChartBuilder,
-    color_for_title,
-    color_name_for_title,
     create_chart_views,
     create_color_swatch,
-    top_rows_with_other,
 )
+from src.ui.report_data import ReportDataController
 from src.ui.report_date_ranges import RECENT_PERIOD_DAYS, date_range_for_period
 from src.ui.report_graph_unit import ReportGraphUnitController
 from src.ui.report_graph_unit_state import ReportGraphUnitState
+from src.ui.report_layout import build_report_dialog_layout
 from src.ui.report_log_operations import ReportLogOperationController
 from src.ui.report_log_operation_state import ReportLogOperationState
 from src.ui.report_log_table import ReportLogTableController, bool_text
@@ -256,7 +248,7 @@ class ReportDialog(QDialog):
             )
             self.chart_fallback_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self._build_layout()
+        build_report_dialog_layout(self)
         self.refresh()
 
     def _ensure_report_tab_state(self) -> ReportTabState:
@@ -450,115 +442,12 @@ class ReportDialog(QDialog):
     def _create_unit_toggle(self) -> QWidget:
         return self._get_graph_unit_controller().create_unit_toggle()
 
-    def _build_layout(self) -> None:
-        tabs = QTabWidget(self)
-        tabs.addTab(self._build_summary_tab(), "ゲーム別")
-        tabs.addTab(self._build_trend_tab(), "推移")
-        tabs.addTab(self._build_log_tab(), "ログ")
-        tabs.currentChanged.connect(self._on_tab_changed)
-        self.tabs = tabs
-
-        layout = QVBoxLayout()
-        layout.addWidget(tabs)
-        layout.addWidget(self.debug_label)
-        self.setLayout(layout)
-
-    def _build_summary_tab(self) -> QWidget:
-        controls = QHBoxLayout()
-        controls.addWidget(QLabel("期間", self))
-        controls.addWidget(self.period_combo)
-        controls.addSpacing(12)
-        controls.addWidget(QLabel("グラフ", self))
-        controls.addWidget(self.chart_type_combo)
-        controls.addSpacing(12)
-        controls.addWidget(QLabel("単位", self))
-        controls.addWidget(self.summary_unit_control)
-        controls.addStretch()
-
-        layout = QVBoxLayout()
-        layout.addLayout(controls)
-        layout.addWidget(self.summary_label)
-        if self.chart_view is not None:
-            layout.addWidget(self.chart_view, 2)
-        elif self.chart_fallback_label is not None:
-            layout.addWidget(self.chart_fallback_label)
-        layout.addWidget(self.table, 3)
-
-        tab = QWidget(self)
-        tab.setLayout(layout)
-        return tab
-
-    def _build_trend_tab(self) -> QWidget:
-        controls = QHBoxLayout()
-        controls.addWidget(QLabel("期間", self))
-        controls.addWidget(self.trend_period_combo)
-        controls.addSpacing(12)
-        controls.addWidget(QLabel("開始", self))
-        controls.addWidget(self.trend_start_date_edit)
-        controls.addWidget(QLabel("終了", self))
-        controls.addWidget(self.trend_end_date_edit)
-        controls.addWidget(self.trend_apply_date_button)
-        controls.addSpacing(12)
-        controls.addWidget(QLabel("表示", self))
-        controls.addWidget(self.trend_mode_combo)
-        controls.addSpacing(12)
-        controls.addWidget(QLabel("集計単位", self))
-        controls.addWidget(self.trend_granularity_combo)
-        controls.addSpacing(12)
-        controls.addWidget(QLabel("単位", self))
-        controls.addWidget(self.trend_unit_control)
-        controls.addSpacing(12)
-        controls.addWidget(self.clear_trend_selection_button)
-        controls.addStretch()
-
-        layout = QVBoxLayout()
-        layout.addLayout(controls)
-        layout.addWidget(self.trend_summary_label)
-
-        title_filter_layout = QVBoxLayout()
-        title_filter_layout.addWidget(self.title_filter_label)
-        title_filter_actions = QHBoxLayout()
-        title_filter_actions.addWidget(self.select_all_titles_button)
-        title_filter_actions.addWidget(self.clear_all_titles_button)
-        title_filter_layout.addLayout(title_filter_actions)
-        title_filter_layout.addWidget(self.title_filter_table)
-
-        trend_layout = QVBoxLayout()
-        if self.trend_chart_view is not None:
-            trend_layout.addWidget(self.trend_chart_view, 3)
-        trend_layout.addWidget(self.trend_table, 2)
-
-        content_layout = QHBoxLayout()
-        content_layout.addLayout(title_filter_layout, 1)
-        content_layout.addLayout(trend_layout, 4)
-        layout.addLayout(content_layout)
-
-        tab = QWidget(self)
-        tab.setLayout(layout)
-        return tab
-
-    def _build_log_tab(self) -> QWidget:
-        controls = QHBoxLayout()
-        controls.addWidget(self.log_sync_button)
-        controls.addWidget(self.log_edit_button)
-        controls.addWidget(self.log_delete_button)
-        controls.addStretch()
-
-        form = QFormLayout()
-        form.addRow("開始時刻", self.log_start_time_edit)
-        form.addRow("終了時刻", self.log_end_time_edit)
-        form.addRow("タイトル", self.log_title_edit)
-        form.addRow("フレンドとプレイ", self.log_friends_check)
-
-        layout = QVBoxLayout()
-        layout.addLayout(controls)
-        layout.addWidget(self.log_summary_label)
-        layout.addWidget(self.log_table)
-        layout.addLayout(form)
-
-        tab = QWidget(self)
-        tab.setLayout(layout)
-        return tab
+    def _get_data_controller(self) -> ReportDataController:
+        controller = getattr(self, "_data_controller", None)
+        if controller is None:
+            controller = ReportDataController(self)
+            self._data_controller = controller
+        return controller
 
     @staticmethod
     def date_range_for_period(
@@ -569,35 +458,21 @@ class ReportDialog(QDialog):
         return date_range_for_period(period_key, today)
 
     def _selected_date_range(self) -> Tuple[Optional[date], Optional[date]]:
-        index = self.period_combo.currentIndex()
-        _, period_key = self._PERIODS[index]
-        return self.date_range_for_period(period_key, date.today())
+        return self._get_data_controller().selected_date_range()
 
     def _selected_trend_date_range(self) -> Tuple[Optional[date], Optional[date]]:
-        period_key = str(self.trend_period_combo.currentData() or "all")
-        if period_key == "custom":
-            return self._trend_date_edit_value(
-                self.trend_start_date_edit
-            ), self._trend_date_edit_value(self.trend_end_date_edit)
-        return self.date_range_for_period(period_key, date.today())
+        return self._get_data_controller().selected_trend_date_range()
 
     @staticmethod
     def _date_to_qdate(value: date) -> QDate:
-        return QDate(value.year, value.month, value.day)
+        return ReportDataController.date_to_qdate(value)
 
     @staticmethod
     def _qdate_to_date(value: object) -> date:
-        if isinstance(value, date):
-            return value
-        to_python = getattr(value, "toPython", None)
-        if callable(to_python):
-            converted = to_python()
-            if isinstance(converted, date):
-                return converted
-        return date(int(value.year()), int(value.month()), int(value.day()))
+        return ReportDataController.qdate_to_date(value)
 
     def _trend_date_edit_value(self, date_edit: QDateEdit) -> date:
-        return self._qdate_to_date(date_edit.date())
+        return self._get_data_controller().trend_date_edit_value(date_edit)
 
     def _set_trend_date_edits(self, start_date: date, end_date: date) -> None:
         self.trend_start_date_edit.setDate(self._date_to_qdate(start_date))
@@ -624,35 +499,22 @@ class ReportDialog(QDialog):
         self._request_trend_refresh()
 
     def _load_summary(self) -> ReportSummary:
-        start_date, end_date = self._selected_date_range()
-        get_report_stats = getattr(self.log_handler, "get_report_stats", None)
-        if callable(get_report_stats):
-            return get_report_stats(start_date=start_date, end_date=end_date)
-
-        return build_game_report(
-            self._cached_records(),
-            start_date=start_date,
-            end_date=end_date,
-        )
+        return self._get_data_controller().load_summary()
 
     def _cached_records(self) -> List[dict]:
-        get_cached_records = getattr(self.log_handler, "get_cached_records", None)
-        records = get_cached_records() if callable(get_cached_records) else []
-        return list(records)
+        return self._get_data_controller().cached_records()
 
     def _selected_trend_granularity(self) -> str:
-        granularity = self.trend_granularity_combo.currentData()
-        return str(granularity or "week")
+        return self._get_data_controller().selected_trend_granularity()
 
     def _selected_trend_mode(self) -> str:
-        mode = self.trend_mode_combo.currentData()
-        return str(mode or "total")
+        return self._get_data_controller().selected_trend_mode()
 
     def _is_title_trend_mode(self) -> bool:
-        return self._selected_trend_mode() == "by_title"
+        return self._get_data_controller().is_title_trend_mode()
 
     def _trend_series_label(self) -> str:
-        return "タイトル" if self._is_title_trend_mode() else "系列"
+        return self._get_data_controller().trend_series_label()
 
     def _get_title_filter_controller(self) -> ReportTitleFilterController:
         controller = getattr(self, "_title_filter_controller", None)
@@ -712,56 +574,13 @@ class ReportDialog(QDialog):
 
     @staticmethod
     def _total_points_to_series(points: List[TrendPoint]) -> List[TrendSeries]:
-        if not points:
-            return []
-        return [TrendSeries(title="合計", points=points)]
+        return ReportDataController.total_points_to_series(points)
 
     def _load_total_trend_series(self) -> List[TrendSeries]:
-        granularity = self._selected_trend_granularity()
-        start_date, end_date = self._selected_trend_date_range()
-        get_trend_stats = getattr(self.log_handler, "get_trend_stats", None)
-        if callable(get_trend_stats):
-            points = get_trend_stats(
-                granularity=granularity,
-                start_date=start_date,
-                end_date=end_date,
-            )
-        else:
-            points = build_play_time_trend(
-                self._cached_records(),
-                granularity=granularity,
-                start_date=start_date,
-                end_date=end_date,
-            )
-        return self._total_points_to_series(points)
+        return self._get_data_controller().load_total_trend_series()
 
     def _load_trend_series(self) -> List[TrendSeries]:
-        if not self._is_title_trend_mode():
-            return self._load_total_trend_series()
-
-        granularity = self._selected_trend_granularity()
-        start_date, end_date = self._selected_trend_date_range()
-        titles = self._selected_titles()
-        get_trend_stats_by_title = getattr(
-            self.log_handler,
-            "get_trend_stats_by_title",
-            None,
-        )
-        if callable(get_trend_stats_by_title):
-            return get_trend_stats_by_title(
-                granularity=granularity,
-                titles=titles,
-                start_date=start_date,
-                end_date=end_date,
-            )
-
-        return build_play_time_trend_by_title(
-            self._cached_records(),
-            granularity=granularity,
-            titles=titles,
-            start_date=start_date,
-            end_date=end_date,
-        )
+        return self._get_data_controller().load_trend_series()
 
     def _get_tab_refresh_controller(self) -> ReportTabRefreshController:
         controller = getattr(self, "_tab_refresh_controller", None)
@@ -1143,32 +962,8 @@ class ReportDialog(QDialog):
             chart_type,
         )
 
-    @staticmethod
-    def _top_rows_with_other(
-        summary: ReportSummary,
-        limit: int = 10,
-    ) -> Tuple[list, float]:
-        return top_rows_with_other(summary, limit=limit)
-
-    @classmethod
-    def _color_for_title(cls, title: str) -> object:
-        return color_for_title(title)
-
-    @classmethod
-    def _color_name_for_title(cls, title: str) -> str:
-        return color_name_for_title(title)
-
-    def _build_bar_chart(self, summary: ReportSummary) -> object:
-        return self._get_chart_builder().build_bar_chart(summary)
-
-    def _build_pie_chart(self, summary: ReportSummary) -> object:
-        return self._get_chart_builder().build_pie_chart(summary)
-
     def _populate_trend_chart(self, series_list: List[TrendSeries]) -> None:
         self._get_chart_builder().populate_trend_chart(
             self.trend_chart_view,
             series_list,
         )
-
-    def _build_line_chart(self, series_list: List[TrendSeries]) -> object:
-        return self._get_chart_builder().build_line_chart(series_list)
