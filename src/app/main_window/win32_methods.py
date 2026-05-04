@@ -2,61 +2,86 @@
 
 from __future__ import annotations
 
+from src.app.main_window.base import MainWindowCollaborator
 from typing import List, Optional, Tuple
 
 from PySide6.QtWidgets import QWidget
 
 from src.app.main_constants import OVERLAY_SAMPLE_RATIOS
 from src.app.win32_helpers import (
+    get_foreground_hwnd,
+    global_rect_of_widget,
     Point,
     Rect,
+    rect_contains_point,
+    rects_intersect,
+    root_window,
+    sample_points_from_rect,
+    window_at_point,
+    window_below,
+    window_handle_of,
+    window_rect,
 )
 
 
-def _main_module() -> object:
-    from src.app import main as main_module
-
-    return main_module
-
-
-class MainWindowWin32Methods:
+class MainWindowWin32Ops(MainWindowCollaborator):
     """Expose Win32 helper delegates expected by legacy MainWindow tests."""
 
+
+    METHOD_NAMES = (
+        "_global_rect_of_widget",
+        "_window_rect",
+        "_rect_contains_point",
+        "_rects_intersect",
+        "_sample_points_from_rect",
+        "_window_at_point",
+        "_window_below",
+        "_root_window",
+        "_window_handle_of",
+        "_is_own_window",
+        "_native_scale_factor",
+        "_to_native_point",
+        "_to_native_rect",
+        "_foreground_rect_if_foreign",
+        "_find_covering_foreign_window_at_point",
+        "_get_today_display_cover_state",
+        "_is_today_display_covered_by_foreground_window",
+    )
     @staticmethod
     def _global_rect_of_widget(widget: QWidget) -> Optional[Rect]:
-        return _main_module().global_rect_of_widget(widget)
+        return global_rect_of_widget(widget)
 
     @staticmethod
     def _window_rect(hwnd: int) -> Optional[Rect]:
-        return _main_module().window_rect(hwnd)
+        return window_rect(hwnd)
 
     @staticmethod
     def _rect_contains_point(rect: Rect, x: int, y: int) -> bool:
-        return _main_module().rect_contains_point(rect, x, y)
+        return rect_contains_point(rect, x, y)
 
     @staticmethod
     def _rects_intersect(first_rect: Rect, second_rect: Rect) -> bool:
-        return _main_module().rects_intersect(first_rect, second_rect)
+        return rects_intersect(first_rect, second_rect)
 
     @staticmethod
     def _sample_points_from_rect(rect: Rect) -> List[Point]:
-        return _main_module().sample_points_from_rect(rect, OVERLAY_SAMPLE_RATIOS)
+        return sample_points_from_rect(rect, OVERLAY_SAMPLE_RATIOS)
 
     @staticmethod
     def _window_at_point(x: int, y: int) -> int:
-        return _main_module().window_at_point(x, y)
+        return window_at_point(x, y)
 
     @staticmethod
     def _window_below(hwnd: int) -> int:
-        return _main_module().window_below(hwnd)
+        return window_below(hwnd)
 
     @staticmethod
     def _root_window(hwnd: int) -> int:
-        return _main_module().root_window(hwnd)
+        return root_window(hwnd)
 
     @staticmethod
     def _window_handle_of(widget: Optional[QWidget]) -> int:
-        return _main_module().window_handle_of(widget)
+        return window_handle_of(widget)
 
     def _is_own_window(self, hwnd: int) -> bool:
         """Return whether HWND belongs to this app or its overlay."""
@@ -77,7 +102,7 @@ class MainWindowWin32Methods:
     def _foreground_rect_if_foreign(self) -> Optional[Rect]:
         """Return the foreground rectangle when it belongs to a foreign window."""
         return self._get_cover_detector().foreground_rect_if_foreign(
-            _main_module().get_foreground_hwnd()
+            get_foreground_hwnd()
         )
 
     def _find_covering_foreign_window_at_point(
@@ -101,11 +126,3 @@ class MainWindowWin32Methods:
     def _is_today_display_covered_by_foreground_window(self) -> bool:
         """Return whether today_time_display is covered by a foreign window."""
         return self._get_cover_detector().is_today_display_covered()
-
-
-def install_main_window_win32_methods(target_cls: type) -> None:
-    """Install Win32 helper delegates on MainWindow without inheritance."""
-    for name, descriptor in MainWindowWin32Methods.__dict__.items():
-        if name.startswith("__"):
-            continue
-        setattr(target_cls, name, descriptor)

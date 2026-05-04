@@ -765,7 +765,7 @@ class TestOverlayMethods(unittest.TestCase):
         """_sample_points_from_rectは中心+25/75%点を返す."""
         rect = (100, 200, 200, 300)  # width=100, height=100
 
-        points = main.MainWindow._sample_points_from_rect(rect)
+        points = main.MainWindowWin32Ops._sample_points_from_rect(rect)
 
         self.assertEqual(points, [(150, 250), (125, 225),
                          (175, 225), (125, 275), (175, 275)])
@@ -780,8 +780,11 @@ class TestOverlayMethods(unittest.TestCase):
         frame_geometry.height.return_value = 600
         window.frameGeometry = MagicMock(return_value=frame_geometry)
 
-        with patch("src.app.main.window_handle_of", return_value=123), patch(
-            "src.app.main.window_rect",
+        with patch(
+            "src.app.main_window.win32_methods.window_handle_of",
+            return_value=123,
+        ), patch(
+            "src.app.main_window.win32_methods.window_rect",
             return_value=(2000, 1000, 3600, 2200),
         ):
             point = window._to_native_point(1100, 650)

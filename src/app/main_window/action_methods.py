@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from src.app.main_window.base import MainWindowCollaborator
 from typing import Dict, Optional, Sequence, cast
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QLabel, QMenu, QPushButton, QWidget
+from PySide6.QtWidgets import QLabel, QMenu, QMessageBox, QPushButton, QWidget
 
 from src.app.controllers import (
     MainWindowBootstrapError,
@@ -20,15 +20,69 @@ from src.core.models import GameEntry
 from src.core.window_state import DISPLAY_MODES
 from src.ui.manual_record_dialog import ManualPlayRecord, ManualRecordDialog
 
+import logging
 
-def _main_module() -> object:
-    from src.app import main as main_module
-
-    return main_module
+logger = logging.getLogger(__name__)
 
 
-class MainWindowActionMethods:
+class MainWindowActions(MainWindowCollaborator):
     """Runtime, dialog, overlay, alert, and display actions for MainWindow."""
+
+    METHOD_NAMES = (
+        "_record_playing_games_before_close",
+        "_iter_recordable_games",
+        "_start_timer",
+        "_disable_with_status",
+        "_init_components",
+        "_save_window_state",
+        "_set_status",
+        "_initialize_overlay",
+        "_is_overtime_alert_enabled",
+        "_set_overtime_alert_enabled",
+        "_get_overtime_alert_tracker",
+        "_get_overtime_alert_toggle",
+        "_get_report_button",
+        "_get_manual_record_button",
+        "_initialize_overtime_alert_toggle",
+        "_initialize_report_button",
+        "_initialize_manual_record_button",
+        "_open_report_dialog",
+        "_open_manual_record_dialog",
+        "_get_or_create_manual_record_dialog",
+        "_save_manual_record",
+        "_refresh_after_manual_record",
+        "_reload_today_stats",
+        "_set_today_stats_cache",
+        "_open_settings_dialog",
+        "_open_game_catalog_dialog",
+        "_on_game_catalog_saved",
+        "_on_settings_saved",
+        "_on_overtime_alert_toggled",
+        "_prime_overtime_alert_progress",
+        "_emit_overtime_alert",
+        "_update_overtime_alert",
+        "_get_overlay_window",
+        "_get_today_time_display",
+        "_refresh_overlay_time",
+        "_sync_overlay_geometry",
+        "_should_show_overlay",
+        "_sync_overlay_visibility",
+        "_sync_overlay",
+        "_close_overlay",
+        "_apply_mode_geometry",
+        "_apply_display_mode",
+        "_set_widget_visibility",
+        "_set_widget_with_height",
+        "_should_cycle_display_mode",
+        "_should_show_context_menu",
+        "_show_context_menu",
+        "_add_display_mode_menu",
+        "_handle_context_menu_selection",
+        "_set_display_mode",
+        "_cycle_display_mode",
+        "_record_current_mode_size",
+    )
+
 
     def _record_playing_games_before_close(self) -> None:
         for game in self._iter_recordable_games():
@@ -46,7 +100,7 @@ class MainWindowActionMethods:
         interval_seconds: float,
         callback: object,
     ) -> QTimer:
-        return self._get_loop_controller().start_timer(self, interval_seconds, callback)
+        return self._get_loop_controller().start_timer(self._owner, interval_seconds, callback)
 
     def _disable_with_status(self, message: str) -> None:
         self._set_status(message)
@@ -57,14 +111,14 @@ class MainWindowActionMethods:
             result = self._get_bootstrapper().bootstrap(window_title=self.windowTitle())
         except MainWindowBootstrapError as e:
             if e.log_message:
-                _main_module().logger.error(e.log_message)
+                logger.error(e.log_message)
             if getattr(e, "open_settings", False):
                 self._force_startup_window_visible = True
                 self._set_status(e.status_message)
                 alert_message = getattr(e, "alert_message", None)
                 if alert_message:
-                    _main_module().QMessageBox.warning(
-                        self,
+                    QMessageBox.warning(
+                        self._owner,
                         getattr(e, "alert_title", "設定エラー"),
                         alert_message,
                     )
@@ -102,8 +156,9 @@ class MainWindowActionMethods:
     def _set_status(self, message: str) -> None:
         title = f"{BASE_TITLE} - {message}" if message else BASE_TITLE
         self.setWindowTitle(title)
-        if hasattr(self, "scanner"):
-            self.scanner.excluded_titles.add(title)
+        scanner = getattr(self, "scanner", None)
+        if scanner is not None and hasattr(scanner, "excluded_titles"):
+            scanner.excluded_titles.add(title)
 
     def _initialize_overlay(self) -> None:
         self._get_overlay_controller().initialize_overlay()
@@ -217,7 +272,7 @@ class MainWindowActionMethods:
 
     def _apply_mode_geometry(self) -> None:
         self._get_display_controller().apply_mode_geometry(
-            self,
+            self._owner,
             self.display_mode,
             self.mode_sizes,
         )
@@ -307,11 +362,3 @@ class MainWindowActionMethods:
             self.width(),
             self.height(),
         )
-
-
-def install_main_window_action_methods(target_cls: type) -> None:
-    """Install MainWindow action methods."""
-    for name, descriptor in MainWindowActionMethods.__dict__.items():
-        if name.startswith("__"):
-            continue
-        setattr(target_cls, name, descriptor)

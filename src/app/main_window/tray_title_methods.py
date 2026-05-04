@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from src.app.main_window.base import MainWindowCollaborator
 from typing import Optional
 
 from PySide6.QtWidgets import QMenu, QWidget
@@ -9,9 +10,31 @@ from PySide6.QtWidgets import QMenu, QWidget
 from src.app.controllers import MainWindowTitleController, MainWindowTrayController
 
 
-class MainWindowTrayTitleMethods:
+class MainWindowTrayTitleOps(MainWindowCollaborator):
     """Compatibility methods that delegate tray and title-list work to controllers."""
 
+
+    METHOD_NAMES = (
+        "_initialize_tray_icon",
+        "_build_tray_menu",
+        "_show_main_window_from_tray",
+        "_process_pending_ui_events",
+        "_align_today_display_to_overlay_position",
+        "_hide_main_window_to_tray",
+        "_sync_tray_window_actions",
+        "_set_startup_window_visible",
+        "_set_tray_overlay_enabled",
+        "_quit_application",
+        "should_show_window_on_startup",
+        "_get_window_list_widget",
+        "_initialize_window_title_copy",
+        "_initialize_window_title_context_menu",
+        "_on_window_title_item_clicked",
+        "_show_window_title_context_menu",
+        "_window_title_item_at",
+        "_text_from_window_title_item",
+        "_copy_text_to_clipboard",
+    )
     def _initialize_tray_icon(self) -> None:
         """Create the tray icon and context menu used as the app's home."""
         self._get_tray_controller().initialize_tray_icon()
@@ -76,11 +99,3 @@ class MainWindowTrayTitleMethods:
     def _copy_text_to_clipboard(self, text: str) -> None:
         """Copy text to the clipboard."""
         self._get_window_title_controller().copy_text_to_clipboard(text)
-
-
-def install_main_window_tray_title_actions(target_cls: type) -> None:
-    """Install tray and title-list actions on MainWindow without inheritance."""
-    for name, descriptor in MainWindowTrayTitleMethods.__dict__.items():
-        if name.startswith("__"):
-            continue
-        setattr(target_cls, name, descriptor)

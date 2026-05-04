@@ -2,85 +2,48 @@
 
 import logging
 import sys
-from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
+from typing import Any, Callable, Optional, Sequence, TypeVar, cast
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QCloseEvent, QMouseEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QApplication,
-    QLabel,
     QMenu,
     QMessageBox,
-    QPushButton,
     QWidget,
 )
 
 from src.app.controllers import (
     BootstrapDependencies,
-    MainWindowBootstrapError,
     MainWindowBootstrapResult,
     MainWindowBootstrapper,
-    MainWindowContextMenuController,
-    MainWindowDialogController,
-    MainWindowDisplayController,
-    MainWindowLoopController,
-    MainWindowOverlayController,
-    MainWindowOvertimeAlertController,
-    MainWindowScanController,
-    MainWindowStateController,
-    MainWindowTitleController,
-    MainWindowTrayController,
-    MainWindowUiController,
     OvertimeAlertTracker,
     TodayTimeOverlayWindow,
 )
 from src.app.alert_state import GameAlertState
-from src.app.cover_detector import CoverDetectorOps, Win32CoverDetector
 from src.app.dialog_state import DialogRefState
 from src.app.display_state import WindowDisplayState
 from src.app.lifecycle_state import AppLifecycleState
 from src.app.main_constants import (
     BASE_TITLE,
     INACTIVE_TIMEOUT_MINUTES,
-    MAX_WIDGET_HEIGHT,
     MIN_MODE_SAFE_HEIGHT,
     MIN_MODE_SAFE_WIDTH,
-    OVERLAY_COVERED_POINTS_THRESHOLD,
-    OVERLAY_SAMPLE_RATIOS,
     OVERTIME_ALERT_THRESHOLDS_MINUTES,
     POLL_INTERVAL_SECONDS,
     UI_REFRESH_INTERVAL_SECONDS,
 )
-from src.app.main_window.action_methods import install_main_window_action_methods
-from src.app.main_window.controller_methods import (
-    install_main_window_controller_methods,
-)
-from src.app.main_window.scan_methods import install_main_window_scan_methods
-from src.app.main_window.state_descriptors import (
-    install_main_window_state_accessors,
-)
-from src.app.main_window.tray_title_methods import (
-    install_main_window_tray_title_actions,
-)
-from src.app.main_window.win32_methods import install_main_window_win32_methods
+from src.app.main_window.action_methods import MainWindowActions
+from src.app.main_window.controller_methods import MainWindowControllerRegistry
+from src.app.main_window.scan_methods import MainWindowScanOps
+from src.app.main_window.state_descriptors import MainWindowStateAccess
+from src.app.main_window.tray_title_methods import MainWindowTrayTitleOps
+from src.app.main_window.win32_methods import MainWindowWin32Ops
 from src.app.session_state import GameSessionState
 from src.app.timer_state import TimerState
 from src.app.tray_state import TrayActionState
 from src.app.window_title_state import WindowTitleState
-from src.app.win32_helpers import (
-    get_foreground_hwnd,
-    global_rect_of_widget,
-    rect_contains_point,
-    rects_intersect,
-    root_window,
-    sample_points_from_rect,
-    window_at_point,
-    window_below,
-    window_handle_of,
-    window_rect,
-)
-from src.core.models import GameEntry
+from src.app.win32_helpers import get_foreground_hwnd
 from src.core.adapters import (
     GameInfoLoader,
     Messages,
@@ -88,13 +51,12 @@ from src.core.adapters import (
     SessionRecorder,
     WindowScanner,
 )
-from src.core.domain import DailyStatsTracker, GameStateTracker, ScanResult
+from src.core.domain import DailyStatsTracker, GameStateTracker
 from src.core.time_utils import SECONDS_PER_MINUTE
 from src.core.window_state import (
     DEFAULT_OVERTIME_ALERT_ENABLED,
     DISPLAY_MODES,
     MODE_DEFAULT_SIZES,
-    WindowState,
 )
 from src.infra.config_loader import (
     ConfigLoader,
@@ -108,14 +70,7 @@ from src.infra.log_config import (
     LOG_MAX_BYTES,
     configure_logging as configure_app_logging,
 )
-from src.infra.runtime_paths import (
-    resolve_window_state_file,
-)
 from src.ui.gui_layout import build_main_layout
-from src.ui.game_catalog_dialog import GameCatalogDialog
-from src.ui.manual_record_dialog import ManualPlayRecord, ManualRecordDialog
-from src.ui.report_dialog import ReportDialog
-from src.ui.settings_dialog import SettingsDialog
 
 logger = logging.getLogger(__name__)
 
@@ -137,8 +92,27 @@ TDependency = TypeVar("TDependency")
 class MainWindow(QWidget):
     """メインウィンドウ."""
 
+    _COLLABORATOR_ATTRS = (
+        "_state_access",
+        "_controllers",
+        "_actions",
+        "_scan_ops",
+        "_tray_title_ops",
+        "_win32_ops",
+    )
+    _STATE_ATTRIBUTE_NAMES = set(MainWindowStateAccess.ATTRIBUTE_NAMES)
+    _COLLABORATOR_METHOD_NAMES = (
+        set(MainWindowStateAccess.METHOD_NAMES)
+        | set(MainWindowControllerRegistry.METHOD_NAMES)
+        | set(MainWindowActions.METHOD_NAMES)
+        | set(MainWindowScanOps.METHOD_NAMES)
+        | set(MainWindowTrayTitleOps.METHOD_NAMES)
+        | set(MainWindowWin32Ops.METHOD_NAMES)
+    )
+
     def __init__(self) -> None:
         super().__init__()
+        self._initialize_collaborators()
         self._initialize_window_state()
         self.w = build_main_layout(self)
         self._initialize_runtime_state()
@@ -148,6 +122,50 @@ class MainWindow(QWidget):
         self._init_components()
         self._start_background_timers()
         self._run_initial_refresh()
+
+
+    def _initialize_collaborators(self) -> None:
+        self._state_access = MainWindowStateAccess(self)
+        for name in self._STATE_ATTRIBUTE_NAMES:
+            if name in self.__dict__:
+                setattr(self._state_access, name, self.__dict__[name])
+        self._controllers = MainWindowControllerRegistry(self)
+        self._actions = MainWindowActions(self)
+        self._scan_ops = MainWindowScanOps(self)
+        self._tray_title_ops = MainWindowTrayTitleOps(self)
+        self._win32_ops = MainWindowWin32Ops(self)
+
+    def _ensure_collaborators(self) -> None:
+        if "_actions" not in self.__dict__:
+            self._initialize_collaborators()
+
+    def __getattr__(self, name: str) -> Any:
+        if name in self._STATE_ATTRIBUTE_NAMES:
+            self._ensure_collaborators()
+            return getattr(self._state_access, name)
+        if name in self._COLLABORATOR_METHOD_NAMES:
+            self._ensure_collaborators()
+            for attr_name in self._COLLABORATOR_ATTRS:
+                collaborator = self.__dict__[attr_name]
+                if name in getattr(type(collaborator), "METHOD_NAMES", ()):
+                    return getattr(collaborator, name)
+        raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}")
+
+    def __getattribute__(self, name: str) -> Any:
+        if (
+            name not in {"_state_access", "_STATE_ATTRIBUTE_NAMES", "__dict__"}
+            and name in type(self)._STATE_ATTRIBUTE_NAMES
+            and "_state_access" in object.__getattribute__(self, "__dict__")
+        ):
+            return getattr(object.__getattribute__(self, "_state_access"), name)
+        return super().__getattribute__(name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in type(self)._STATE_ATTRIBUTE_NAMES and "_state_access" in self.__dict__:
+            setattr(self._state_access, name, value)
+            super().__setattr__(name, value)
+            return
+        super().__setattr__(name, value)
 
     def _initialize_window_state(self) -> None:
         """タイトルと永続化されたウィンドウ状態を初期適用する."""
@@ -315,12 +333,6 @@ class MainWindow(QWidget):
 # =============================================================================
 # エントリーポイント
 # =============================================================================
-install_main_window_state_accessors(MainWindow)
-install_main_window_scan_methods(MainWindow)
-install_main_window_tray_title_actions(MainWindow)
-install_main_window_win32_methods(MainWindow)
-install_main_window_controller_methods(MainWindow)
-install_main_window_action_methods(MainWindow)
 
 
 def main() -> None:

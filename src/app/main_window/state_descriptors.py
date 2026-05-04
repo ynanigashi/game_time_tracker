@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from src.app.main_window.base import MainWindowCollaborator
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 
 from src.app.alert_state import GameAlertState
@@ -24,8 +25,52 @@ if TYPE_CHECKING:
     from src.ui.settings_dialog import SettingsDialog
 
 
-class MainWindowStateDescriptors:
+class MainWindowStateAccess(MainWindowCollaborator):
     """Compatibility accessors backed by extracted MainWindow state objects."""
+
+    ATTRIBUTE_NAMES = (
+        "games",
+        "active_games_cache",
+        "inactive_games_cache",
+        "latest_window_titles",
+        "overtime_alert_enabled",
+        "_overtime_alert_tracker",
+        "_overtime_alert_toggle_connected",
+        "display_mode",
+        "mode_sizes",
+        "startup_window_visible",
+        "tray_overlay_enabled",
+        "overlay_position",
+        "_report_dialog",
+        "_game_catalog_dialog",
+        "_manual_record_dialog",
+        "_settings_dialog",
+        "_report_button_connected",
+        "_manual_record_button_connected",
+        "_window_title_copy_connected",
+        "_window_title_context_menu_connected",
+        "_is_quitting",
+        "_force_startup_window_visible",
+        "_tray_show_action",
+        "_tray_hide_action",
+        "_tray_startup_show_action",
+        "_tray_startup_hide_action",
+        "_tray_overlay_action",
+        "_scan_timer",
+        "_ui_timer",
+    )
+
+    METHOD_NAMES = (
+        "_ensure_session_state",
+        "_ensure_alert_state",
+        "_ensure_display_state",
+        "_ensure_dialog_state",
+        "_ensure_window_title_state",
+        "_ensure_lifecycle_state",
+        "_ensure_tray_action_state",
+        "_ensure_timer_state",
+    )
+
 
     def _ensure_session_state(self) -> GameSessionState:
         state = getattr(self, "session_state", None)
@@ -325,11 +370,3 @@ class MainWindowStateDescriptors:
     @_ui_timer.setter
     def _ui_timer(self, value: object) -> None:
         self._ensure_timer_state().ui_timer = value
-
-
-def install_main_window_state_accessors(target_cls: type) -> None:
-    """Install state accessors on MainWindow without using inheritance."""
-    for name, descriptor in MainWindowStateDescriptors.__dict__.items():
-        if name.startswith("__"):
-            continue
-        setattr(target_cls, name, descriptor)

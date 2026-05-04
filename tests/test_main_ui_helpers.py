@@ -405,7 +405,7 @@ class TestMainWindowUIHelpers(unittest.TestCase):
         menu.addAction.return_value = action
         menu.exec.return_value = action
 
-        with patch.object(main, "QMenu", return_value=menu):
+        with patch("src.app.main_window.controller_methods.QMenu", return_value=menu):
             window._show_window_title_context_menu(object())
 
         menu.addAction.assert_called_once_with("ゲーム一覧に追加")
@@ -418,7 +418,7 @@ class TestMainWindowUIHelpers(unittest.TestCase):
         window = self._create_mock_main_window()
         dialog = MagicMock()
 
-        with patch.object(main, "GameCatalogDialog", return_value=dialog):
+        with patch("src.app.main_window.controller_methods.GameCatalogDialog", return_value=dialog):
             window._open_game_catalog_dialog()
 
         dialog.sync_on_open.assert_called_once()

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from src.app.main_window.base import MainWindowCollaborator
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QMenu
+
 from src.app.controllers import (
     MainWindowContextMenuController,
     MainWindowDialogController,
@@ -24,16 +28,30 @@ from src.app.main_constants import (
 )
 from src.core.window_state import DISPLAY_MODES
 from src.infra.runtime_paths import resolve_window_state_file
+from src.ui.game_catalog_dialog import GameCatalogDialog
+from src.ui.manual_record_dialog import ManualRecordDialog
+from src.ui.report_dialog import ReportDialog
+from src.ui.settings_dialog import SettingsDialog
 
 
-def _main_module() -> object:
-    from src.app import main as main_module
-
-    return main_module
-
-
-class MainWindowControllerMethods:
+class MainWindowControllerRegistry(MainWindowCollaborator):
     """Controller factory methods for MainWindow."""
+
+    METHOD_NAMES = (
+        "_get_ui_controller",
+        "_get_display_controller",
+        "_get_state_controller",
+        "_get_loop_controller",
+        "_get_overlay_controller",
+        "_get_tray_controller",
+        "_get_dialog_controller",
+        "_get_context_menu_controller",
+        "_get_window_title_controller",
+        "_get_cover_detector",
+        "_get_scan_controller",
+        "_get_overtime_alert_controller",
+    )
+
 
     def _get_ui_controller(self) -> MainWindowUiController:
         daily_stats = self._ensure_daily_stats()
@@ -61,7 +79,7 @@ class MainWindowControllerMethods:
         return self._resolve_dependency(
             "_loop_controller",
             factory=lambda: MainWindowLoopController(
-                timer_factory=_main_module().QTimer
+                timer_factory=QTimer
             ),
         )
 
@@ -88,14 +106,14 @@ class MainWindowControllerMethods:
                 is_main_window_active=lambda: bool(
                     getattr(self, "isActiveWindow", lambda: False)()
                 ),
-                is_active_window_own=lambda active_window: active_window is self,
+                is_active_window_own=lambda active_window: active_window is self._owner,
                 window_geometry=self.geometry,
                 move_window=self.move,
                 get_tray_overlay_enabled=lambda: bool(self.tray_overlay_enabled),
             ),
             validator=lambda controller: (
-                getattr(controller.window_geometry, "__self__", None) is self
-                and getattr(controller.move_window, "__self__", None) is self
+                getattr(controller.window_geometry, "__self__", None) is self._owner
+                and getattr(controller.move_window, "__self__", None) is self._owner
             ),
         )
 
@@ -103,7 +121,7 @@ class MainWindowControllerMethods:
         return self._resolve_dependency(
             "_tray_controller",
             factory=lambda: MainWindowTrayController(
-                parent_widget=self,
+                parent_widget=self._owner,
                 base_title=BASE_TITLE,
                 action_state=self._ensure_tray_action_state(),
                 get_tray_overlay_enabled=lambda: bool(self.tray_overlay_enabled),
@@ -160,7 +178,7 @@ class MainWindowControllerMethods:
                 close_overlay=self._close_overlay,
             ),
             validator=lambda controller: (
-                controller.parent_widget is self
+                controller.parent_widget is self._owner
                 and controller.action_state is self._ensure_tray_action_state()
             ),
         )
@@ -169,11 +187,11 @@ class MainWindowControllerMethods:
         return self._resolve_dependency(
             "_dialog_controller",
             factory=lambda: MainWindowDialogController(
-                parent_widget=self,
-                report_dialog_cls=_main_module().ReportDialog,
-                manual_record_dialog_cls=_main_module().ManualRecordDialog,
-                game_catalog_dialog_cls=_main_module().GameCatalogDialog,
-                settings_dialog_cls=_main_module().SettingsDialog,
+                parent_widget=self._owner,
+                report_dialog_cls=ReportDialog,
+                manual_record_dialog_cls=ManualRecordDialog,
+                game_catalog_dialog_cls=GameCatalogDialog,
+                settings_dialog_cls=SettingsDialog,
                 state=self._ensure_dialog_state(),
                 has_recorder=lambda: hasattr(self, "recorder"),
                 log_handler_provider=lambda: self.recorder.log_handler,
@@ -199,7 +217,7 @@ class MainWindowControllerMethods:
                 init_components=self._init_components,
             ),
             validator=lambda controller: (
-                controller.parent_widget is self
+                controller.parent_widget is self._owner
                 and controller.state is self._ensure_dialog_state()
             ),
         )
@@ -208,7 +226,7 @@ class MainWindowControllerMethods:
         return self._resolve_dependency(
             "_context_menu_controller",
             factory=lambda: MainWindowContextMenuController(
-                parent_widget=self,
+                parent_widget=self._owner,
                 display_modes=DISPLAY_MODES,
                 display_mode_provider=lambda: self.display_mode,
                 set_display_mode=self._set_display_mode,
@@ -218,14 +236,14 @@ class MainWindowControllerMethods:
                 open_settings_dialog=self._open_settings_dialog,
                 quit_application=self._quit_application,
             ),
-            validator=lambda controller: controller.parent_widget is self,
+            validator=lambda controller: controller.parent_widget is self._owner,
         )
 
     def _get_window_title_controller(self) -> MainWindowTitleController:
         return self._resolve_dependency(
             "_window_title_controller",
             factory=lambda: MainWindowTitleController(
-                qmenu_cls=_main_module().QMenu,
+                qmenu_cls=QMenu,
                 state=self._ensure_window_title_state(),
                 get_window_list_widget=lambda: getattr(self.w, "window_list", None),
                 on_item_clicked=self._on_window_title_item_clicked,
@@ -242,7 +260,7 @@ class MainWindowControllerMethods:
         return self._resolve_dependency(
             "_cover_detector",
             factory=lambda: Win32CoverDetector(
-                self,
+                self._owner,
                 sample_ratios=OVERLAY_SAMPLE_RATIOS,
                 covered_points_threshold=OVERLAY_COVERED_POINTS_THRESHOLD,
                 target_widget_provider=self._get_today_time_display,
@@ -269,7 +287,7 @@ class MainWindowControllerMethods:
                     ),
                 ),
             ),
-            validator=lambda detector: detector.owner is self,
+            validator=lambda detector: detector.owner is self._owner,
         )
 
     def _get_scan_controller(self) -> MainWindowScanController:
@@ -319,11 +337,3 @@ class MainWindowControllerMethods:
                 controller.state is self._ensure_alert_state()
             ),
         )
-
-
-def install_main_window_controller_methods(target_cls: type) -> None:
-    """Install controller provider methods on MainWindow."""
-    for name, descriptor in MainWindowControllerMethods.__dict__.items():
-        if name.startswith("__"):
-            continue
-        setattr(target_cls, name, descriptor)
