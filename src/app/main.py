@@ -461,12 +461,21 @@ class MainWindow(
         return self._resolve_dependency(
             "_dialog_controller",
             factory=lambda: MainWindowDialogController(
-                self,
+                parent_widget=self,
                 report_dialog_cls=ReportDialog,
                 manual_record_dialog_cls=ManualRecordDialog,
                 game_catalog_dialog_cls=GameCatalogDialog,
                 settings_dialog_cls=SettingsDialog,
                 state=self._ensure_dialog_state(),
+                has_recorder=lambda: hasattr(self, "recorder"),
+                log_handler_provider=lambda: self.recorder.log_handler,
+                record_with_times=lambda game, start_time, end_time: (
+                    self.recorder.record_with_times(game, start_time, end_time)
+                ),
+                games_provider=lambda: self.games,
+                get_today_stats=lambda: self.recorder.log_handler.get_today_stats(),
+                set_today_stats=self._set_today_stats_cache,
+                set_disabled=lambda disabled: self.setDisabled(disabled),
                 get_report_button=self._get_report_button,
                 get_manual_record_button=self._get_manual_record_button,
                 open_report_dialog_callback=self._open_report_dialog,
@@ -482,7 +491,7 @@ class MainWindow(
                 init_components=self._init_components,
             ),
             validator=lambda controller: (
-                controller.owner is self
+                controller.parent_widget is self
                 and controller.state is self._ensure_dialog_state()
             ),
         )
@@ -730,6 +739,15 @@ class MainWindow(
     def _reload_today_stats(self) -> None:
         """Refresh cached completed play time from the log handler."""
         self._get_dialog_controller().reload_today_stats()
+
+    def _set_today_stats_cache(
+        self,
+        game_minutes: Dict[str, float],
+        completed_seconds: float,
+    ) -> None:
+        self.daily_stats.today_game_minutes_cache = game_minutes
+        self.daily_stats.today_completed_seconds = completed_seconds
+        self.daily_stats.last_today_games_content = ""
 
     def _open_settings_dialog(self) -> None:
         """Open a non-modal settings dialog."""

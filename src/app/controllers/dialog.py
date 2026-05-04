@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Callable
+from typing import Callable, Dict, Optional
 
 from src.app.dialog_state import DialogRefState
 
@@ -13,13 +13,20 @@ class MainWindowDialogController:
 
     def __init__(
         self,
-        owner: "MainWindow",
         *,
+        parent_widget: object,
         report_dialog_cls: Callable[..., object],
         manual_record_dialog_cls: Callable[..., object],
         game_catalog_dialog_cls: Callable[..., object],
         settings_dialog_cls: Callable[..., object],
         state: DialogRefState,
+        has_recorder: Callable[[], bool],
+        log_handler_provider: Callable[[], object],
+        record_with_times: Callable[[object, datetime, datetime], Optional[float]],
+        games_provider: Callable[[], list],
+        get_today_stats: Callable[[], tuple[Dict[str, float], float]],
+        set_today_stats: Callable[[Dict[str, float], float], None],
+        set_disabled: Callable[[bool], None],
         get_report_button: Callable[[], object],
         get_manual_record_button: Callable[[], object],
         open_report_dialog_callback: Callable[[], None],
@@ -34,12 +41,19 @@ class MainWindowDialogController:
         on_game_catalog_saved_callback: Callable[[], None],
         init_components: Callable[[], None],
     ) -> None:
-        self.owner = owner
+        self.parent_widget = parent_widget
         self.report_dialog_cls = report_dialog_cls
         self.manual_record_dialog_cls = manual_record_dialog_cls
         self.game_catalog_dialog_cls = game_catalog_dialog_cls
         self.settings_dialog_cls = settings_dialog_cls
         self.state = state
+        self.has_recorder = has_recorder
+        self.log_handler_provider = log_handler_provider
+        self.record_with_times = record_with_times
+        self.games_provider = games_provider
+        self.get_today_stats = get_today_stats
+        self.set_today_stats = set_today_stats
+        self.set_disabled = set_disabled
         self.get_report_button = get_report_button
         self.get_manual_record_button = get_manual_record_button
         self.open_report_dialog_callback = open_report_dialog_callback
@@ -81,18 +95,21 @@ class MainWindowDialogController:
         self.state.manual_record_button_connected = True
 
     def open_report_dialog(self) -> None:
-        if not hasattr(self.owner, "recorder"):
+        if not self.has_recorder():
             return
 
         dialog = self.state.report_dialog
         if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
-            dialog = self.report_dialog_cls(self.owner.recorder.log_handler, self.owner)
+            dialog = self.report_dialog_cls(
+                self.log_handler_provider(),
+                self.parent_widget,
+            )
             self.state.report_dialog = dialog
 
         self._show_dialog(dialog)
 
     def open_manual_record_dialog(self) -> None:
-        if not hasattr(self.owner, "recorder"):
+        if not self.has_recorder():
             return
 
         dialog = self.get_or_create_manual_record_dialog()
@@ -102,17 +119,17 @@ class MainWindowDialogController:
         dialog = self.state.manual_record_dialog
         if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
             dialog = self.manual_record_dialog_cls(
-                self.owner,
+                self.parent_widget,
                 on_save=self.save_manual_record,
-                games=self.owner.games,
+                games=self.games_provider(),
             )
             self.state.manual_record_dialog = dialog
         else:
-            dialog.set_games(self.owner.games)
+            dialog.set_games(self.games_provider())
         return dialog
 
     def save_manual_record(self, record: object) -> bool:
-        recorded_seconds = self.owner.recorder.record_with_times(
+        recorded_seconds = self.record_with_times(
             record.game,
             record.start_time,
             record.end_time,
@@ -138,16 +155,14 @@ class MainWindowDialogController:
         self.sync_overlay()
 
     def reload_today_stats(self) -> None:
-        game_minutes, completed_seconds = self.owner.recorder.log_handler.get_today_stats()
-        self.owner.daily_stats.today_game_minutes_cache = game_minutes
-        self.owner.daily_stats.today_completed_seconds = completed_seconds
-        self.owner.daily_stats.last_today_games_content = ""
+        game_minutes, completed_seconds = self.get_today_stats()
+        self.set_today_stats(game_minutes, completed_seconds)
 
     def open_settings_dialog(self) -> None:
         dialog = self.state.settings_dialog
         if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
             dialog = self.settings_dialog_cls(
-                self.owner,
+                self.parent_widget,
                 on_saved=self.on_settings_saved_callback,
             )
             self.state.settings_dialog = dialog
@@ -159,7 +174,7 @@ class MainWindowDialogController:
         created_dialog = False
         if dialog is None or not bool(getattr(dialog, "isVisible", lambda: False)()):
             dialog = self.game_catalog_dialog_cls(
-                self.owner,
+                self.parent_widget,
                 on_saved=self.on_game_catalog_saved_callback,
             )
             self.state.game_catalog_dialog = dialog
@@ -185,7 +200,7 @@ class MainWindowDialogController:
         self.init_components()
 
     def on_settings_saved(self) -> None:
-        self.owner.setDisabled(False)
+        self.set_disabled(False)
         self.set_status("\u8a2d\u5b9a\u3092\u4fdd\u5b58\u3057\u307e\u3057\u305f\u3002")
         self.init_components()
 
