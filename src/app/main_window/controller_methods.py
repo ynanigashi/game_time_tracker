@@ -63,7 +63,23 @@ class MainWindowControllerRegistry(MainWindowCollaborator):
         return self._owner._resolve_dependency(
             "_loop_controller",
             factory=lambda: MainWindowLoopController(
-                timer_factory=QTimer
+                timer_factory=QTimer,
+                games_provider=lambda: self._state.games,
+                day_change_checker=lambda: self._owner.daily_stats.check_day_change(),
+                reset_today_games_table=lambda: self._owner.w.today_games_table.setRowCount(0),
+                prime_overtime_alert_progress=(
+                    self._actions._prime_overtime_alert_progress
+                ),
+                window_titles_provider=lambda: self._owner.scanner.get_titles(),
+                foreground_title_provider=lambda: self._owner.scanner.get_foreground_title(),
+                scan_games=self._scan_ops._scan_games,
+                apply_scan_result=self._scan_ops._apply_scan_result,
+                active_games_provider=lambda: self._state.active_games_cache,
+                update_session_times=self._scan_ops._update_session_times,
+                update_today_totals=self._scan_ops._update_today_totals,
+                update_today_games_list=self._scan_ops._update_today_games_list,
+                update_overtime_alert=self._actions._update_overtime_alert,
+                sync_overlay=self._actions._sync_overlay,
             ),
         )
 

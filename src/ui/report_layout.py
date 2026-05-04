@@ -24,7 +24,7 @@ def build_report_dialog_layout(dialog: "ReportDialog") -> None:
     tabs.addTab(build_summary_tab(dialog), "ゲーム別")
     tabs.addTab(build_trend_tab(dialog), "推移")
     tabs.addTab(build_log_tab(dialog), "ログ")
-    tabs.currentChanged.connect(dialog._on_tab_changed)
+    tabs.currentChanged.connect(dialog.on_tab_changed)
     dialog.tabs = tabs
 
     layout = QVBoxLayout()

@@ -20,17 +20,7 @@ class MainWindowScanOps(MainWindowCollaborator):
 
     def _scan_tick(self) -> None:
         """Run one monitoring scan tick."""
-        if not self._state.games:
-            return
-
-        if self._owner.daily_stats.check_day_change():
-            self._owner.w.today_games_table.setRowCount(0)
-            self._actions._prime_overtime_alert_progress(0.0)
-
-        window_titles = self._owner.scanner.get_titles()
-        foreground_title = self._owner.scanner.get_foreground_title()
-        result = self._scan_games(window_titles, foreground_title)
-        self._apply_scan_result(window_titles, result)
+        self._controllers._get_loop_controller().run_scan_tick()
 
     def _scan_games(
             self,

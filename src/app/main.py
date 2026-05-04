@@ -2,7 +2,6 @@
 
 import logging
 import sys
-from datetime import datetime
 from typing import Callable, Optional, Sequence, TypeVar, cast
 
 from PySide6.QtCore import QTimer, Qt
@@ -275,13 +274,11 @@ class MainWindow(QWidget):
 
     def _ui_tick(self) -> None:
         """Refresh displayed play time and overlay state."""
-        now = datetime.now()
-        active_games = self._state_access.active_games_cache
-        self._scan_ops._update_session_times(active_games, now)
-        total_seconds = self._scan_ops._update_today_totals(active_games, now)
-        self._scan_ops._update_today_games_list(now)
-        self._actions._update_overtime_alert(total_seconds)
-        self._actions._sync_overlay()
+        self._controllers._get_loop_controller().run_ui_tick()
+
+    def should_show_window_on_startup(self) -> bool:
+        """Return whether the main window should be shown at startup."""
+        return self._tray_title_ops.should_show_window_on_startup()
 
 
 def main() -> None:
@@ -289,7 +286,7 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     window = MainWindow()
-    if window._tray_title_ops.should_show_window_on_startup():
+    if window.should_show_window_on_startup():
         window.show()
     sys.exit(app.exec())
 
