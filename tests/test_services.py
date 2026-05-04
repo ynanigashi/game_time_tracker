@@ -1169,6 +1169,53 @@ class TestGameStateTrackerIntegration(unittest.TestCase):
         self.assertEqual(len(result.inactive_games), 0)
         self.assertEqual(result.recorded_seconds, 0.0)
 
+    def test_finalize_inactive_sessions_splits_by_day(self):
+        """非アクティブ確定時に日跨ぎセッションを日単位へ分割する."""
+        from src.core.domain import DailyStatsTracker, GameStateTracker
+
+        class SegmentRecorder:
+            def __init__(self):
+                self.segments = []
+
+            def record_with_times(self, game, start_time, end_time):
+                self.segments.append((start_time, end_time))
+                return (end_time - start_time).total_seconds()
+
+        recorder = SegmentRecorder()
+        daily_stats = DailyStatsTracker()
+        tracker = GameStateTracker(
+            recorder=recorder,
+            daily_stats=daily_stats,
+            browsers=[],
+            inactive_timeout_minutes=5,
+        )
+        game = models.GameEntry(game_title="TestGame", window_title="TestGame")
+        game.is_playing = True
+        game.start_time = datetime(2026, 1, 1, 23, 55, 0)
+        game.inactive_since = datetime(2026, 1, 2, 0, 5, 0)
+
+        recorded = tracker._finalize_inactive_sessions(
+            game,
+            lambda: {},
+            datetime(2026, 1, 2, 0, 10, 0),
+        )
+
+        self.assertEqual(
+            recorder.segments,
+            [
+                (
+                    datetime(2026, 1, 1, 23, 55, 0),
+                    datetime(2026, 1, 2, 0, 0, 0),
+                ),
+                (
+                    datetime(2026, 1, 2, 0, 0, 0),
+                    datetime(2026, 1, 2, 0, 5, 0),
+                ),
+            ],
+        )
+        self.assertEqual(recorded, 10 * SECONDS_PER_MINUTE)
+        self.assertEqual(daily_stats.today_completed_seconds, recorded)
+
 
 if __name__ == "__main__":
     unittest.main()
