@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
 
 if TYPE_CHECKING:
     from src.core.domain import ScanResult
     from src.core.models import GameEntry
+
+logger = logging.getLogger(__name__)
 
 
 class MainWindowScanActions:
@@ -54,7 +57,10 @@ class MainWindowScanActions:
         )
 
     def _has_playing_games(self) -> bool:
-        return self._get_scan_controller().has_playing_games()
+        return any(
+            bool(getattr(game, "is_playing", False))
+            for game in self.games
+        )
 
     def _update_session_times(
             self,
@@ -84,7 +90,15 @@ class MainWindowScanActions:
 
     def _load_today_game_minutes(self) -> Dict[str, float]:
         """Load today's completed minutes by game from the log handler."""
-        return self._get_scan_controller().load_today_game_minutes()
+        try:
+            game_minutes, _ = self.recorder.log_handler.get_today_stats()
+            return game_minutes
+        except Exception:
+            logger.warning(
+                "failed to load today's game minutes",
+                exc_info=True,
+            )
+            return {}
 
     def _update_today_games_list(self, now: datetime) -> None:
         """Update today's played-game list."""
@@ -96,4 +110,12 @@ class MainWindowScanActions:
 
     def _load_today_completed_seconds(self) -> float:
         """Load today's completed play seconds from the log handler."""
-        return self._get_scan_controller().load_today_completed_seconds()
+        try:
+            _, completed_seconds = self.recorder.log_handler.get_today_stats()
+            return completed_seconds
+        except Exception:
+            logger.warning(
+                "failed to load today's completed play seconds",
+                exc_info=True,
+            )
+            return 0.0

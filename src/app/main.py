@@ -353,20 +353,38 @@ class MainWindow(
         return self._resolve_dependency(
             "_overlay_controller",
             factory=lambda: MainWindowOverlayController(
-                self,
                 overlay_window_provider=lambda: self._get_overlay_window(),
                 set_overlay_window=lambda window: setattr(
                     self,
                     "overlay_window",
                     window,
                 ),
+                set_overlay_position=lambda position: setattr(
+                    self,
+                    "overlay_position",
+                    position,
+                ),
+                get_overlay_position=lambda: self.overlay_position,
                 today_time_display_provider=lambda: self._get_today_time_display(),
                 save_window_state=lambda: self._save_window_state(),
                 has_playing_games=lambda: self._has_playing_games(),
                 today_display_cover_state=lambda: self._get_today_display_cover_state(),
                 is_own_window=lambda hwnd: self._is_own_window(hwnd),
+                is_main_window_visible=lambda: bool(
+                    getattr(self, "isVisible", lambda: False)()
+                ),
+                is_main_window_active=lambda: bool(
+                    getattr(self, "isActiveWindow", lambda: False)()
+                ),
+                is_active_window_own=lambda active_window: active_window is self,
+                window_geometry=self.geometry,
+                move_window=self.move,
+                get_tray_overlay_enabled=lambda: bool(self.tray_overlay_enabled),
             ),
-            validator=lambda controller: controller.owner is self,
+            validator=lambda controller: (
+                getattr(controller.window_geometry, "__self__", None) is self
+                and getattr(controller.move_window, "__self__", None) is self
+            ),
         )
 
     def _get_tray_controller(self) -> MainWindowTrayController:
@@ -374,18 +392,39 @@ class MainWindow(
         return self._resolve_dependency(
             "_tray_controller",
             factory=lambda: MainWindowTrayController(
-                self,
+                parent_widget=self,
                 base_title=BASE_TITLE,
                 action_state=self._ensure_tray_action_state(),
-                show_main_window=self._show_main_window_from_tray,
-                hide_main_window=self._hide_main_window_to_tray,
-                set_tray_overlay_enabled=self._set_tray_overlay_enabled,
-                set_startup_window_visible=self._set_startup_window_visible,
+                get_tray_overlay_enabled=lambda: bool(self.tray_overlay_enabled),
+                set_tray_overlay_enabled_value=lambda enabled: setattr(
+                    self,
+                    "tray_overlay_enabled",
+                    bool(enabled),
+                ),
+                get_startup_window_visible=lambda: bool(self.startup_window_visible),
+                set_startup_window_visible_value=lambda visible: setattr(
+                    self,
+                    "startup_window_visible",
+                    bool(visible),
+                ),
+                get_force_startup_window_visible=lambda: bool(
+                    self._force_startup_window_visible
+                ),
+                get_overlay_position=lambda: self.overlay_position,
+                get_tray_icon=lambda: getattr(self, "tray_icon", None),
+                set_tray_icon=lambda icon: setattr(self, "tray_icon", icon),
+                set_tray_menu=lambda menu: setattr(self, "tray_menu", menu),
+                show_window=self.show,
+                hide_window=self.hide,
+                raise_window=self.raise_,
+                activate_window=self.activateWindow,
+                is_window_visible=lambda: bool(self.isVisible()),
+                window_geometry=self.geometry,
+                move_window=self.move,
                 open_manual_record_dialog=self._open_manual_record_dialog,
                 open_report_dialog=self._open_report_dialog,
                 open_game_catalog_dialog=self._open_game_catalog_dialog,
                 open_settings_dialog=self._open_settings_dialog,
-                quit_application=self._quit_application,
                 sync_tray_window_actions_callback=self._sync_tray_window_actions,
                 save_window_state=self._save_window_state,
                 sync_overlay=self._sync_overlay,
@@ -409,7 +448,10 @@ class MainWindow(
                 ),
                 close_overlay=self._close_overlay,
             ),
-            validator=lambda controller: controller.owner is self,
+            validator=lambda controller: (
+                controller.parent_widget is self
+                and controller.action_state is self._ensure_tray_action_state()
+            ),
         )
 
     def _get_dialog_controller(self) -> MainWindowDialogController:
@@ -417,12 +459,21 @@ class MainWindow(
         return self._resolve_dependency(
             "_dialog_controller",
             factory=lambda: MainWindowDialogController(
-                self,
+                parent_widget=self,
                 report_dialog_cls=ReportDialog,
                 manual_record_dialog_cls=ManualRecordDialog,
                 game_catalog_dialog_cls=GameCatalogDialog,
                 settings_dialog_cls=SettingsDialog,
                 state=self._ensure_dialog_state(),
+                has_recorder=lambda: hasattr(self, "recorder"),
+                log_handler_provider=lambda: self.recorder.log_handler,
+                record_with_times=lambda game, start_time, end_time: (
+                    self.recorder.record_with_times(game, start_time, end_time)
+                ),
+                games_provider=lambda: self.games,
+                get_today_stats=lambda: self.recorder.log_handler.get_today_stats(),
+                set_today_stats=self._set_today_stats_cache,
+                set_disabled=lambda disabled: self.setDisabled(disabled),
                 get_report_button=self._get_report_button,
                 get_manual_record_button=self._get_manual_record_button,
                 open_report_dialog_callback=self._open_report_dialog,
@@ -438,7 +489,7 @@ class MainWindow(
                 init_components=self._init_components,
             ),
             validator=lambda controller: (
-                controller.owner is self
+                controller.parent_widget is self
                 and controller.state is self._ensure_dialog_state()
             ),
         )
@@ -448,8 +499,9 @@ class MainWindow(
         return self._resolve_dependency(
             "_context_menu_controller",
             factory=lambda: MainWindowContextMenuController(
-                self,
+                parent_widget=self,
                 display_modes=DISPLAY_MODES,
+                display_mode_provider=lambda: self.display_mode,
                 set_display_mode=self._set_display_mode,
                 open_manual_record_dialog=self._open_manual_record_dialog,
                 open_report_dialog=self._open_report_dialog,
@@ -457,7 +509,7 @@ class MainWindow(
                 open_settings_dialog=self._open_settings_dialog,
                 quit_application=self._quit_application,
             ),
-            validator=lambda controller: controller.owner is self,
+            validator=lambda controller: controller.parent_widget is self,
         )
 
     def _get_window_title_controller(self) -> MainWindowTitleController:
@@ -465,7 +517,6 @@ class MainWindow(
         return self._resolve_dependency(
             "_window_title_controller",
             factory=lambda: MainWindowTitleController(
-                self,
                 qmenu_cls=QMenu,
                 state=self._ensure_window_title_state(),
                 get_window_list_widget=lambda: getattr(self.w, "window_list", None),
@@ -475,8 +526,7 @@ class MainWindow(
                 set_status=self._set_status,
             ),
             validator=lambda controller: (
-                controller.owner is self
-                and controller.state is self._ensure_window_title_state()
+                controller.state is self._ensure_window_title_state()
             ),
         )
 
@@ -520,7 +570,7 @@ class MainWindow(
         return self._resolve_dependency(
             "_scan_controller",
             factory=lambda: MainWindowScanController(
-                self,
+                state_tracker=self.state_tracker,
                 games_provider=lambda: self.games,
                 scan_result_updater=lambda active, inactive, titles: (
                     self._ensure_session_state().update_scan_result(
@@ -536,7 +586,9 @@ class MainWindow(
                 load_today_game_minutes=self._load_today_game_minutes,
                 get_today_stats=self.recorder.log_handler.get_today_stats,
             ),
-            validator=lambda controller: controller.owner is self,
+            validator=lambda controller: (
+                controller.state_tracker is self.state_tracker
+            ),
         )
 
     def _get_overtime_alert_controller(self) -> MainWindowOvertimeAlertController:
@@ -544,7 +596,6 @@ class MainWindow(
         return self._resolve_dependency(
             "_overtime_alert_controller",
             factory=lambda: MainWindowOvertimeAlertController(
-                self,
                 self._ensure_alert_state(),
                 toggle_provider=self._get_overtime_alert_toggle,
                 on_toggle_changed=self._on_overtime_alert_toggled,
@@ -560,8 +611,7 @@ class MainWindow(
                 sync_overlay=self._sync_overlay,
             ),
             validator=lambda controller: (
-                controller.owner is self
-                and controller.state is self._ensure_alert_state()
+                controller.state is self._ensure_alert_state()
             ),
         )
 
@@ -687,6 +737,15 @@ class MainWindow(
     def _reload_today_stats(self) -> None:
         """Refresh cached completed play time from the log handler."""
         self._get_dialog_controller().reload_today_stats()
+
+    def _set_today_stats_cache(
+        self,
+        game_minutes: Dict[str, float],
+        completed_seconds: float,
+    ) -> None:
+        self.daily_stats.today_game_minutes_cache = game_minutes
+        self.daily_stats.today_completed_seconds = completed_seconds
+        self.daily_stats.last_today_games_content = ""
 
     def _open_settings_dialog(self) -> None:
         """Open a non-modal settings dialog."""

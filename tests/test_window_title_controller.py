@@ -16,10 +16,7 @@ class MainWindowTitleControllerTest(unittest.TestCase):
             setToolTip=lambda _text: None,
         )
         state = WindowTitleState()
-        owner = SimpleNamespace(
-        )
         controller = MainWindowTitleController(
-            owner,
             qmenu_cls=object,
             state=state,
             get_window_list_widget=lambda: window_list,

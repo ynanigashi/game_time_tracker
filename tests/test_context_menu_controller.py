@@ -11,8 +11,9 @@ from src.app.controllers.context_menu import MainWindowContextMenuController
 class MainWindowContextMenuControllerTest(unittest.TestCase):
     def _create_controller(self, calls):
         return MainWindowContextMenuController(
-            SimpleNamespace(display_mode="小"),
+            parent_widget=SimpleNamespace(),
             display_modes=("小", "大"),
+            display_mode_provider=lambda: "小",
             set_display_mode=lambda mode: calls.append(("mode", mode)),
             open_manual_record_dialog=lambda: calls.append("manual"),
             open_report_dialog=lambda: calls.append("report"),
