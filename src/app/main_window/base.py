@@ -2,39 +2,44 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.app.main import MainWindow
+    from src.app.main_window.action_methods import MainWindowActions
+    from src.app.main_window.controller_methods import MainWindowControllerRegistry
+    from src.app.main_window.scan_methods import MainWindowScanOps
+    from src.app.main_window.state_descriptors import MainWindowStateAccess
+    from src.app.main_window.tray_title_methods import MainWindowTrayTitleOps
+    from src.app.main_window.win32_methods import MainWindowWin32Ops
 
 
 class MainWindowCollaborator:
-    """Delegate unknown attribute access to the owning MainWindow."""
+    """Base object for explicit MainWindow collaborators."""
 
-    def __init__(self, owner: object) -> None:
+    def __init__(self, owner: "MainWindow") -> None:
         object.__setattr__(self, "_owner", owner)
 
-    def __getattribute__(self, name: str) -> Any:
-        if name == "_owner" or name.startswith("__"):
-            return object.__getattribute__(self, name)
-        descriptor = getattr(type(self), name, None)
-        if hasattr(descriptor, "__get__") and hasattr(descriptor, "__set__"):
-            return object.__getattribute__(self, name)
-        owner = object.__getattribute__(self, "_owner")
-        owner_state_names = getattr(type(owner), "_STATE_ATTRIBUTE_NAMES", ())
-        if name in owner_state_names and "_state_access" in getattr(owner, "__dict__", {}):
-            return getattr(owner, name)
-        owner_dict = getattr(owner, "__dict__", {})
-        if name in owner_dict:
-            return owner_dict[name]
-        return object.__getattribute__(self, name)
+    @property
+    def _state(self) -> "MainWindowStateAccess":
+        return self._owner._state_access
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._owner, name)
+    @property
+    def _controllers(self) -> "MainWindowControllerRegistry":
+        return self._owner._controllers
 
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name == "_owner":
-            object.__setattr__(self, name, value)
-            return
-        descriptor = getattr(type(self), name, None)
-        if hasattr(descriptor, "__set__"):
-            object.__setattr__(self, name, value)
-            return
-        setattr(self._owner, name, value)
+    @property
+    def _actions(self) -> "MainWindowActions":
+        return self._owner._actions
+
+    @property
+    def _scan_ops(self) -> "MainWindowScanOps":
+        return self._owner._scan_ops
+
+    @property
+    def _tray_title_ops(self) -> "MainWindowTrayTitleOps":
+        return self._owner._tray_title_ops
+
+    @property
+    def _win32_ops(self) -> "MainWindowWin32Ops":
+        return self._owner._win32_ops

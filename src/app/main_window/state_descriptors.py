@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from src.app.main_window.base import MainWindowCollaborator
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 
+from src.app.main_window.base import MainWindowCollaborator
 from src.app.alert_state import GameAlertState
 from src.app.dialog_state import DialogRefState
 from src.app.display_state import WindowDisplayState
@@ -28,55 +28,11 @@ if TYPE_CHECKING:
 class MainWindowStateAccess(MainWindowCollaborator):
     """Compatibility accessors backed by extracted MainWindow state objects."""
 
-    ATTRIBUTE_NAMES = (
-        "games",
-        "active_games_cache",
-        "inactive_games_cache",
-        "latest_window_titles",
-        "overtime_alert_enabled",
-        "_overtime_alert_tracker",
-        "_overtime_alert_toggle_connected",
-        "display_mode",
-        "mode_sizes",
-        "startup_window_visible",
-        "tray_overlay_enabled",
-        "overlay_position",
-        "_report_dialog",
-        "_game_catalog_dialog",
-        "_manual_record_dialog",
-        "_settings_dialog",
-        "_report_button_connected",
-        "_manual_record_button_connected",
-        "_window_title_copy_connected",
-        "_window_title_context_menu_connected",
-        "_is_quitting",
-        "_force_startup_window_visible",
-        "_tray_show_action",
-        "_tray_hide_action",
-        "_tray_startup_show_action",
-        "_tray_startup_hide_action",
-        "_tray_overlay_action",
-        "_scan_timer",
-        "_ui_timer",
-    )
-
-    METHOD_NAMES = (
-        "_ensure_session_state",
-        "_ensure_alert_state",
-        "_ensure_display_state",
-        "_ensure_dialog_state",
-        "_ensure_window_title_state",
-        "_ensure_lifecycle_state",
-        "_ensure_tray_action_state",
-        "_ensure_timer_state",
-    )
-
-
     def _ensure_session_state(self) -> GameSessionState:
-        state = getattr(self, "session_state", None)
+        state = getattr(self._owner, "session_state", None)
         if state is None:
             state = GameSessionState()
-            self.session_state = state
+            self._owner.session_state = state
         return state
 
     @property
@@ -112,13 +68,13 @@ class MainWindowStateAccess(MainWindowCollaborator):
         self._ensure_session_state().latest_window_titles = list(value)
 
     def _ensure_alert_state(self) -> GameAlertState:
-        state = getattr(self, "alert_state", None)
+        state = getattr(self._owner, "alert_state", None)
         if state is None:
             state = GameAlertState.create(
                 enabled=DEFAULT_OVERTIME_ALERT_ENABLED,
                 thresholds_minutes=OVERTIME_ALERT_THRESHOLDS_MINUTES,
             )
-            self.alert_state = state
+            self._owner.alert_state = state
         return state
 
     @property
@@ -146,10 +102,10 @@ class MainWindowStateAccess(MainWindowCollaborator):
         self._ensure_alert_state().toggle_connected = bool(value)
 
     def _ensure_display_state(self) -> WindowDisplayState:
-        state = getattr(self, "display_state", None)
+        state = getattr(self._owner, "display_state", None)
         if state is None:
             state = WindowDisplayState.create()
-            self.display_state = state
+            self._owner.display_state = state
         return state
 
     @property
@@ -199,10 +155,10 @@ class MainWindowStateAccess(MainWindowCollaborator):
         self._ensure_display_state().overlay_position = (int(value[0]), int(value[1]))
 
     def _ensure_dialog_state(self) -> DialogRefState:
-        state = getattr(self, "dialog_state", None)
+        state = getattr(self._owner, "dialog_state", None)
         if state is None:
             state = DialogRefState()
-            self.dialog_state = state
+            self._owner.dialog_state = state
         return state
 
     @property
@@ -254,10 +210,10 @@ class MainWindowStateAccess(MainWindowCollaborator):
         self._ensure_dialog_state().manual_record_button_connected = bool(value)
 
     def _ensure_window_title_state(self) -> WindowTitleState:
-        state = getattr(self, "window_title_state", None)
+        state = getattr(self._owner, "window_title_state", None)
         if state is None:
             state = WindowTitleState()
-            self.window_title_state = state
+            self._owner.window_title_state = state
         return state
 
     @property
@@ -277,15 +233,15 @@ class MainWindowStateAccess(MainWindowCollaborator):
         self._ensure_window_title_state().context_menu_connected = bool(value)
 
     def _ensure_lifecycle_state(self) -> AppLifecycleState:
-        state = getattr(self, "lifecycle_state", None)
+        state = getattr(self._owner, "lifecycle_state", None)
         if state is None:
             state = AppLifecycleState()
-            self.lifecycle_state = state
+            self._owner.lifecycle_state = state
         return state
 
     @property
     def _is_quitting(self) -> bool:
-        if "lifecycle_state" not in self.__dict__:
+        if "lifecycle_state" not in self._owner.__dict__:
             return True
         return self._ensure_lifecycle_state().is_quitting
 
@@ -302,10 +258,10 @@ class MainWindowStateAccess(MainWindowCollaborator):
         self._ensure_lifecycle_state().force_startup_window_visible = bool(value)
 
     def _ensure_tray_action_state(self) -> TrayActionState:
-        state = getattr(self, "tray_action_state", None)
+        state = getattr(self._owner, "tray_action_state", None)
         if state is None:
             state = TrayActionState()
-            self.tray_action_state = state
+            self._owner.tray_action_state = state
         return state
 
     @property
@@ -349,10 +305,10 @@ class MainWindowStateAccess(MainWindowCollaborator):
         self._ensure_tray_action_state().overlay_action = value
 
     def _ensure_timer_state(self) -> TimerState:
-        state = getattr(self, "timer_state", None)
+        state = getattr(self._owner, "timer_state", None)
         if state is None:
             state = TimerState()
-            self.timer_state = state
+            self._owner.timer_state = state
         return state
 
     @property

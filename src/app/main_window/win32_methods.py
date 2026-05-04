@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from src.app.main_window.base import MainWindowCollaborator
 from typing import List, Optional, Tuple
 
 from PySide6.QtWidgets import QWidget
 
 from src.app.main_constants import OVERLAY_SAMPLE_RATIOS
+from src.app.main_window.base import MainWindowCollaborator
 from src.app.win32_helpers import (
     get_foreground_hwnd,
     global_rect_of_widget,
@@ -27,26 +27,6 @@ from src.app.win32_helpers import (
 class MainWindowWin32Ops(MainWindowCollaborator):
     """Expose Win32 helper delegates expected by legacy MainWindow tests."""
 
-
-    METHOD_NAMES = (
-        "_global_rect_of_widget",
-        "_window_rect",
-        "_rect_contains_point",
-        "_rects_intersect",
-        "_sample_points_from_rect",
-        "_window_at_point",
-        "_window_below",
-        "_root_window",
-        "_window_handle_of",
-        "_is_own_window",
-        "_native_scale_factor",
-        "_to_native_point",
-        "_to_native_rect",
-        "_foreground_rect_if_foreign",
-        "_find_covering_foreign_window_at_point",
-        "_get_today_display_cover_state",
-        "_is_today_display_covered_by_foreground_window",
-    )
     @staticmethod
     def _global_rect_of_widget(widget: QWidget) -> Optional[Rect]:
         return global_rect_of_widget(widget)
@@ -85,23 +65,23 @@ class MainWindowWin32Ops(MainWindowCollaborator):
 
     def _is_own_window(self, hwnd: int) -> bool:
         """Return whether HWND belongs to this app or its overlay."""
-        return self._get_cover_detector().is_own_window(hwnd)
+        return self._owner._get_cover_detector().is_own_window(hwnd)
 
     def _native_scale_factor(self) -> float:
         """Estimate logical-to-native coordinate scaling."""
-        return self._get_cover_detector().native_scale_factor()
+        return self._owner._get_cover_detector().native_scale_factor()
 
     def _to_native_point(self, x: int, y: int) -> Point:
         """Convert a logical point to Win32 native coordinates."""
-        return self._get_cover_detector().to_native_point(x, y)
+        return self._owner._get_cover_detector().to_native_point(x, y)
 
     def _to_native_rect(self, rect: Rect) -> Rect:
         """Convert a logical rectangle to Win32 native coordinates."""
-        return self._get_cover_detector().to_native_rect(rect)
+        return self._owner._get_cover_detector().to_native_rect(rect)
 
     def _foreground_rect_if_foreign(self) -> Optional[Rect]:
         """Return the foreground rectangle when it belongs to a foreign window."""
-        return self._get_cover_detector().foreground_rect_if_foreign(
+        return self._owner._get_cover_detector().foreground_rect_if_foreign(
             get_foreground_hwnd()
         )
 
@@ -113,7 +93,7 @@ class MainWindowWin32Ops(MainWindowCollaborator):
         expected_root_hwnd: Optional[int] = None,
     ) -> int:
         """Return a foreign HWND that covers a point, if any."""
-        return self._get_cover_detector().find_covering_foreign_window_at_point(
+        return self._owner._get_cover_detector().find_covering_foreign_window_at_point(
             x,
             y,
             expected_root_hwnd=expected_root_hwnd,
@@ -121,8 +101,8 @@ class MainWindowWin32Ops(MainWindowCollaborator):
 
     def _get_today_display_cover_state(self) -> Tuple[bool, str]:
         """Return cover state and reason for today_time_display."""
-        return self._get_cover_detector().get_today_display_cover_state()
+        return self._owner._get_cover_detector().get_today_display_cover_state()
 
     def _is_today_display_covered_by_foreground_window(self) -> bool:
         """Return whether today_time_display is covered by a foreign window."""
-        return self._get_cover_detector().is_today_display_covered()
+        return self._owner._get_cover_detector().is_today_display_covered()

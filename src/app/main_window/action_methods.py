@@ -1,8 +1,7 @@
-"""MainWindow action methods installed outside the QWidget subclass."""
+"""MainWindow action collaborators."""
 
 from __future__ import annotations
 
-from src.app.main_window.base import MainWindowCollaborator
 from typing import Dict, Optional, Sequence, cast
 
 from PySide6.QtCore import QTimer, Qt
@@ -14,6 +13,7 @@ from src.app.controllers import (
     OvertimeAlertTracker,
     TodayTimeOverlayWindow,
 )
+from src.app.main_window.base import MainWindowCollaborator
 from src.app.main_constants import BASE_TITLE
 from src.core.adapters import Messages
 from src.core.models import GameEntry
@@ -28,70 +28,14 @@ logger = logging.getLogger(__name__)
 class MainWindowActions(MainWindowCollaborator):
     """Runtime, dialog, overlay, alert, and display actions for MainWindow."""
 
-    METHOD_NAMES = (
-        "_record_playing_games_before_close",
-        "_iter_recordable_games",
-        "_start_timer",
-        "_disable_with_status",
-        "_init_components",
-        "_save_window_state",
-        "_set_status",
-        "_initialize_overlay",
-        "_is_overtime_alert_enabled",
-        "_set_overtime_alert_enabled",
-        "_get_overtime_alert_tracker",
-        "_get_overtime_alert_toggle",
-        "_get_report_button",
-        "_get_manual_record_button",
-        "_initialize_overtime_alert_toggle",
-        "_initialize_report_button",
-        "_initialize_manual_record_button",
-        "_open_report_dialog",
-        "_open_manual_record_dialog",
-        "_get_or_create_manual_record_dialog",
-        "_save_manual_record",
-        "_refresh_after_manual_record",
-        "_reload_today_stats",
-        "_set_today_stats_cache",
-        "_open_settings_dialog",
-        "_open_game_catalog_dialog",
-        "_on_game_catalog_saved",
-        "_on_settings_saved",
-        "_on_overtime_alert_toggled",
-        "_prime_overtime_alert_progress",
-        "_emit_overtime_alert",
-        "_update_overtime_alert",
-        "_get_overlay_window",
-        "_get_today_time_display",
-        "_refresh_overlay_time",
-        "_sync_overlay_geometry",
-        "_should_show_overlay",
-        "_sync_overlay_visibility",
-        "_sync_overlay",
-        "_close_overlay",
-        "_apply_mode_geometry",
-        "_apply_display_mode",
-        "_set_widget_visibility",
-        "_set_widget_with_height",
-        "_should_cycle_display_mode",
-        "_should_show_context_menu",
-        "_show_context_menu",
-        "_add_display_mode_menu",
-        "_handle_context_menu_selection",
-        "_set_display_mode",
-        "_cycle_display_mode",
-        "_record_current_mode_size",
-    )
-
-
     def _record_playing_games_before_close(self) -> None:
         for game in self._iter_recordable_games():
-            self.recorder.record(game)
+            self._owner.recorder.record(game)
 
     def _iter_recordable_games(self) -> Sequence[GameEntry]:
         return [
             game
-            for game in getattr(self, "games", [])
+            for game in self._state.games
             if game.is_playing and game.start_time
         ]
 
@@ -100,21 +44,27 @@ class MainWindowActions(MainWindowCollaborator):
         interval_seconds: float,
         callback: object,
     ) -> QTimer:
-        return self._get_loop_controller().start_timer(self._owner, interval_seconds, callback)
+        return self._controllers._get_loop_controller().start_timer(
+            self._owner,
+            interval_seconds,
+            callback,
+        )
 
     def _disable_with_status(self, message: str) -> None:
-        self._set_status(message)
-        self.setDisabled(True)
+        self._owner._set_status(message)
+        self._owner.setDisabled(True)
 
     def _init_components(self) -> None:
         try:
-            result = self._get_bootstrapper().bootstrap(window_title=self.windowTitle())
+            result = self._owner._get_bootstrapper().bootstrap(
+                window_title=self._owner.windowTitle()
+            )
         except MainWindowBootstrapError as e:
             if e.log_message:
                 logger.error(e.log_message)
             if getattr(e, "open_settings", False):
-                self._force_startup_window_visible = True
-                self._set_status(e.status_message)
+                self._state._force_startup_window_visible = True
+                self._owner._set_status(e.status_message)
                 alert_message = getattr(e, "alert_message", None)
                 if alert_message:
                     QMessageBox.warning(
@@ -122,172 +72,172 @@ class MainWindowActions(MainWindowCollaborator):
                         getattr(e, "alert_title", "設定エラー"),
                         alert_message,
                     )
-                self._open_settings_dialog()
+                self._owner._open_settings_dialog()
                 return
             if getattr(e, "open_game_catalog", False):
-                self._force_startup_window_visible = True
-                self._set_status(e.status_message)
-                self._open_game_catalog_dialog()
+                self._state._force_startup_window_visible = True
+                self._owner._set_status(e.status_message)
+                self._owner._open_game_catalog_dialog()
                 return
-            self._force_startup_window_visible = True
-            self._disable_with_status(e.status_message)
+            self._state._force_startup_window_visible = True
+            self._owner._disable_with_status(e.status_message)
             return
 
-        self._apply_bootstrap_result(result)
-        self._initialize_overtime_alert_toggle()
-        self._initialize_report_button()
-        self._initialize_manual_record_button()
-        self._apply_display_mode()
-        self._apply_mode_geometry()
-        self._set_status(Messages.NO_GAME_PLAYING)
-        self._initialize_overlay()
+        self._owner._apply_bootstrap_result(result)
+        self._owner._initialize_overtime_alert_toggle()
+        self._owner._initialize_report_button()
+        self._owner._initialize_manual_record_button()
+        self._owner._apply_display_mode()
+        self._owner._apply_mode_geometry()
+        self._owner._set_status(Messages.NO_GAME_PLAYING)
+        self._owner._initialize_overlay()
 
     def _save_window_state(self) -> None:
-        self._get_state_controller().save(
-            self.geometry(),
-            self.display_mode,
-            self.mode_sizes,
-            self._is_overtime_alert_enabled(),
-            startup_window_visible=bool(getattr(self, "startup_window_visible", False)),
-            tray_overlay_enabled=bool(getattr(self, "tray_overlay_enabled", False)),
-            overlay_position=getattr(self, "overlay_position", None),
+        self._owner._get_state_controller().save(
+            self._owner.geometry(),
+            self._state.display_mode,
+            self._state.mode_sizes,
+            self._owner._is_overtime_alert_enabled(),
+            startup_window_visible=bool(self._state.startup_window_visible),
+            tray_overlay_enabled=bool(self._state.tray_overlay_enabled),
+            overlay_position=self._state.overlay_position,
         )
 
     def _set_status(self, message: str) -> None:
         title = f"{BASE_TITLE} - {message}" if message else BASE_TITLE
-        self.setWindowTitle(title)
-        scanner = getattr(self, "scanner", None)
+        self._owner.setWindowTitle(title)
+        scanner = getattr(self._owner, "scanner", None)
         if scanner is not None and hasattr(scanner, "excluded_titles"):
             scanner.excluded_titles.add(title)
 
     def _initialize_overlay(self) -> None:
-        self._get_overlay_controller().initialize_overlay()
+        self._owner._get_overlay_controller().initialize_overlay()
 
     def _is_overtime_alert_enabled(self) -> bool:
-        return self._get_overtime_alert_controller().is_enabled()
+        return self._owner._get_overtime_alert_controller().is_enabled()
 
     def _set_overtime_alert_enabled(self, enabled: bool) -> None:
-        self._get_overtime_alert_controller().set_enabled(enabled)
+        self._owner._get_overtime_alert_controller().set_enabled(enabled)
 
     def _get_overtime_alert_tracker(self) -> OvertimeAlertTracker:
-        return self._get_overtime_alert_controller().get_tracker()
+        return self._owner._get_overtime_alert_controller().get_tracker()
 
     def _get_overtime_alert_toggle(self) -> Optional[QPushButton]:
-        return self.w.overtime_alert_toggle
+        return self._owner.w.overtime_alert_toggle
 
     def _get_report_button(self) -> Optional[QPushButton]:
-        return getattr(self.w, "report_button", None)
+        return getattr(self._owner.w, "report_button", None)
 
     def _get_manual_record_button(self) -> Optional[QPushButton]:
-        return getattr(self.w, "manual_record_button", None)
+        return getattr(self._owner.w, "manual_record_button", None)
 
     def _initialize_overtime_alert_toggle(self) -> None:
-        self._get_overtime_alert_controller().initialize_toggle()
+        self._owner._get_overtime_alert_controller().initialize_toggle()
 
     def _initialize_report_button(self) -> None:
-        self._get_dialog_controller().initialize_report_button()
+        self._owner._get_dialog_controller().initialize_report_button()
 
     def _initialize_manual_record_button(self) -> None:
-        self._get_dialog_controller().initialize_manual_record_button()
+        self._owner._get_dialog_controller().initialize_manual_record_button()
 
     def _open_report_dialog(self) -> None:
-        self._get_dialog_controller().open_report_dialog()
+        self._owner._get_dialog_controller().open_report_dialog()
 
     def _open_manual_record_dialog(self) -> None:
-        self._get_dialog_controller().open_manual_record_dialog()
+        self._owner._get_dialog_controller().open_manual_record_dialog()
 
     def _get_or_create_manual_record_dialog(self) -> ManualRecordDialog:
         return cast(
             ManualRecordDialog,
-            self._get_dialog_controller().get_or_create_manual_record_dialog(),
+            self._owner._get_dialog_controller().get_or_create_manual_record_dialog(),
         )
 
     def _save_manual_record(self, record: ManualPlayRecord) -> bool:
-        return self._get_dialog_controller().save_manual_record(record)
+        return self._owner._get_dialog_controller().save_manual_record(record)
 
     def _refresh_after_manual_record(self) -> None:
-        self._get_dialog_controller().refresh_after_manual_record()
+        self._owner._get_dialog_controller().refresh_after_manual_record()
 
     def _reload_today_stats(self) -> None:
-        self._get_dialog_controller().reload_today_stats()
+        self._owner._get_dialog_controller().reload_today_stats()
 
     def _set_today_stats_cache(
         self,
         game_minutes: Dict[str, float],
         completed_seconds: float,
     ) -> None:
-        self.daily_stats.today_game_minutes_cache = game_minutes
-        self.daily_stats.today_completed_seconds = completed_seconds
-        self.daily_stats.last_today_games_content = ""
+        self._owner.daily_stats.today_game_minutes_cache = game_minutes
+        self._owner.daily_stats.today_completed_seconds = completed_seconds
+        self._owner.daily_stats.last_today_games_content = ""
 
     def _open_settings_dialog(self) -> None:
-        self._get_dialog_controller().open_settings_dialog()
+        self._owner._get_dialog_controller().open_settings_dialog()
 
     def _open_game_catalog_dialog(self, *, initial_window_title: str = "") -> None:
-        self._get_dialog_controller().open_game_catalog_dialog(
+        self._owner._get_dialog_controller().open_game_catalog_dialog(
             initial_window_title=initial_window_title
         )
 
     def _on_game_catalog_saved(self) -> None:
-        self._get_dialog_controller().on_game_catalog_saved()
+        self._owner._get_dialog_controller().on_game_catalog_saved()
 
     def _on_settings_saved(self) -> None:
-        self._get_dialog_controller().on_settings_saved()
+        self._owner._get_dialog_controller().on_settings_saved()
 
     def _on_overtime_alert_toggled(self, checked: bool) -> None:
-        self._get_overtime_alert_controller().on_toggled(checked)
+        self._owner._get_overtime_alert_controller().on_toggled(checked)
 
     def _prime_overtime_alert_progress(self, total_seconds: float) -> None:
-        self._get_overtime_alert_controller().prime_progress(total_seconds)
+        self._owner._get_overtime_alert_controller().prime_progress(total_seconds)
 
     def _emit_overtime_alert(self, threshold_minutes: int) -> None:
-        self._get_overtime_alert_controller().emit_alert(threshold_minutes)
+        self._owner._get_overtime_alert_controller().emit_alert(threshold_minutes)
 
     def _update_overtime_alert(self, total_seconds: float) -> None:
-        self._get_overtime_alert_controller().update_alert(total_seconds)
+        self._owner._get_overtime_alert_controller().update_alert(total_seconds)
 
     def _get_overlay_window(self) -> Optional[TodayTimeOverlayWindow]:
-        return self.overlay_window
+        return self._owner.overlay_window
 
     def _get_today_time_display(self) -> Optional[QLabel]:
-        return self.w.today_time_display
+        return self._owner.w.today_time_display
 
     def _refresh_overlay_time(self) -> None:
-        self._get_overlay_controller().refresh_overlay_time()
+        self._owner._get_overlay_controller().refresh_overlay_time()
 
     def _sync_overlay_geometry(self) -> None:
-        self._get_overlay_controller().sync_overlay_geometry()
+        self._owner._get_overlay_controller().sync_overlay_geometry()
 
     def _should_show_overlay(self) -> bool:
-        return self._get_overlay_controller().should_show_overlay()
+        return self._owner._get_overlay_controller().should_show_overlay()
 
     def _sync_overlay_visibility(self) -> None:
-        self._get_overlay_controller().sync_overlay_visibility()
+        self._owner._get_overlay_controller().sync_overlay_visibility()
 
     def _sync_overlay(self) -> None:
-        self._get_overlay_controller().sync_overlay()
+        self._owner._get_overlay_controller().sync_overlay()
 
     def _close_overlay(self) -> None:
-        self._get_overlay_controller().close_overlay()
+        self._owner._get_overlay_controller().close_overlay()
 
     def _apply_mode_geometry(self) -> None:
-        self._get_display_controller().apply_mode_geometry(
+        self._owner._get_display_controller().apply_mode_geometry(
             self._owner,
-            self.display_mode,
-            self.mode_sizes,
+            self._state.display_mode,
+            self._state.mode_sizes,
         )
 
     def _apply_display_mode(self) -> None:
-        self._get_display_controller().apply_display_mode(
-            display_mode=self.display_mode,
-            widgets=self.w,
-            set_widget_visibility=self._set_widget_visibility,
-            set_widget_with_height=self._set_widget_with_height,
-            apply_mode_geometry=self._apply_mode_geometry,
+        self._owner._get_display_controller().apply_display_mode(
+            display_mode=self._state.display_mode,
+            widgets=self._owner.w,
+            set_widget_visibility=self._owner._set_widget_visibility,
+            set_widget_with_height=self._owner._set_widget_with_height,
+            apply_mode_geometry=self._owner._apply_mode_geometry,
         )
 
     def _set_widget_visibility(self, widget: QWidget, visible: bool) -> None:
-        self._get_display_controller().set_widget_visibility(widget, visible)
+        self._owner._get_display_controller().set_widget_visibility(widget, visible)
 
     def _set_widget_with_height(
         self,
@@ -297,7 +247,7 @@ class MainWindowActions(MainWindowCollaborator):
         min_height: int,
         max_height: int,
     ) -> None:
-        self._get_display_controller().set_widget_with_height(
+        self._owner._get_display_controller().set_widget_with_height(
             widget,
             visible,
             min_height=min_height,
@@ -313,10 +263,10 @@ class MainWindowActions(MainWindowCollaborator):
         return event.button() == Qt.MouseButton.RightButton
 
     def _show_context_menu(self, event: QMouseEvent) -> None:
-        self._get_context_menu_controller().show_context_menu(event)
+        self._owner._get_context_menu_controller().show_context_menu(event)
 
     def _add_display_mode_menu(self, menu: QMenu) -> Dict[str, object]:
-        return self._get_context_menu_controller().add_display_mode_menu(menu)
+        return self._owner._get_context_menu_controller().add_display_mode_menu(menu)
 
     def _handle_context_menu_selection(
         self,
@@ -329,7 +279,7 @@ class MainWindowActions(MainWindowCollaborator):
         mode_actions: Optional[Dict[str, object]] = None,
         manual_record_action: object = None,
     ) -> None:
-        self._get_context_menu_controller().handle_context_menu_selection(
+        self._owner._get_context_menu_controller().handle_context_menu_selection(
             selected_action,
             report_action=report_action,
             settings_action=settings_action,
@@ -342,23 +292,23 @@ class MainWindowActions(MainWindowCollaborator):
     def _set_display_mode(self, display_mode: str) -> None:
         if display_mode not in DISPLAY_MODES:
             return
-        if self.display_mode == display_mode:
+        if self._state.display_mode == display_mode:
             return
-        self.display_mode = display_mode
-        self._apply_display_mode()
-        self._save_window_state()
+        self._state.display_mode = display_mode
+        self._owner._apply_display_mode()
+        self._owner._save_window_state()
 
     def _cycle_display_mode(self) -> None:
-        self.display_mode = self._get_display_controller().next_display_mode(
-            self.display_mode
+        self._state.display_mode = self._owner._get_display_controller().next_display_mode(
+            self._state.display_mode
         )
-        self._apply_display_mode()
-        self._save_window_state()
+        self._owner._apply_display_mode()
+        self._owner._save_window_state()
 
     def _record_current_mode_size(self) -> None:
-        self._get_state_controller().record_resize(
-            self.mode_sizes,
-            self.display_mode,
-            self.width(),
-            self.height(),
+        self._owner._get_state_controller().record_resize(
+            self._state.mode_sizes,
+            self._state.display_mode,
+            self._owner.width(),
+            self._owner.height(),
         )

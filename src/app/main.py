@@ -2,7 +2,8 @@
 
 import logging
 import sys
-from typing import Any, Callable, Optional, Sequence, TypeVar, cast
+from datetime import datetime
+from typing import Callable, Optional, Sequence, TypeVar, cast
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QCloseEvent, QMouseEvent, QResizeEvent
@@ -33,6 +34,7 @@ from src.app.main_constants import (
     POLL_INTERVAL_SECONDS,
     UI_REFRESH_INTERVAL_SECONDS,
 )
+from src.app.main_window.legacy_aliases import method_aliases, state_aliases
 from src.app.main_window.action_methods import MainWindowActions
 from src.app.main_window.controller_methods import MainWindowControllerRegistry
 from src.app.main_window.scan_methods import MainWindowScanOps
@@ -63,13 +65,13 @@ from src.infra.config_loader import (
     DEFAULT_BROWSERS,
     DEFAULT_EXCLUDED_TITLES,
 )
-from src.infra.log_handler import LogHandler
 from src.infra.log_config import (
     DEFAULT_LOGGING_STATE,
     LOG_BACKUP_COUNT,
     LOG_MAX_BYTES,
     configure_logging as configure_app_logging,
 )
+from src.infra.log_handler import LogHandler
 from src.ui.gui_layout import build_main_layout
 
 logger = logging.getLogger(__name__)
@@ -79,7 +81,7 @@ LOG_DIR = DEFAULT_LOGGING_STATE.log_dir
 
 
 def configure_logging() -> None:
-    """アプリ起動時にロギングを初期化する（import時は実行しない）。"""
+    """Configure application logging at startup."""
     global LOG_DIR, LOG_FILE_PATH
     configure_app_logging(DEFAULT_LOGGING_STATE)
     LOG_FILE_PATH = DEFAULT_LOGGING_STATE.log_file_path
@@ -90,25 +92,10 @@ TDependency = TypeVar("TDependency")
 
 
 class MainWindow(QWidget):
-    """メインウィンドウ."""
+    """Main application window."""
 
-    _COLLABORATOR_ATTRS = (
-        "_state_access",
-        "_controllers",
-        "_actions",
-        "_scan_ops",
-        "_tray_title_ops",
-        "_win32_ops",
-    )
-    _STATE_ATTRIBUTE_NAMES = set(MainWindowStateAccess.ATTRIBUTE_NAMES)
-    _COLLABORATOR_METHOD_NAMES = (
-        set(MainWindowStateAccess.METHOD_NAMES)
-        | set(MainWindowControllerRegistry.METHOD_NAMES)
-        | set(MainWindowActions.METHOD_NAMES)
-        | set(MainWindowScanOps.METHOD_NAMES)
-        | set(MainWindowTrayTitleOps.METHOD_NAMES)
-        | set(MainWindowWin32Ops.METHOD_NAMES)
-    )
+    locals().update(state_aliases())
+    locals().update(method_aliases())
 
     def __init__(self) -> None:
         super().__init__()
@@ -116,75 +103,40 @@ class MainWindow(QWidget):
         self._initialize_window_state()
         self.w = build_main_layout(self)
         self._initialize_runtime_state()
-        self._initialize_tray_icon()
-        self._initialize_window_title_copy()
+        self._tray_title_ops._initialize_tray_icon()
+        self._tray_title_ops._initialize_window_title_copy()
         self._warmup_dependencies()
-        self._init_components()
+        self._actions._init_components()
         self._start_background_timers()
         self._run_initial_refresh()
 
-
     def _initialize_collaborators(self) -> None:
         self._state_access = MainWindowStateAccess(self)
-        for name in self._STATE_ATTRIBUTE_NAMES:
-            if name in self.__dict__:
-                setattr(self._state_access, name, self.__dict__[name])
         self._controllers = MainWindowControllerRegistry(self)
         self._actions = MainWindowActions(self)
         self._scan_ops = MainWindowScanOps(self)
         self._tray_title_ops = MainWindowTrayTitleOps(self)
         self._win32_ops = MainWindowWin32Ops(self)
 
-    def _ensure_collaborators(self) -> None:
-        if "_actions" not in self.__dict__:
-            self._initialize_collaborators()
-
-    def __getattr__(self, name: str) -> Any:
-        if name in self._STATE_ATTRIBUTE_NAMES:
-            self._ensure_collaborators()
-            return getattr(self._state_access, name)
-        if name in self._COLLABORATOR_METHOD_NAMES:
-            self._ensure_collaborators()
-            for attr_name in self._COLLABORATOR_ATTRS:
-                collaborator = self.__dict__[attr_name]
-                if name in getattr(type(collaborator), "METHOD_NAMES", ()):
-                    return getattr(collaborator, name)
-        raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}")
-
-    def __getattribute__(self, name: str) -> Any:
-        if (
-            name not in {"_state_access", "_STATE_ATTRIBUTE_NAMES", "__dict__"}
-            and name in type(self)._STATE_ATTRIBUTE_NAMES
-            and "_state_access" in object.__getattribute__(self, "__dict__")
-        ):
-            return getattr(object.__getattribute__(self, "_state_access"), name)
-        return super().__getattribute__(name)
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name in type(self)._STATE_ATTRIBUTE_NAMES and "_state_access" in self.__dict__:
-            setattr(self._state_access, name, value)
-            super().__setattr__(name, value)
-            return
-        super().__setattr__(name, value)
-
     def _initialize_window_state(self) -> None:
-        """タイトルと永続化されたウィンドウ状態を初期適用する."""
+        """Apply the persisted window state."""
         self.setWindowTitle(BASE_TITLE)
+        state = self._state_access
         (
             x,
             y,
-            self.display_mode,
-            self.mode_sizes,
-            self.overtime_alert_enabled,
-        ) = self._get_state_controller().load_all()
-        state_controller = self._get_state_controller()
-        self.startup_window_visible = state_controller.load_startup_window_visible()
-        self.tray_overlay_enabled = state_controller.load_tray_overlay_enabled()
-        self.overlay_position = state_controller.load_overlay_position()
-        self.setGeometry(x, y, *self.mode_sizes[self.display_mode])
+            state.display_mode,
+            state.mode_sizes,
+            state.overtime_alert_enabled,
+        ) = self._controllers._get_state_controller().load_all()
+        state_controller = self._controllers._get_state_controller()
+        state.startup_window_visible = state_controller.load_startup_window_visible()
+        state.tray_overlay_enabled = state_controller.load_tray_overlay_enabled()
+        state.overlay_position = state_controller.load_overlay_position()
+        self.setGeometry(x, y, *state.mode_sizes[state.display_mode])
 
     def _initialize_runtime_state(self) -> None:
-        """実行時状態の初期値を設定する."""
+        """Initialize runtime-only state."""
         self.session_state = GameSessionState()
         self.browsers: Sequence[str] = DEFAULT_BROWSERS
         self.scanner: WindowScanner
@@ -196,15 +148,12 @@ class MainWindow(QWidget):
         self.timer_state = TimerState()
         self.tray_action_state = TrayActionState()
         self.lifecycle_state = AppLifecycleState()
-        current_display_mode = getattr(self, "display_mode", "max")
-        current_mode_sizes = getattr(self, "mode_sizes", MODE_DEFAULT_SIZES)
-        current_startup_window_visible = bool(
-            getattr(self, "startup_window_visible", False)
-        )
-        current_tray_overlay_enabled = bool(
-            getattr(self, "tray_overlay_enabled", False)
-        )
-        current_overlay_position = getattr(self, "overlay_position", None)
+        state = self._state_access
+        current_display_mode = state.display_mode
+        current_mode_sizes = state.mode_sizes
+        current_startup_window_visible = bool(state.startup_window_visible)
+        current_tray_overlay_enabled = bool(state.tray_overlay_enabled)
+        current_overlay_position = state.overlay_position
         self.display_state = WindowDisplayState.create(
             display_mode=current_display_mode,
             mode_sizes=current_mode_sizes,
@@ -212,9 +161,7 @@ class MainWindow(QWidget):
             tray_overlay_enabled=current_tray_overlay_enabled,
             overlay_position=current_overlay_position,
         )
-        current_overtime_alert_enabled = bool(
-            getattr(self, "overtime_alert_enabled", DEFAULT_OVERTIME_ALERT_ENABLED)
-        )
+        current_overtime_alert_enabled = bool(state.overtime_alert_enabled)
         self.alert_state = GameAlertState.create(
             enabled=current_overtime_alert_enabled,
             thresholds_minutes=OVERTIME_ALERT_THRESHOLDS_MINUTES,
@@ -223,27 +170,35 @@ class MainWindow(QWidget):
         self.window_title_state = WindowTitleState()
 
     def _warmup_dependencies(self) -> None:
-        """起動直後に使う依存を事前生成する."""
-        self._get_ui_controller()
-        self._get_display_controller()
-        self._get_loop_controller()
-        self._get_overlay_controller()
+        """Create dependencies used immediately after startup."""
+        self._controllers._get_ui_controller()
+        self._controllers._get_display_controller()
+        self._controllers._get_loop_controller()
+        self._controllers._get_overlay_controller()
         self._get_bootstrapper()
 
     def _start_background_timers(self) -> None:
-        """バックグラウンド更新タイマーを開始する."""
-        # タイマーをインスタンス変数に保持（GCによる停止防止）
-        self._scan_timer = self._start_timer(POLL_INTERVAL_SECONDS, self._scan_tick)
-        self._ui_timer = self._start_timer(UI_REFRESH_INTERVAL_SECONDS, self._ui_tick)
+        """Start background refresh timers."""
+        # Keep timer objects alive to prevent garbage collection.
+        self._state_access._scan_timer = self._start_timer(
+            POLL_INTERVAL_SECONDS,
+            self._scan_tick,
+        )
+        self._state_access._ui_timer = self._start_timer(
+            UI_REFRESH_INTERVAL_SECONDS,
+            self._ui_tick,
+        )
 
     def _run_initial_refresh(self) -> None:
-        """起動直後の初回描画を実行する."""
+        """Run the first scan and UI refresh."""
         self._scan_tick()
         self._ui_tick()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """ウィンドウ終了時にプレイ中のゲームを記録し、状態を保存."""
-        if not bool(getattr(self, "_is_quitting", True)):
+        """Hide to tray or save state before application exit."""
+        if "_state_access" not in self.__dict__:
+            self._initialize_collaborators()
+        if not bool(self._is_quitting):
             self._hide_main_window_to_tray()
             ignore = getattr(event, "ignore", None)
             if callable(ignore):
@@ -256,7 +211,7 @@ class MainWindow(QWidget):
         super().closeEvent(event)
 
     def _ensure_daily_stats(self) -> DailyStatsTracker:
-        """daily_stats を必ず返す."""
+        """Return a DailyStatsTracker instance."""
         daily_stats = getattr(self, "daily_stats", None)
         if daily_stats is None:
             daily_stats = DailyStatsTracker()
@@ -270,7 +225,7 @@ class MainWindow(QWidget):
         factory: Callable[[], TDependency],
         validator: Optional[Callable[[TDependency], bool]] = None,
     ) -> TDependency:
-        """キャッシュ済み依存を再利用し、必要時のみ再生成する."""
+        """Resolve and cache a dependency."""
         dependency = cast(Optional[TDependency], getattr(self, attr_name, None))
         if dependency is None or (validator is not None and not validator(dependency)):
             dependency = factory()
@@ -278,7 +233,7 @@ class MainWindow(QWidget):
         return dependency
 
     def _get_bootstrapper(self) -> MainWindowBootstrapper:
-        """初期化ブートストラッパーを返す."""
+        """Return the bootstrapper for startup dependencies."""
         daily_stats = self._ensure_daily_stats()
         return self._resolve_dependency(
             "_bootstrapper",
@@ -300,8 +255,8 @@ class MainWindow(QWidget):
         )
 
     def _apply_bootstrap_result(self, result: MainWindowBootstrapResult) -> None:
-        """ブートストラップ結果を MainWindow の状態へ反映."""
-        self.games = result.games
+        """Apply bootstrap results to MainWindow state."""
+        self._state_access.games = result.games
         self.browsers = result.browsers
         self.scanner = result.scanner
         self.recorder = result.recorder
@@ -310,7 +265,9 @@ class MainWindow(QWidget):
         self.daily_stats.today_completed_seconds = result.today_completed_seconds
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        """クリックで表示モードをトグル。"""
+        """Handle mouse clicks for context menu and display mode cycling."""
+        if "_actions" not in self.__dict__:
+            self._initialize_collaborators()
         if self._should_show_context_menu(event):
             self._show_context_menu(event)
             super().mousePressEvent(event)
@@ -320,19 +277,19 @@ class MainWindow(QWidget):
         super().mousePressEvent(event)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
-        """リサイズ時に現在モードのサイズを記録."""
+        """Record the current mode size on resize."""
         self._record_current_mode_size()
         super().resizeEvent(event)
 
     def _ui_tick(self) -> None:
-        """UIだけを高速更新（0.1秒間隔）."""
-        self._get_loop_controller().run_ui_tick(self)
+        """Refresh displayed play time and overlay state."""
+        now = datetime.now()
+        active_games = self._state_access.active_games_cache
+        self._update_session_times(active_games, now)
+        total_seconds = self._update_today_totals(active_games, now)
+        self._update_today_games_list(now)
+        self._update_overtime_alert(total_seconds)
         self._sync_overlay()
-
-
-# =============================================================================
-# エントリーポイント
-# =============================================================================
 
 
 def main() -> None:
@@ -340,10 +297,10 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     window = MainWindow()
-    if window.should_show_window_on_startup():
+    if window._tray_title_ops.should_show_window_on_startup():
         window.show()
     sys.exit(app.exec())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
