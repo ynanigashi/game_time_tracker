@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from src.ui.settings_dialog import SettingsDialog
 
 
-class MainWindowStateAccessors:
+class MainWindowStateDescriptors:
     """Compatibility accessors backed by extracted MainWindow state objects."""
 
     def _ensure_session_state(self) -> GameSessionState:
@@ -325,3 +325,11 @@ class MainWindowStateAccessors:
     @_ui_timer.setter
     def _ui_timer(self, value: object) -> None:
         self._ensure_timer_state().ui_timer = value
+
+
+def install_main_window_state_accessors(target_cls: type) -> None:
+    """Install state accessors on MainWindow without using inheritance."""
+    for name, descriptor in MainWindowStateDescriptors.__dict__.items():
+        if name.startswith("__"):
+            continue
+        setattr(target_cls, name, descriptor)

@@ -19,7 +19,7 @@ def _main_module() -> object:
     return main_module
 
 
-class MainWindowWin32Mixin:
+class MainWindowWin32Methods:
     """Expose Win32 helper delegates expected by legacy MainWindow tests."""
 
     @staticmethod
@@ -101,3 +101,11 @@ class MainWindowWin32Mixin:
     def _is_today_display_covered_by_foreground_window(self) -> bool:
         """Return whether today_time_display is covered by a foreign window."""
         return self._get_cover_detector().is_today_display_covered()
+
+
+def install_main_window_win32_methods(target_cls: type) -> None:
+    """Install Win32 helper delegates on MainWindow without inheritance."""
+    for name, descriptor in MainWindowWin32Methods.__dict__.items():
+        if name.startswith("__"):
+            continue
+        setattr(target_cls, name, descriptor)

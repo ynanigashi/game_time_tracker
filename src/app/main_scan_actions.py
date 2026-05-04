@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class MainWindowScanActions:
+class MainWindowScanMethods:
     """Compatibility methods that delegate scan and today-summary work."""
 
     def _scan_tick(self) -> None:
@@ -119,3 +119,23 @@ class MainWindowScanActions:
                 exc_info=True,
             )
             return 0.0
+
+
+def install_main_window_scan_methods(target_cls: type) -> None:
+    """Install scan compatibility methods without using inheritance."""
+    for name in (
+        "_scan_tick",
+        "_scan_games",
+        "_apply_scan_result",
+        "_update_scan_status",
+        "_update_active_list",
+        "_all_playing_games",
+        "_has_playing_games",
+        "_update_session_times",
+        "_update_today_totals",
+        "_update_window_list",
+        "_load_today_game_minutes",
+        "_update_today_games_list",
+        "_load_today_completed_seconds",
+    ):
+        setattr(target_cls, name, MainWindowScanMethods.__dict__[name])

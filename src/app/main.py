@@ -52,10 +52,10 @@ from src.app.main_constants import (
     POLL_INTERVAL_SECONDS,
     UI_REFRESH_INTERVAL_SECONDS,
 )
-from src.app.main_scan_actions import MainWindowScanActions
-from src.app.main_state_accessors import MainWindowStateAccessors
-from src.app.main_tray_title_actions import MainWindowTrayTitleActions
-from src.app.main_win32 import MainWindowWin32Mixin
+from src.app.main_scan_actions import install_main_window_scan_methods
+from src.app.main_state_accessors import install_main_window_state_accessors
+from src.app.main_tray_title_actions import install_main_window_tray_title_actions
+from src.app.main_win32 import install_main_window_win32_methods
 from src.app.session_state import GameSessionState
 from src.app.timer_state import TimerState
 from src.app.tray_state import TrayActionState
@@ -126,13 +126,7 @@ def configure_logging() -> None:
 TDependency = TypeVar("TDependency")
 
 
-class MainWindow(
-    QWidget,
-    MainWindowScanActions,
-    MainWindowStateAccessors,
-    MainWindowTrayTitleActions,
-    MainWindowWin32Mixin,
-):
+class MainWindow(QWidget):
     """メインウィンドウ."""
 
     def __init__(self) -> None:
@@ -936,6 +930,12 @@ class MainWindow(
 # =============================================================================
 # エントリーポイント
 # =============================================================================
+install_main_window_state_accessors(MainWindow)
+install_main_window_scan_methods(MainWindow)
+install_main_window_tray_title_actions(MainWindow)
+install_main_window_win32_methods(MainWindow)
+
+
 def main() -> None:
     configure_logging()
     app = QApplication(sys.argv)

@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QMenu, QWidget
 from src.app.controllers import MainWindowTitleController, MainWindowTrayController
 
 
-class MainWindowTrayTitleActions:
+class MainWindowTrayTitleMethods:
     """Compatibility methods that delegate tray and title-list work to controllers."""
 
     def _initialize_tray_icon(self) -> None:
@@ -76,3 +76,11 @@ class MainWindowTrayTitleActions:
     def _copy_text_to_clipboard(self, text: str) -> None:
         """Copy text to the clipboard."""
         self._get_window_title_controller().copy_text_to_clipboard(text)
+
+
+def install_main_window_tray_title_actions(target_cls: type) -> None:
+    """Install tray and title-list actions on MainWindow without inheritance."""
+    for name, descriptor in MainWindowTrayTitleMethods.__dict__.items():
+        if name.startswith("__"):
+            continue
+        setattr(target_cls, name, descriptor)
