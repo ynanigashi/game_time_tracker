@@ -32,7 +32,7 @@ class MainWindowScanController:
     def __init__(
         self,
         *,
-        state_tracker: Optional[ScanStateTracker],
+        state_tracker: ScanStateTracker,
         games_provider: Callable[[], Sequence[GameEntry]],
         scan_result_updater: Callable[
             [Sequence[GameEntry], Sequence[GameEntry], List[str]],
@@ -60,8 +60,6 @@ class MainWindowScanController:
         window_titles: List[str],
         foreground_title: Optional[str],
     ) -> ScanResult:
-        if self.state_tracker is None:
-            raise RuntimeError("state_tracker is required to scan games")
         return self.state_tracker.scan(
             games=self.games_provider(),
             window_titles=window_titles,

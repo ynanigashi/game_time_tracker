@@ -31,40 +31,38 @@ class MainWindowOverlayController:
     def __init__(
         self,
         *,
-        overlay_window_provider: Optional[Callable[[], object]] = None,
-        set_overlay_window: Optional[Callable[[object], None]] = None,
-        set_overlay_position: Optional[Callable[[Tuple[int, int]], None]] = None,
-        get_overlay_position: Optional[Callable[[], Optional[Tuple[int, int]]]] = None,
-        today_time_display_provider: Optional[Callable[[], object]] = None,
-        save_window_state: Optional[Callable[[], None]] = None,
-        has_playing_games: Optional[Callable[[], bool]] = None,
+        overlay_window_provider: Callable[[], object],
+        set_overlay_window: Callable[[object], None],
+        set_overlay_position: Callable[[Tuple[int, int]], None],
+        get_overlay_position: Callable[[], Optional[Tuple[int, int]]],
+        today_time_display_provider: Callable[[], object],
+        save_window_state: Callable[[], None],
+        has_playing_games: Callable[[], bool],
         today_display_cover_state: Optional[Callable[[], Tuple[bool, str]]] = None,
         is_own_window: Optional[Callable[[int], bool]] = None,
-        is_main_window_visible: Optional[Callable[[], bool]] = None,
-        is_main_window_active: Optional[Callable[[], bool]] = None,
-        own_window_provider: Optional[Callable[[], object]] = None,
-        window_geometry: Optional[Callable[[], object]] = None,
-        move_window: Optional[Callable[[int, int], None]] = None,
-        get_tray_overlay_enabled: Optional[Callable[[], bool]] = None,
+        is_main_window_visible: Callable[[], bool],
+        is_main_window_active: Callable[[], bool],
+        is_active_window_own: Callable[[object], bool],
+        window_geometry: Callable[[], object],
+        move_window: Callable[[int, int], None],
+        get_tray_overlay_enabled: Callable[[], bool],
     ) -> None:
         self.visibility_log_state = OverlayVisibilityLogState()
-        self.overlay_window_provider = overlay_window_provider or (lambda: None)
-        self.set_overlay_window = set_overlay_window or (lambda _window: None)
-        self.set_overlay_position = set_overlay_position or (lambda _position: None)
-        self.get_overlay_position = get_overlay_position or (lambda: None)
-        self.today_time_display_provider = today_time_display_provider or (
-            lambda: None
-        )
-        self.save_window_state = save_window_state or (lambda: None)
-        self.has_playing_games = has_playing_games or (lambda: False)
+        self.overlay_window_provider = overlay_window_provider
+        self.set_overlay_window = set_overlay_window
+        self.set_overlay_position = set_overlay_position
+        self.get_overlay_position = get_overlay_position
+        self.today_time_display_provider = today_time_display_provider
+        self.save_window_state = save_window_state
+        self.has_playing_games = has_playing_games
         self.today_display_cover_state = today_display_cover_state
         self.is_own_window = is_own_window
-        self.is_main_window_visible = is_main_window_visible or (lambda: False)
-        self.is_main_window_active = is_main_window_active or (lambda: False)
-        self.own_window_provider = own_window_provider or (lambda: None)
-        self.window_geometry = window_geometry or (lambda: None)
-        self.move_window = move_window or (lambda _x, _y: None)
-        self.get_tray_overlay_enabled = get_tray_overlay_enabled or (lambda: False)
+        self.is_main_window_visible = is_main_window_visible
+        self.is_main_window_active = is_main_window_active
+        self.is_active_window_own = is_active_window_own
+        self.window_geometry = window_geometry
+        self.move_window = move_window
+        self.get_tray_overlay_enabled = get_tray_overlay_enabled
 
     def initialize_overlay(self) -> None:
         """今日のプレイ時間オーバーレイを初期化する."""
@@ -231,7 +229,7 @@ class MainWindowOverlayController:
 
         try:
             active_window = QApplication.activeWindow()
-            if active_window is self.own_window_provider():
+            if self.is_active_window_own(active_window):
                 return True
         except Exception:
             logger.debug("Qt active window 判定に失敗", exc_info=True)

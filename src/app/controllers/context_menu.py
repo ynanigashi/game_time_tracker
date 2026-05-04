@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Callable, Dict, Optional, Sequence
 
-from PySide6.QtWidgets import QMenu
+from PySide6.QtWidgets import QMenu, QWidget
 
 
 class MainWindowContextMenuController:
@@ -13,7 +13,7 @@ class MainWindowContextMenuController:
     def __init__(
         self,
         *,
-        parent_widget: object,
+        parent_widget: Optional[QWidget],
         display_modes: Sequence[str],
         display_mode_provider: Callable[[], str],
         set_display_mode: Callable[[str], None],

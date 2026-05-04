@@ -6,7 +6,7 @@ import logging
 from typing import Callable, Optional, Tuple
 
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication, QMenu, QStyle, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QMenu, QStyle, QSystemTrayIcon, QWidget
 
 from src.infra.runtime_paths import runtime_path
 from src.app.tray_state import TrayActionState
@@ -20,46 +20,39 @@ class MainWindowTrayController:
     def __init__(
         self,
         *,
-        parent_widget: object,
+        parent_widget: Optional[QWidget],
         base_title: str,
         action_state: TrayActionState,
-        get_tray_overlay_enabled: Callable[[], bool] = lambda: False,
-        set_tray_overlay_enabled_value: Callable[[bool], None] = lambda _enabled: None,
-        get_startup_window_visible: Callable[[], bool] = lambda: False,
-        set_startup_window_visible_value: Callable[[bool], None] = lambda _visible: None,
-        get_force_startup_window_visible: Callable[[], bool] = lambda: False,
-        get_overlay_position: Callable[[], Optional[Tuple[int, int]]] = lambda: None,
-        get_tray_icon: Callable[[], object] = lambda: None,
-        set_tray_icon: Callable[[object], None] = lambda _icon: None,
-        set_tray_menu: Callable[[object], None] = lambda _menu: None,
-        show_window: Callable[[], None] = lambda: None,
-        hide_window: Callable[[], None] = lambda: None,
-        raise_window: Callable[[], None] = lambda: None,
-        activate_window: Callable[[], None] = lambda: None,
-        is_window_visible: Callable[[], bool] = lambda: False,
-        window_geometry: Callable[[], object] = lambda: None,
-        move_window: Callable[[int, int], None] = lambda _x, _y: None,
-        show_main_window: Callable[[], None] = lambda: None,
-        hide_main_window: Callable[[], None] = lambda: None,
-        set_tray_overlay_enabled: Callable[[bool], None] = lambda _enabled: None,
-        set_startup_window_visible: Callable[[bool], None] = lambda _visible: None,
-        open_manual_record_dialog: Callable[[], None] = lambda: None,
-        open_report_dialog: Callable[[], None] = lambda: None,
-        open_game_catalog_dialog: Callable[[], None] = lambda: None,
-        open_settings_dialog: Callable[[], None] = lambda: None,
-        quit_application: Callable[[], None] = lambda: None,
-        sync_tray_window_actions_callback: Callable[[], None] = lambda: None,
-        save_window_state: Callable[[], None] = lambda: None,
-        sync_overlay: Callable[[], None] = lambda: None,
-        set_force_startup_window_visible: Callable[[bool], None] = lambda _visible: None,
-        process_pending_ui_events_callback: Callable[[], None] = lambda: None,
-        align_today_display_to_overlay_position_callback: Callable[[], None] = (
-            lambda: None
-        ),
-        today_time_display_provider: Callable[[], object] = lambda: None,
-        set_quitting: Callable[[bool], None] = lambda _quitting: None,
-        record_playing_games_before_close: Callable[[], None] = lambda: None,
-        close_overlay: Callable[[], None] = lambda: None,
+        get_tray_overlay_enabled: Callable[[], bool],
+        set_tray_overlay_enabled_value: Callable[[bool], None],
+        get_startup_window_visible: Callable[[], bool],
+        set_startup_window_visible_value: Callable[[bool], None],
+        get_force_startup_window_visible: Callable[[], bool],
+        get_overlay_position: Callable[[], Optional[Tuple[int, int]]],
+        get_tray_icon: Callable[[], object],
+        set_tray_icon: Callable[[object], None],
+        set_tray_menu: Callable[[object], None],
+        show_window: Callable[[], None],
+        hide_window: Callable[[], None],
+        raise_window: Callable[[], None],
+        activate_window: Callable[[], None],
+        is_window_visible: Callable[[], bool],
+        window_geometry: Callable[[], object],
+        move_window: Callable[[int, int], None],
+        open_manual_record_dialog: Callable[[], None],
+        open_report_dialog: Callable[[], None],
+        open_game_catalog_dialog: Callable[[], None],
+        open_settings_dialog: Callable[[], None],
+        sync_tray_window_actions_callback: Callable[[], None],
+        save_window_state: Callable[[], None],
+        sync_overlay: Callable[[], None],
+        set_force_startup_window_visible: Callable[[bool], None],
+        process_pending_ui_events_callback: Callable[[], None],
+        align_today_display_to_overlay_position_callback: Callable[[], None],
+        today_time_display_provider: Callable[[], object],
+        set_quitting: Callable[[bool], None],
+        record_playing_games_before_close: Callable[[], None],
+        close_overlay: Callable[[], None],
     ) -> None:
         self.parent_widget = parent_widget
         self.base_title = base_title
@@ -80,15 +73,10 @@ class MainWindowTrayController:
         self.is_window_visible = is_window_visible
         self.window_geometry = window_geometry
         self.move_window = move_window
-        self.show_main_window_callback = show_main_window
-        self.hide_main_window_callback = hide_main_window
-        self.set_tray_overlay_enabled_callback = set_tray_overlay_enabled
-        self.set_startup_window_visible_callback = set_startup_window_visible
         self.open_manual_record_dialog_callback = open_manual_record_dialog
         self.open_report_dialog_callback = open_report_dialog
         self.open_game_catalog_dialog_callback = open_game_catalog_dialog
         self.open_settings_dialog_callback = open_settings_dialog
-        self.quit_application_callback = quit_application
         self.sync_tray_window_actions_callback = sync_tray_window_actions_callback
         self.save_window_state = save_window_state
         self.sync_overlay = sync_overlay
@@ -159,17 +147,17 @@ class MainWindowTrayController:
         exit_action = menu.addAction("\u7d42\u4e86")
 
         show_action.triggered.connect(
-            lambda _checked=False: self.show_main_window_callback()
+            lambda _checked=False: self.show_main_window_from_tray()
         )
         hide_action.triggered.connect(
-            lambda _checked=False: self.hide_main_window_callback()
+            lambda _checked=False: self.hide_main_window_to_tray()
         )
-        overlay_action.toggled.connect(self.set_tray_overlay_enabled_callback)
+        overlay_action.toggled.connect(self.set_tray_overlay_enabled)
         startup_show_action.triggered.connect(
-            lambda _checked=False: self.set_startup_window_visible_callback(True)
+            lambda _checked=False: self.set_startup_window_visible(True)
         )
         startup_hide_action.triggered.connect(
-            lambda _checked=False: self.set_startup_window_visible_callback(False)
+            lambda _checked=False: self.set_startup_window_visible(False)
         )
         manual_record_action.triggered.connect(
             lambda _checked=False: self.open_manual_record_dialog_callback()
@@ -183,7 +171,7 @@ class MainWindowTrayController:
         settings_action.triggered.connect(
             lambda _checked=False: self.open_settings_dialog_callback()
         )
-        exit_action.triggered.connect(lambda _checked=False: self.quit_application_callback())
+        exit_action.triggered.connect(lambda _checked=False: self.quit_application())
 
         self.action_state.show_action = show_action
         self.action_state.hide_action = hide_action

@@ -376,12 +376,15 @@ class MainWindow(
                 is_main_window_active=lambda: bool(
                     getattr(self, "isActiveWindow", lambda: False)()
                 ),
-                own_window_provider=lambda: self,
+                is_active_window_own=lambda active_window: active_window is self,
                 window_geometry=self.geometry,
                 move_window=self.move,
                 get_tray_overlay_enabled=lambda: bool(self.tray_overlay_enabled),
             ),
-            validator=lambda controller: controller.own_window_provider() is self,
+            validator=lambda controller: (
+                controller.overlay_window_provider()
+                is getattr(self, "overlay_window", None)
+            ),
         )
 
     def _get_tray_controller(self) -> MainWindowTrayController:
@@ -418,15 +421,10 @@ class MainWindow(
                 is_window_visible=lambda: bool(self.isVisible()),
                 window_geometry=self.geometry,
                 move_window=self.move,
-                show_main_window=self._show_main_window_from_tray,
-                hide_main_window=self._hide_main_window_to_tray,
-                set_tray_overlay_enabled=self._set_tray_overlay_enabled,
-                set_startup_window_visible=self._set_startup_window_visible,
                 open_manual_record_dialog=self._open_manual_record_dialog,
                 open_report_dialog=self._open_report_dialog,
                 open_game_catalog_dialog=self._open_game_catalog_dialog,
                 open_settings_dialog=self._open_settings_dialog,
-                quit_application=self._quit_application,
                 sync_tray_window_actions_callback=self._sync_tray_window_actions,
                 save_window_state=self._save_window_state,
                 sync_overlay=self._sync_overlay,
@@ -572,7 +570,7 @@ class MainWindow(
         return self._resolve_dependency(
             "_scan_controller",
             factory=lambda: MainWindowScanController(
-                state_tracker=getattr(self, "state_tracker", None),
+                state_tracker=self.state_tracker,
                 games_provider=lambda: self.games,
                 scan_result_updater=lambda active, inactive, titles: (
                     self._ensure_session_state().update_scan_result(
@@ -589,7 +587,7 @@ class MainWindow(
                 get_today_stats=self.recorder.log_handler.get_today_stats,
             ),
             validator=lambda controller: (
-                controller.state_tracker is getattr(self, "state_tracker", None)
+                controller.state_tracker is self.state_tracker
             ),
         )
 

@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Callable, Dict, Optional
 
 from src.app.dialog_state import DialogRefState
+from src.core.models import GameEntry
 
 
 class MainWindowDialogController:
@@ -22,7 +23,7 @@ class MainWindowDialogController:
         state: DialogRefState,
         has_recorder: Callable[[], bool],
         log_handler_provider: Callable[[], object],
-        record_with_times: Callable[[object, datetime, datetime], Optional[float]],
+        record_with_times: Callable[[GameEntry, datetime, datetime], Optional[float]],
         games_provider: Callable[[], list],
         get_today_stats: Callable[[], tuple[Dict[str, float], float]],
         set_today_stats: Callable[[Dict[str, float], float], None],

@@ -10,14 +10,51 @@ from src.app.tray_state import TrayActionState
 
 
 class MainWindowTrayControllerTest(unittest.TestCase):
+    def _create_controller(self, **overrides):
+        defaults = {
+            "parent_widget": SimpleNamespace(),
+            "base_title": "Game Time Tracker",
+            "action_state": TrayActionState(),
+            "get_tray_overlay_enabled": lambda: False,
+            "set_tray_overlay_enabled_value": lambda _enabled: None,
+            "get_startup_window_visible": lambda: False,
+            "set_startup_window_visible_value": lambda _visible: None,
+            "get_force_startup_window_visible": lambda: False,
+            "get_overlay_position": lambda: None,
+            "get_tray_icon": lambda: None,
+            "set_tray_icon": lambda _icon: None,
+            "set_tray_menu": lambda _menu: None,
+            "show_window": lambda: None,
+            "hide_window": lambda: None,
+            "raise_window": lambda: None,
+            "activate_window": lambda: None,
+            "is_window_visible": lambda: False,
+            "window_geometry": lambda: SimpleNamespace(x=lambda: 0, y=lambda: 0),
+            "move_window": lambda _x, _y: None,
+            "open_manual_record_dialog": lambda: None,
+            "open_report_dialog": lambda: None,
+            "open_game_catalog_dialog": lambda: None,
+            "open_settings_dialog": lambda: None,
+            "sync_tray_window_actions_callback": lambda: None,
+            "save_window_state": lambda: None,
+            "sync_overlay": lambda: None,
+            "set_force_startup_window_visible": lambda _visible: None,
+            "process_pending_ui_events_callback": lambda: None,
+            "align_today_display_to_overlay_position_callback": lambda: None,
+            "today_time_display_provider": lambda: None,
+            "set_quitting": lambda _quitting: None,
+            "record_playing_games_before_close": lambda: None,
+            "close_overlay": lambda: None,
+        }
+        defaults.update(overrides)
+        return MainWindowTrayController(**defaults)
+
     def test_sync_window_actions_uses_injected_action_state(self):
         action_state = TrayActionState(
             show_action=FakeAction("show"),
             hide_action=FakeAction("hide"),
         )
-        controller = MainWindowTrayController(
-            parent_widget=SimpleNamespace(),
-            base_title="Game Time Tracker",
+        controller = self._create_controller(
             action_state=action_state,
             is_window_visible=lambda: False,
         )
@@ -33,15 +70,13 @@ class MainWindowTrayControllerTest(unittest.TestCase):
             tray_overlay_enabled=False,
             startup_window_visible=True,
         )
-        controller = MainWindowTrayController(
+        controller = self._create_controller(
             parent_widget=owner,
-            base_title="Game Time Tracker",
-            action_state=TrayActionState(),
             get_tray_overlay_enabled=lambda: owner.tray_overlay_enabled,
             get_startup_window_visible=lambda: owner.startup_window_visible,
-            show_main_window=lambda: calls.append("show"),
+            show_window=lambda: calls.append("show"),
             open_report_dialog=lambda: calls.append("report"),
-            set_startup_window_visible=lambda visible: calls.append(
+            set_startup_window_visible_value=lambda visible: calls.append(
                 ("startup", visible)
             ),
             sync_tray_window_actions_callback=lambda: calls.append("sync"),
@@ -53,15 +88,16 @@ class MainWindowTrayControllerTest(unittest.TestCase):
         menu.menus[0].actions[1].triggered.callback()
         menu.aboutToShow.callback()
 
-        self.assertEqual(calls, ["show", "report", ("startup", False), "sync"])
+        self.assertEqual(
+            calls,
+            ["show", "sync", "report", ("startup", False), "sync"],
+        )
 
     def test_set_tray_overlay_enabled_uses_injected_persistence_callbacks(self):
         calls = []
         owner = SimpleNamespace(tray_overlay_enabled=False)
-        controller = MainWindowTrayController(
+        controller = self._create_controller(
             parent_widget=owner,
-            base_title="Game Time Tracker",
-            action_state=TrayActionState(),
             set_tray_overlay_enabled_value=lambda enabled: setattr(
                 owner,
                 "tray_overlay_enabled",
@@ -83,10 +119,8 @@ class MainWindowTrayControllerTest(unittest.TestCase):
             raise_=lambda: calls.append("raise"),
             activateWindow=lambda: calls.append("activate"),
         )
-        controller = MainWindowTrayController(
+        controller = self._create_controller(
             parent_widget=owner,
-            base_title="Game Time Tracker",
-            action_state=TrayActionState(),
             show_window=owner.show,
             raise_window=owner.raise_,
             activate_window=owner.activateWindow,
@@ -118,10 +152,8 @@ class MainWindowTrayControllerTest(unittest.TestCase):
     def test_quit_application_uses_injected_shutdown_callbacks(self):
         calls = []
         owner = SimpleNamespace(tray_icon=None)
-        controller = MainWindowTrayController(
+        controller = self._create_controller(
             parent_widget=owner,
-            base_title="Game Time Tracker",
-            action_state=TrayActionState(),
             get_tray_icon=lambda: owner.tray_icon,
             set_quitting=lambda value: calls.append(("quitting", value)),
             record_playing_games_before_close=lambda: calls.append("record"),
