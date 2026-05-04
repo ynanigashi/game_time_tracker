@@ -530,7 +530,7 @@ class TestStartTimerRealMethod(unittest.TestCase):
 
         callback = MagicMock()
 
-        with patch('src.app.main.QTimer') as MockQTimer:
+        with patch('src.app.main_window.controller_methods.QTimer') as MockQTimer:
             mock_timer = MagicMock()
             MockQTimer.return_value = mock_timer
 

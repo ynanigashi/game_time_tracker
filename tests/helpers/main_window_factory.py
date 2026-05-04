@@ -58,6 +58,7 @@ def create_mock_main_window(
     """Create a MainWindow test double without running MainWindow.__init__."""
     with patch.object(main.MainWindow, "__init__", lambda self: None):
         window = main.MainWindow()
+    window._initialize_collaborators()
 
     window.games = []
     window.browsers = list(browsers or ["Chrome"])
