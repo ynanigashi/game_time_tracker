@@ -66,8 +66,11 @@ class ReportDialogRefreshMixin:
     def _refresh_tab(self, tab_index: int, *, force: bool = False) -> None:
         self._get_tab_refresh_controller().refresh_tab(tab_index, force=force)
 
-    def _on_tab_changed(self, tab_index: int) -> None:
+    def on_tab_changed(self, tab_index: int) -> None:
         self._get_tab_refresh_controller().on_tab_changed(tab_index)
+
+    def _on_tab_changed(self, tab_index: int) -> None:
+        self.on_tab_changed(tab_index)
 
     def _request_summary_refresh(self, *_args: object) -> None:
         self._mark_tab_dirty(self._SUMMARY_TAB)

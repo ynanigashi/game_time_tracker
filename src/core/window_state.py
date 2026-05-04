@@ -48,6 +48,11 @@ class WindowState:
             return {}
 
     @staticmethod
+    def load_data(path: Path) -> Dict[str, object]:
+        """Load raw persisted state data from a file."""
+        return WindowState._load_data(path)
+
+    @staticmethod
     def _coerce_bool(value: object, default: bool) -> bool:
         if isinstance(value, bool):
             return value
