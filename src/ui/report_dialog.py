@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta
-from time import perf_counter
 from typing import Callable, List, Optional, Tuple
 
 from PySide6.QtCore import QDate, Qt
@@ -51,7 +50,7 @@ from src.ui.report_summary_table import (
     ReportSummaryTableController,
     summary_label_text,
 )
-from src.ui.report_sync_messages import sync_result_message
+from src.ui.report_refresh import ReportRefreshController
 from src.ui.report_tab_refresh import ReportTabRefreshController
 from src.ui.report_tab_state import ReportTabState
 from src.ui.report_title_filter import ReportTitleFilterController
@@ -647,76 +646,30 @@ class ReportDialog(QDialog):
                 logger.exception("Failed to load title filter")
         self.refresh_trend()
 
+    def _get_refresh_controller(self) -> ReportRefreshController:
+        controller = getattr(self, "_refresh_controller", None)
+        if controller is None:
+            controller = ReportRefreshController(self)
+            self._refresh_controller = controller
+        return controller
+
     def _sync_from_spreadsheet(self, *_args: object) -> None:
-        sync_with_spreadsheet = getattr(
-            self.log_handler,
-            "sync_with_spreadsheet",
-            None,
-        )
-        if not callable(sync_with_spreadsheet):
-            self._set_debug_message("スプシ同期に対応していないログハンドラです")
-            return
-
-        self._set_debug_message("スプシ同期中...", process_events=True)
-        try:
-            result = sync_with_spreadsheet()
-        except Exception:
-            logger.exception("Failed to sync play logs from spreadsheet")
-            self._set_debug_message("スプシ同期に失敗しました")
-            return
-
-        self.refresh()
-        self._set_debug_message(self._sync_result_message(result))
+        self._get_refresh_controller().sync_from_spreadsheet()
 
     def _sync_result_message(self, result: object) -> str:
-        return sync_result_message(result, lambda: len(self._cached_records()))
+        return self._get_refresh_controller().sync_result_message(result)
 
     def refresh_summary(self, *_args: object) -> None:
         """Refresh the game summary table and chart."""
-        started_at = perf_counter()
-        try:
-            summary = self._load_summary()
-        except Exception:
-            logger.exception("Failed to load report stats")
-            summary = ReportSummary(rows=[], total_seconds=0.0, session_count=0)
-        self._ensure_report_tab_state().last_summary = summary
-
-        self._populate_summary(summary)
-        self._populate_chart(summary)
-        elapsed_ms = (perf_counter() - started_at) * 1000
-        self._set_debug_message(
-            f"ゲーム別集計を更新: {len(summary.rows)} タイトル "
-            f"({elapsed_ms:.0f} ms)"
-        )
+        self._get_refresh_controller().refresh_summary()
 
     def refresh_trend(self, *_args: object) -> None:
         """Refresh the trend table and line chart."""
-        self._trend_selected_indices = None
-        started_at = perf_counter()
-        try:
-            series_list = self._load_trend_series()
-        except Exception:
-            logger.exception("Failed to load trend stats")
-            series_list = []
-        self._ensure_report_tab_state().last_trend_series = series_list
-
-        self._populate_trend_selection(series_list)
-        self._populate_trend_chart(series_list)
-        self._update_title_filter_action_states()
-        self._update_trend_selection_action_states()
-        point_count = sum(len(series.points) for series in series_list)
-        elapsed_ms = (perf_counter() - started_at) * 1000
-        self._set_debug_message(
-            f"推移グラフを更新: {len(series_list)} {self._trend_series_label()} / "
-            f"{point_count} 点 ({elapsed_ms:.0f} ms)"
-        )
+        self._get_refresh_controller().refresh_trend()
 
     def refresh_logs(self, *_args: object) -> None:
         """Refresh the raw play-log table."""
-        records = self._cached_records()
-        self.log_summary_label.setText(f"ログ {len(records)} 件")
-        self._populate_log_table(records)
-        self._apply_selected_log_row()
+        self._get_refresh_controller().refresh_logs()
 
     def _get_summary_table_controller(self) -> ReportSummaryTableController:
         controller = getattr(self, "_summary_table_controller", None)
