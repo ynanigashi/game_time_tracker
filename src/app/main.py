@@ -374,9 +374,35 @@ class MainWindow(
         return self._resolve_dependency(
             "_tray_controller",
             factory=lambda: MainWindowTrayController(
-                self,
+                parent_widget=self,
                 base_title=BASE_TITLE,
                 action_state=self._ensure_tray_action_state(),
+                get_tray_overlay_enabled=lambda: bool(self.tray_overlay_enabled),
+                set_tray_overlay_enabled_value=lambda enabled: setattr(
+                    self,
+                    "tray_overlay_enabled",
+                    bool(enabled),
+                ),
+                get_startup_window_visible=lambda: bool(self.startup_window_visible),
+                set_startup_window_visible_value=lambda visible: setattr(
+                    self,
+                    "startup_window_visible",
+                    bool(visible),
+                ),
+                get_force_startup_window_visible=lambda: bool(
+                    self._force_startup_window_visible
+                ),
+                get_overlay_position=lambda: self.overlay_position,
+                get_tray_icon=lambda: getattr(self, "tray_icon", None),
+                set_tray_icon=lambda icon: setattr(self, "tray_icon", icon),
+                set_tray_menu=lambda menu: setattr(self, "tray_menu", menu),
+                show_window=self.show,
+                hide_window=self.hide,
+                raise_window=self.raise_,
+                activate_window=self.activateWindow,
+                is_window_visible=lambda: bool(self.isVisible()),
+                window_geometry=self.geometry,
+                move_window=self.move,
                 show_main_window=self._show_main_window_from_tray,
                 hide_main_window=self._hide_main_window_to_tray,
                 set_tray_overlay_enabled=self._set_tray_overlay_enabled,
@@ -409,7 +435,10 @@ class MainWindow(
                 ),
                 close_overlay=self._close_overlay,
             ),
-            validator=lambda controller: controller.owner is self,
+            validator=lambda controller: (
+                controller.parent_widget is self
+                and controller.action_state is self._ensure_tray_action_state()
+            ),
         )
 
     def _get_dialog_controller(self) -> MainWindowDialogController:

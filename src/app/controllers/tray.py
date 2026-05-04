@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from typing import Callable, Optional, Tuple
 
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QStyle, QSystemTrayIcon
@@ -19,10 +19,26 @@ class MainWindowTrayController:
 
     def __init__(
         self,
-        owner: "MainWindow",
         *,
+        parent_widget: object,
         base_title: str,
         action_state: TrayActionState,
+        get_tray_overlay_enabled: Callable[[], bool] = lambda: False,
+        set_tray_overlay_enabled_value: Callable[[bool], None] = lambda _enabled: None,
+        get_startup_window_visible: Callable[[], bool] = lambda: False,
+        set_startup_window_visible_value: Callable[[bool], None] = lambda _visible: None,
+        get_force_startup_window_visible: Callable[[], bool] = lambda: False,
+        get_overlay_position: Callable[[], Optional[Tuple[int, int]]] = lambda: None,
+        get_tray_icon: Callable[[], object] = lambda: None,
+        set_tray_icon: Callable[[object], None] = lambda _icon: None,
+        set_tray_menu: Callable[[object], None] = lambda _menu: None,
+        show_window: Callable[[], None] = lambda: None,
+        hide_window: Callable[[], None] = lambda: None,
+        raise_window: Callable[[], None] = lambda: None,
+        activate_window: Callable[[], None] = lambda: None,
+        is_window_visible: Callable[[], bool] = lambda: False,
+        window_geometry: Callable[[], object] = lambda: None,
+        move_window: Callable[[int, int], None] = lambda _x, _y: None,
         show_main_window: Callable[[], None] = lambda: None,
         hide_main_window: Callable[[], None] = lambda: None,
         set_tray_overlay_enabled: Callable[[bool], None] = lambda _enabled: None,
@@ -45,9 +61,25 @@ class MainWindowTrayController:
         record_playing_games_before_close: Callable[[], None] = lambda: None,
         close_overlay: Callable[[], None] = lambda: None,
     ) -> None:
-        self.owner = owner
+        self.parent_widget = parent_widget
         self.base_title = base_title
         self.action_state = action_state
+        self.get_tray_overlay_enabled = get_tray_overlay_enabled
+        self.set_tray_overlay_enabled_value = set_tray_overlay_enabled_value
+        self.get_startup_window_visible = get_startup_window_visible
+        self.set_startup_window_visible_value = set_startup_window_visible_value
+        self.get_force_startup_window_visible = get_force_startup_window_visible
+        self.get_overlay_position = get_overlay_position
+        self.get_tray_icon = get_tray_icon
+        self.set_tray_icon = set_tray_icon
+        self.set_tray_menu = set_tray_menu
+        self.show_window = show_window
+        self.hide_window = hide_window
+        self.raise_window = raise_window
+        self.activate_window = activate_window
+        self.is_window_visible = is_window_visible
+        self.window_geometry = window_geometry
+        self.move_window = move_window
         self.show_main_window_callback = show_main_window
         self.hide_main_window_callback = hide_main_window
         self.set_tray_overlay_enabled_callback = set_tray_overlay_enabled
@@ -76,11 +108,11 @@ class MainWindowTrayController:
             self.set_force_startup_window_visible(True)
             return
 
-        tray_icon = QSystemTrayIcon(self.create_tray_icon(), self.owner)
+        tray_icon = QSystemTrayIcon(self.create_tray_icon(), self.parent_widget)
         tray_icon.setToolTip(self.base_title)
         tray_icon.setContextMenu(self.build_tray_menu())
         tray_icon.show()
-        self.owner.tray_icon = tray_icon
+        self.set_tray_icon(tray_icon)
 
     def create_tray_icon(self) -> QIcon:
         icon_path = runtime_path("assets", "tray_icon.ico")
@@ -101,12 +133,12 @@ class MainWindowTrayController:
         return QIcon()
 
     def build_tray_menu(self) -> QMenu:
-        menu = QMenu(self.owner)
+        menu = QMenu(self.parent_widget)
         show_action = menu.addAction("\u30a6\u30a3\u30f3\u30c9\u30a6\u3092\u8868\u793a")
         hide_action = menu.addAction("\u30a6\u30a3\u30f3\u30c9\u30a6\u3092\u975e\u8868\u793a")
         overlay_action = menu.addAction("\u30aa\u30fc\u30d0\u30fc\u30ec\u30a4\u8868\u793a")
         overlay_action.setCheckable(True)
-        overlay_action.setChecked(bool(getattr(self.owner, "tray_overlay_enabled", False)))
+        overlay_action.setChecked(bool(self.get_tray_overlay_enabled()))
 
         startup_menu = menu.addMenu("\u8d77\u52d5\u6642")
         startup_show_action = startup_menu.addAction("\u30a6\u30a3\u30f3\u30c9\u30a6\u3092\u8868\u793a")
@@ -114,10 +146,10 @@ class MainWindowTrayController:
         for action in (startup_show_action, startup_hide_action):
             action.setCheckable(True)
         startup_show_action.setChecked(
-            bool(getattr(self.owner, "startup_window_visible", False))
+            bool(self.get_startup_window_visible())
         )
         startup_hide_action.setChecked(
-            not bool(getattr(self.owner, "startup_window_visible", False))
+            not bool(self.get_startup_window_visible())
         )
 
         manual_record_action = menu.addAction("\u624b\u5165\u529b\u3067\u8a18\u9332")
@@ -158,7 +190,7 @@ class MainWindowTrayController:
         self.action_state.startup_show_action = startup_show_action
         self.action_state.startup_hide_action = startup_hide_action
         self.action_state.overlay_action = overlay_action
-        self.owner.tray_menu = menu
+        self.set_tray_menu(menu)
         self.sync_tray_window_actions()
 
         about_to_show = getattr(menu, "aboutToShow", None)
@@ -170,13 +202,13 @@ class MainWindowTrayController:
         return menu
 
     def show_main_window_from_tray(self) -> None:
-        self.owner.show()
+        self.show_window()
         self.process_pending_ui_events_callback()
         self.align_today_display_to_overlay_position_callback()
         self.process_pending_ui_events_callback()
         self.align_today_display_to_overlay_position_callback()
-        self.owner.raise_()
-        self.owner.activateWindow()
+        self.raise_window()
+        self.activate_window()
         self.sync_tray_window_actions_callback()
         self.sync_overlay()
 
@@ -188,7 +220,7 @@ class MainWindowTrayController:
             logger.debug("failed to process pending UI events", exc_info=True)
 
     def align_today_display_to_overlay_position(self) -> None:
-        overlay_position = getattr(self.owner, "overlay_position", None)
+        overlay_position = self.get_overlay_position()
         if overlay_position is None:
             return
         target = self.today_time_display_provider()
@@ -196,8 +228,8 @@ class MainWindowTrayController:
             return
         try:
             top_left = target.mapToGlobal(target.rect().topLeft())
-            geometry = self.owner.geometry()
-            self.owner.move(
+            geometry = self.window_geometry()
+            self.move_window(
                 int(geometry.x()) + int(overlay_position[0]) - int(top_left.x()),
                 int(geometry.y()) + int(overlay_position[1]) - int(top_left.y()),
             )
@@ -206,12 +238,12 @@ class MainWindowTrayController:
 
     def hide_main_window_to_tray(self) -> None:
         self.save_window_state()
-        self.owner.hide()
+        self.hide_window()
         self.sync_tray_window_actions()
         self.sync_overlay()
 
     def sync_tray_window_actions(self) -> None:
-        is_window_visible = bool(getattr(self.owner, "isVisible", lambda: False)())
+        is_window_visible = bool(self.is_window_visible())
         show_action = self.action_state.show_action
         hide_action = self.action_state.hide_action
         if show_action is not None:
@@ -224,17 +256,17 @@ class MainWindowTrayController:
                 set_visible(is_window_visible)
 
     def set_startup_window_visible(self, visible: bool) -> None:
-        self.owner.startup_window_visible = bool(visible)
+        self.set_startup_window_visible_value(bool(visible))
         show_action = self.action_state.startup_show_action
         hide_action = self.action_state.startup_hide_action
         if show_action is not None:
-            show_action.setChecked(self.owner.startup_window_visible)
+            show_action.setChecked(self.get_startup_window_visible())
         if hide_action is not None:
-            hide_action.setChecked(not self.owner.startup_window_visible)
+            hide_action.setChecked(not self.get_startup_window_visible())
         self.save_window_state()
 
     def set_tray_overlay_enabled(self, enabled: bool) -> None:
-        self.owner.tray_overlay_enabled = bool(enabled)
+        self.set_tray_overlay_enabled_value(bool(enabled))
         self.save_window_state()
         self.sync_overlay()
 
@@ -243,7 +275,7 @@ class MainWindowTrayController:
         self.record_playing_games_before_close()
         self.save_window_state()
         self.close_overlay()
-        tray_icon = getattr(self.owner, "tray_icon", None)
+        tray_icon = self.get_tray_icon()
         if tray_icon is not None:
             tray_icon.hide()
         app = QApplication.instance()
@@ -252,6 +284,6 @@ class MainWindowTrayController:
 
     def should_show_window_on_startup(self) -> bool:
         return bool(
-            getattr(self.owner, "_force_startup_window_visible", False)
-            or getattr(self.owner, "startup_window_visible", False)
+            self.get_force_startup_window_visible()
+            or self.get_startup_window_visible()
         )
