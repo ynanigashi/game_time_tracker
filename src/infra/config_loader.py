@@ -1,9 +1,9 @@
 import configparser
 from dataclasses import dataclass
-from pathlib import Path
 from typing import List, Optional
 
 from src.infra.runtime_paths import default_config_file, resolve_config_file
+from src.infra.settings_repository import SettingsConfigRepository
 from src.infra.settings_store import SettingsStore
 
 
@@ -97,22 +97,19 @@ class ConfigLoader:
         config_file_path: Optional[str] = None,
         settings_store: Optional[SettingsStore] = None,
     ):
-        self.config = configparser.ConfigParser()
+        runtime_store = settings_store or SettingsStore()
+        repository = SettingsConfigRepository(
+            config_file_path=config_file_path,
+            settings_store=runtime_store,
+        )
         if config_file_path is None:
             self.config_file_path = str(resolve_config_file())
-            self.settings_store = settings_store or SettingsStore()
-            config_path = Path(self.config_file_path)
-            stored_config = self.settings_store.load_config()
-            if self._has_required_keys(stored_config):
-                self.config = stored_config
-            elif config_path.exists():
-                self.config = self.settings_store.import_config_file(config_path)
-            else:
-                self.config = stored_config
+            self.settings_store = runtime_store
+            self.config = repository.load_runtime_config(self._has_required_keys)
         else:
             self.config_file_path = config_file_path
             self.settings_store = settings_store
-            self.config.read(self.config_file_path, encoding="utf-8")
+            self.config = repository.load_explicit_file()
         self._validate_required_keys()
 
     @classmethod

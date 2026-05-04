@@ -34,7 +34,7 @@ jobs:
       - name: Build EXE
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --windowed --name game_time_tracker --hidden-import PySide6.QtCharts main.py
+          pyinstaller --noconfirm --clean --windowed --name game_time_tracker --icon assets/tray_icon.ico --add-data "assets;assets" --hidden-import PySide6.QtCharts main.py
 
       - name: Package release files
         shell: pwsh

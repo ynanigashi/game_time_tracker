@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 from tests.test_stubs import install_stubs
 install_stubs()
 
-from src.app.main_components import MainWindowStateController
+from src.app.controllers import MainWindowStateController
 from src.infra.settings_store import SettingsStore
 
 

@@ -1,48 +1,74 @@
 # Overlay Display Spec (Current)
 
 ## 目的
-- `today_time_display` が他ウィンドウに隠れて視認できない場合だけ、同じ値をオーバーレイで補完表示する。
-- メインウィンドウが前面にあるときはオーバーレイを表示しない。
+- プレイ中ゲームがある場合に、今日のプレイ時間をゲーム画面上でも確認できるようにする。
+- メインウィンドウ表示中は、`today_time_display` が他ウィンドウに隠れて視認できない場合だけ補完表示する。
+- メインウィンドウ非表示中は、タスクトレイの `オーバーレイ表示` が有効な場合だけ表示する。
 
 ## 表示内容
-- `today_time_display` と同じ文字列を表示する。
+- `today_time_display` と同じ「今日のプレイ時間」を表示する。
 - 例: `01:23:45.6`
-
-## 位置とサイズ
-- オーバーレイの位置・サイズは `today_time_display` のグローバル座標に同期する。
-- 同期は UI tick ごとに実行する。
+- 今日のプレイ時間は、完了分と進行中分を合算し、日跨ぎセッションは当日 0:00 以降のみを対象にする。
 
 ## 表示条件
-次をすべて満たすときだけ表示する。
+### メインウィンドウ表示中
+次をすべて満たす場合に表示する。
 
-1. `overtime_alert_enabled == True`
-2. メインウィンドウが `isVisible == True`
-3. メインウィンドウが `isMinimized == False`
-4. 前面ウィンドウが自プロセス外 (`_foreground_rect_if_foreign() is not None`)
-5. `today_time_display` の被覆判定が `covered == True`
+1. メインウィンドウが `isVisible == True`
+2. プレイ中ゲームがある
+3. `today_time_display` の被覆判定が `covered == True`
 
-補足:
-- `isActiveWindow` は表示条件に使わない。
-- 前面ウィンドウ判定は Win32 ベースで行う。
+タスクトレイメニューの `オーバーレイ表示` チェック状態は、メインウィンドウ表示中の被覆補完オーバーレイには影響しない。
+
+### メインウィンドウ非表示中
+次をすべて満たす場合に表示する。
+
+1. メインウィンドウが `isVisible == False`
+2. タスクトレイメニューの `オーバーレイ表示` が有効
+3. プレイ中ゲームがある
 
 ## 非表示条件
-- 表示条件を1つでも満たさない場合は非表示。
-- 特に `overtime_alert_enabled == False` の場合、即時で非表示にし、その tick の判定処理を終了する。
+- プレイ中ゲームがない場合は常に非表示。
+- メインウィンドウ表示中に `today_time_display` が覆われていない場合は非表示。
+- メインウィンドウ非表示中に `オーバーレイ表示` が無効な場合は非表示。
+
+## 位置とサイズ
+### メインウィンドウ表示中
+- オーバーレイの位置・サイズは `today_time_display` のグローバル座標に同期する。
+- 同期は UI tick ごとに実行する。
+- オーバーレイのドラッグ完了時は、`today_time_display` がドラッグ後の位置に合うようメインウィンドウを移動する。
+- プログラムによる追従移動では、保存済みのトレイ用オーバーレイ位置を更新しない。
+
+### メインウィンドウ非表示中
+- 保存済みの `overlay_position` があれば、その位置に表示する。
+- 保存位置がなければ、現在スクリーンの右上寄りに初期表示する。
+- 表示位置はスクリーンの表示可能領域内に収まるようクランプする。
+- ドラッグ完了時に `overlay_position` を保存する。
+
+## ドラッグ操作
+- オーバーレイ本体はクリック透過にし、ゲーム操作を阻害しない。
+- 左端の細いドラッグハンドルだけがマウス入力を受け取る。
+- ハンドル上では掴める形のカーソルを表示する。
+- ハンドルは独立したトップレベルウィンドウとして表示し、クリック透過のオーバーレイ本体とは分けて入力を受ける。
+- UI tick 側でもグローバルカーソル位置を参照し、ドラッグ中の move イベント欠落を補完する。
+- ドラッグ中は UI tick のジオメトリ同期で位置を戻さない。
 
 ## 被覆判定仕様
 `_get_today_display_cover_state()` に基づく。
 
 ### 入力
 - `today_time_display` のグローバル矩形
-- 現在の前面ウィンドウ（foreign window）の矩形と root HWND
+- サンプル点上に存在する自プロセス外ウィンドウ
 
 ### 判定フロー
 1. `today_time_display` が取れない場合は未被覆。
-2. 前面ウィンドウが foreign でない場合は未被覆。
-3. `today_time_display` 矩形（native座標）と前面ウィンドウ矩形が交差しない場合は未被覆。
-4. サンプル点を評価し、`WindowFromPoint` + `GW_HWNDNEXT` で被覆ウィンドウを探索する。
-5. 探索対象は「前面ウィンドウと同じ root HWND」に限定する。
+2. `today_time_display` のグローバル矩形からサンプル点を作る。
+3. 各サンプル点で `WindowFromPoint` と `GW_HWNDNEXT` による Z-order 走査を行う。
+4. 自プロセスのウィンドウは被覆扱いにしない。
+5. 点を含まない候補ウィンドウは被覆扱いにしない。
 6. 被覆点数がしきい値以上なら被覆とする。
+
+前面ウィンドウだけに限定せず、`today_time_display` を実際に覆っている自プロセス外ウィンドウを探索する。
 
 ### サンプル点
 - 合計5点
@@ -50,40 +76,42 @@
 
 ### 被覆しきい値
 - `OVERLAY_COVERED_POINTS_THRESHOLD = 2`
-- つまり 5 点中 2 点以上が被覆されているときに表示対象とする。
+- 5 点中 2 点以上が被覆されているときに表示対象とする。
 
 ### Z-order 走査
-- `GW_HWNDNEXT` で背面方向へ探索
+- `GW_HWNDNEXT` で背面方向へ探索する。
 - 打ち切り回数: `MAX_Z_WALK = 32`
 
 ## 判定理由
 内部では理由文字列を返す。代表例:
-- `overtime_alert_disabled`
-- `window_hidden_or_minimized`
-- `window_foreground_or_no_foreign`
+- `no_playing_game`
+- `tray_overlay_disabled`
+- `tray_overlay_enabled`
 - `target_missing`
 - `target_rect_missing`
-- `foreground_not_foreign`
-- `foreground_root_missing`
 - `covered_native_points`
 - `covered_native_points_below_threshold`
+- `covered_logical_points`
+- `covered_logical_points_below_threshold`
 - `no_cover_detected`
 
 ## ログ仕様
 - オーバーレイ可視判定は `INFO` ログに出力する。
 - 出力条件:
-1. 表示/非表示または理由が変化したとき
-2. 変化がなくても 5 秒経過したとき
+  1. 表示/非表示または理由が変化したとき
+  2. 変化がなくても 5 秒経過したとき
 
 ログ形式:
 - `overlay visibility: show (<reason>)`
 - `overlay visibility: hide (<reason>)`
 
 ## テスト観点
-1. トグル OFF 中は常に非表示。
-2. メインウィンドウが前面時は非表示。
-3. foreign window が `today_time_display` を 1 点だけ覆う場合は非表示。
-4. foreign window が 2 点以上覆う場合は表示。
-5. `MAX_Z_WALK` 到達時も無限ループしない。
-6. リサイズ/移動時にオーバーレイ位置が追従する。
-7. DPI スケーリング環境で判定が破綻しない。
+1. プレイ中ゲームがない場合は常に非表示。
+2. メインウィンドウ非表示中は、`オーバーレイ表示` が有効な場合だけ表示する。
+3. メインウィンドウ表示中は、トレイ側設定に依存せず、被覆時だけ表示する。
+4. foreign window が `today_time_display` を 1 点だけ覆う場合は非表示。
+5. foreign window が 2 点以上覆う場合は表示。
+6. 前面ウィンドウ以外が `today_time_display` を覆っている場合も検出する。
+7. `MAX_Z_WALK` 到達時も無限ループしない。
+8. ドラッグ中は UI tick の追従同期で位置を戻さない。
+9. メインウィンドウ表示中の追従同期で、保存済みのトレイ用オーバーレイ位置を上書きしない。

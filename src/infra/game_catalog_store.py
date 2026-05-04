@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from dataclasses import dataclass
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from src.core.models import GameEntry, parse_bool
 from src.infra.runtime_paths import default_game_catalog_db_file
+from src.infra.sqlite_base_store import SQLiteBaseStore
 
 logger = logging.getLogger(__name__)
 
@@ -37,27 +37,13 @@ class GameCatalogPushResult:
     total: int
 
 
-class GameCatalogStore:
+class GameCatalogStore(SQLiteBaseStore):
     """Persist editable game definitions locally in SQLite."""
 
+    SCHEMA_VERSION = 1
+
     def __init__(self, db_path: Optional[Path] = None) -> None:
-        self.db_path = db_path or default_game_catalog_db_file()
-
-    def _connect(self) -> sqlite3.Connection:
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        self._ensure_schema(conn)
-        return conn
-
-    @contextmanager
-    def _connection(self) -> Iterator[sqlite3.Connection]:
-        conn = self._connect()
-        try:
-            yield conn
-            conn.commit()
-        finally:
-            conn.close()
+        super().__init__(db_path or default_game_catalog_db_file())
 
     @staticmethod
     def _ensure_schema(conn: sqlite3.Connection) -> None:

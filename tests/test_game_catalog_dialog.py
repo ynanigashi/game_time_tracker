@@ -59,6 +59,87 @@ class TestGameCatalogDialogSpreadsheetPush(unittest.TestCase):
             ["game-2", "New", "New Window", "TRUE", "TRUE"]
         )
 
+    def test_sync_on_open_pushes_local_games_before_pull(self):
+        self.store.save_game(
+            GameEntry(
+                game_id="local-only",
+                game_title="Local",
+                window_title="Local Window",
+            )
+        )
+        dialog = GameCatalogDialog.__new__(GameCatalogDialog)
+        dialog.game_store = self.store
+        dialog.status_label = MagicMock()
+        dialog._clear_form = MagicMock()
+        dialog._load_games = MagicMock()
+        dialog._notify_saved = MagicMock()
+        service = MagicMock()
+        service.get_all_records.side_effect = [
+            [],
+            [
+                {
+                    "id": "local-only",
+                    "game_title": "Local",
+                    "window_title": "Local Window",
+                    "play_with_friends": "FALSE",
+                    "is_browser_game": "FALSE",
+                }
+            ],
+        ]
+        service.append_row.return_value = True
+        dialog._game_info_service = MagicMock(return_value=service)
+
+        dialog.sync_on_open()
+
+        service.append_row.assert_called_once_with(
+            ["local-only", "Local", "Local Window", "FALSE", "FALSE"]
+        )
+        self.assertEqual(service.get_all_records.call_count, 2)
+        self.assertEqual(len(self.store.load_games()), 1)
+        dialog._notify_saved.assert_called_once()
+
+    def test_sync_on_open_skips_pull_when_push_fails(self):
+        self.store.save_game(
+            GameEntry(
+                game_id="local-only",
+                game_title="Local",
+                window_title="Local Window",
+            )
+        )
+        dialog = GameCatalogDialog.__new__(GameCatalogDialog)
+        dialog.game_store = self.store
+        dialog.status_label = MagicMock()
+        dialog._clear_form = MagicMock()
+        dialog._load_games = MagicMock()
+        dialog._notify_saved = MagicMock()
+        service = MagicMock()
+        service.get_all_records.return_value = []
+        service.append_row.return_value = False
+        dialog._game_info_service = MagicMock(return_value=service)
+
+        dialog.sync_on_open()
+
+        self.assertEqual(service.get_all_records.call_count, 1)
+        self.assertEqual(len(self.store.load_games()), 1)
+        dialog._notify_saved.assert_not_called()
+
+    def test_sync_on_close_pushes_once(self):
+        dialog = GameCatalogDialog.__new__(GameCatalogDialog)
+        dialog._close_sync_done = False
+        dialog.status_label = MagicMock()
+        dialog._push_local_games = MagicMock(
+            return_value=MagicMock(sent=1, updated=1, appended=0, failed=0)
+        )
+        service = MagicMock()
+        dialog._game_info_service = MagicMock(return_value=service)
+        dialog.accept = MagicMock()
+
+        dialog._close_dialog()
+        dialog._sync_on_close()
+
+        dialog._push_local_games.assert_called_once_with(service)
+        dialog.accept.assert_called_once()
+
 
 class TestGameCatalogDialogForm(unittest.TestCase):
     def test_prepare_new_game_prefills_window_title(self):

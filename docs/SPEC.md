@@ -11,10 +11,15 @@ Windows PC で実行中のゲームをウィンドウタイトルから自動検
 - 設定値とウィンドウ状態は `data/settings.sqlite3` に保存する。`config/config.ini` は設定画面の Import/Export で手動入出力する。
 - プレイログは `data/play_logs.sqlite3` に保存し、Google スプレッドシートへベストエフォートでバックアップする。
 - ゲーム情報は `data/game_catalog.sqlite3` に保存し、空の場合のみ Google スプレッドシートから初回取り込みする。
+- アプリはタスクトレイ常駐を基本とする。メインウィンドウは必要時に表示する補助UIで、×ボタンでは終了せずタスクトレイへ戻る。
+- 起動時にメインウィンドウを表示するかどうかは、タスクトレイメニューの `起動時` 設定で保存する。
+- タスクトレイメニューから `オーバーレイ表示` を切り替えられる。これはメインウィンドウ非表示中の今日のプレイ時間オーバーレイに適用する。
+- メインウィンドウ表示中は、今日のプレイ時間表示が他ウィンドウに覆われた場合に、トレイ側設定に依存せず補完オーバーレイを表示する。
 - レポート画面の `ログ` タブでプレイログの編集保存・削除とスプレッドシートの手動同期を実行できる。
 - レポート画面は表示中タブだけを更新し、未表示タブは dirty 扱いで遅延更新する。推移タブのタイトルフィルタ用集計は、ログデータが変わるまでキャッシュを再利用する。
 - プレイログのバックアップは設定画面の `プレイログ保存` で `ローカルのみで運用` / `スプレッドシートにバックアップ` を切り替える。
 - メインウィンドウ右クリックメニューで `手入力で記録` / `レポート` / `ゲーム管理` / `設定` / `終了` を選択できる。
+- タスクトレイ右クリックメニューで `ウィンドウを表示` / `ウィンドウを非表示`、`オーバーレイ表示`、`起動時`、既存の主要画面、`終了` を選択できる。
 - ウィンドウタイトルで自動検出できないゲームは、手入力画面から登録済みゲーム・開始日時・終了日時を指定して記録できる。フレンドプレイ有無はゲーム管理に保存された設定を使う。
 - 手入力画面には開始/停止ボタンと経過時間表示があり、開始/終了日時を自動入力できる。経過時間表示は 100ms 間隔で更新する。
 - SQLite と INI のどちらにも有効な設定がない場合、起動時に設定画面を表示する。
@@ -64,13 +69,32 @@ classDiagram
         }
     }
 
-    namespace services_py {
+    namespace domain_py {
         class ScanResult {
             <<dataclass>>
             +active_games: List~GameEntry~
             +inactive_games: List~GameEntry~
             +recorded_seconds: float
         }
+        class DailyStatsTracker {
+            +today_completed_seconds: float
+            +today_game_minutes_cache: Dict
+            +check_day_change() bool
+            +add_completed_seconds()
+            +update_game_minutes_cache()
+        }
+        class GameStateTracker {
+            +active_games: List~GameEntry~
+            +inactive_games: List~GameEntry~
+            +add_active()
+            +remove_active()
+            +add_inactive()
+            +remove_inactive()
+            +clear_all()
+        }
+    }
+
+    namespace adapters_py {
         class Messages {
             <<constants>>
             GAME_RECORDED
@@ -94,22 +118,6 @@ classDiagram
             +record_with_times() Optional~float~
             -_save_to_spreadsheet() bool
         }
-        class DailyStatsTracker {
-            +today_completed_seconds: float
-            +today_game_minutes_cache: Dict
-            +check_day_change() bool
-            +add_completed_seconds()
-            +update_game_minutes_cache()
-        }
-        class GameStateTracker {
-            +active_games: List~GameEntry~
-            +inactive_games: List~GameEntry~
-            +add_active()
-            +remove_active()
-            +add_inactive()
-            +remove_inactive()
-            +clear_all()
-        }
     }
 
     namespace window_state_py {
@@ -118,6 +126,9 @@ classDiagram
             +load_all()$ Tuple
             +load()$ Tuple
             +load_overtime_alert_enabled()$ bool
+            +load_startup_window_visible()$ bool
+            +load_tray_overlay_enabled()$ bool
+            +load_overlay_position()$ Tuple
             +save()$
         }
     }
@@ -140,6 +151,13 @@ classDiagram
             +daily_stats: DailyStatsTracker
             +state_tracker: GameStateTracker
             +overtime_alert_enabled: bool
+            +startup_window_visible: bool
+            +tray_overlay_enabled: bool
+            +overlay_position: Tuple
+            -_initialize_tray_icon()
+            -_show_main_window_from_tray()
+            -_hide_main_window_to_tray()
+            -_quit_application()
             -_init_components()
             -_scan_tick()
             -_ui_tick()
@@ -153,6 +171,9 @@ classDiagram
             +load_all() Tuple
             +load() Tuple
             +load_overtime_alert_enabled() bool
+            +load_startup_window_visible() bool
+            +load_tray_overlay_enabled() bool
+            +load_overlay_position() Tuple
             +save()
             +record_resize()$
         }
@@ -246,6 +267,25 @@ classDiagram
         }
     }
 
+    namespace play_log_analytics_py {
+        class PlayLogAnalytics {
+            +get_today_stats() Tuple
+            +get_report_stats() ReportSummary
+            +get_trend_stats() List~TrendPoint~
+            +get_trend_stats_by_title() List~TrendSeries~
+        }
+    }
+
+    namespace play_log_backup_py {
+        class PlayLogBackupMixin {
+            -_connect_backup_service()
+            -_fetch_backup_records()
+            -_sync_backup_records()
+            -_back_up_pending_records()
+            -_write_edited_record_to_backup()
+        }
+    }
+
     namespace game_catalog_store_py {
         class GameCatalogStore {
             +load_games() List~GameEntry~
@@ -268,13 +308,17 @@ classDiagram
     }
 
     models_py ..> time_utils_py : uses
-    services_py ..> time_utils_py : uses
-    services_py ..> game_catalog_store_py : loads games
-    services_py ..> log_handler_py : uses
+    domain_py ..> time_utils_py : uses
+    adapters_py ..> time_utils_py : uses
+    adapters_py ..> game_catalog_store_py : loads games
+    adapters_py ..> log_handler_py : uses
     log_handler_py ..> gspread_service_py : backs up
     log_handler_py ..> play_log_store_py : primary store
+    log_handler_py ..> play_log_analytics_py : aggregates
+    log_handler_py ..> play_log_backup_py : spreadsheet sync
     main_py ..> models_py : uses
-    main_py ..> services_py : uses
+    main_py ..> domain_py : uses
+    main_py ..> adapters_py : uses
     main_py ..> time_utils_py : uses
     main_py ..> window_state_py : uses
     main_py ..> gui_layout_py : uses
@@ -425,7 +469,7 @@ sequenceDiagram
 
 ---
 
-### services.py
+### domain.py / adapters.py
 
 #### `ScanResult` (dataclass)
 ゲームスキャン結果を保持するデータクラス。
@@ -436,7 +480,7 @@ sequenceDiagram
 | `inactive_games` | 非アクティブなゲームのリスト |
 | `recorded_seconds` | この周期で記録された秒数 |
 
-#### `GameInfoLoader`
+#### `GameInfoLoader` (`adapters.py`)
 ローカルDBからゲーム情報を読み込む。`data/game_catalog.sqlite3` が空の場合のみ、`GspreadService`でゲーム情報シートへ接続し、既存行をローカルDBへ初回取り込みする。
 
 | メソッド | 説明 | 呼び出し元 |
@@ -445,7 +489,7 @@ sequenceDiagram
 | `load()` | ローカルDBのゲーム情報リストを取得。DBが空の場合のみ`GspreadService(cert_file_path, sheet_key, sheet_gid)`で初回取り込み | `MainWindow._init_components()` |
 | `_record_to_entry(record)` | スプレッドシートのレコードをGameEntryに変換（`models.parse_bool()`を使用） | `load()` 内部 |
 
-#### `WindowScanner`
+#### `WindowScanner` (`adapters.py`)
 アクティブなウィンドウタイトルを取得する。
 
 | メソッド | 説明 | 呼び出し元 |
@@ -454,7 +498,7 @@ sequenceDiagram
 | `get_titles()` | 除外リストを考慮してウィンドウタイトル一覧を取得 | `MainWindow._scan_tick()` |
 | `get_foreground_title()` | フォアグラウンド（最前面）ウィンドウのタイトルを取得 | `MainWindow._scan_tick()` |
 
-#### `SessionRecorder`
+#### `SessionRecorder` (`adapters.py`)
 ゲームセッションを `LogHandler` 経由で記録する。
 
 | メソッド | 説明 | 呼び出し元 |
@@ -465,7 +509,7 @@ sequenceDiagram
 | `_split_by_day(start, end)` | セッションを日付境界で分割 | `record()` / `record_with_times()` 内部 |
 | `_save_to_spreadsheet(game, start_time, end_time)` | 互換名の保存メソッド。ローカルDBに1件保存し、スプレッドシートへバックアップする。**ローカル保存成功時True、失敗時Falseを返す** | `record()` / `record_with_times()` 内部 |
 
-#### `DailyStatsTracker`
+#### `DailyStatsTracker` (`domain.py`)
 日付ごとの統計を追跡し、日付変更時にリセットする。
 
 | メソッド | 説明 | 呼び出し元 |
@@ -499,7 +543,10 @@ UIから独立した状態遷移ロジックを提供。
 | `load_all(path)` | ファイルから `(x, y, display_mode, mode_sizes, overtime_alert_enabled)` を読込。**display_modeが不正な場合は"max"にフォールバック** | `MainWindowStateController.load_all()`, `load()`, `load_overtime_alert_enabled()` |
 | `load(path)` | ファイルから `(x, y, display_mode, mode_sizes)` を読込（`load_all()` のラッパー） | `MainWindowStateController.load()` |
 | `load_overtime_alert_enabled(path)` | ファイルから `overtime_alert_enabled` を読込（未設定時は `True`） | `MainWindowStateController.load_overtime_alert_enabled()` |
-| `save(path, x, y, display_mode, mode_sizes, overtime_alert_enabled=True)` | 現在の状態をファイルに保存（`overtime_alert_enabled` を含む） | `MainWindowStateController.save()` |
+| `load_startup_window_visible(path)` | 起動時にメインウィンドウを表示するかを読込（未設定時は `False`） | `MainWindowStateController.load_startup_window_visible()` |
+| `load_tray_overlay_enabled(path)` | メインウィンドウ非表示中のオーバーレイ表示可否を読込（未設定時は `False`） | `MainWindowStateController.load_tray_overlay_enabled()` |
+| `load_overlay_position(path)` | トレイ用オーバーレイ保存位置を読込（未設定時は `None`） | `MainWindowStateController.load_overlay_position()` |
+| `save(path, x, y, display_mode, mode_sizes, overtime_alert_enabled=True, startup_window_visible=False, tray_overlay_enabled=False, overlay_position=None)` | 現在の状態を保存（アラート設定、起動時表示設定、トレイ用オーバーレイ設定/位置を含む） | `MainWindowStateController.save()` |
 
 ---
 
@@ -528,10 +575,18 @@ GUI版メインウィンドウ。
 | `__init__()` | 起動フローのオーケストレーション（状態復元→依存ウォームアップ→初期化→タイマー開始） | `main()` 関数 |
 | `_initialize_window_state()` | タイトル設定とウィンドウ状態の復元 | `__init__()` 内部 |
 | `_initialize_runtime_state()` | 実行時キャッシュ/依存の初期値を設定 | `__init__()` 内部 |
+| `_initialize_tray_icon()` | タスクトレイアイコンと右クリックメニューを初期化 | `__init__()` 内部 |
+| `_build_tray_menu()` | トレイメニューを構築し、ウィンドウ表示/非表示、オーバーレイ、起動時設定、主要画面、終了へ接続 | `_initialize_tray_icon()` |
+| `_show_main_window_from_tray()` | トレイからメインウィンドウを表示し、保存済みオーバーレイ位置に今日のプレイ時間表示を合わせる | トレイメニュー |
+| `_hide_main_window_to_tray()` | メインウィンドウを非表示にし、タスクトレイ常駐へ戻す | トレイメニュー, `closeEvent()` |
+| `_set_startup_window_visible(visible)` | 起動時にメインウィンドウを表示するかを保存 | トレイメニュー `起動時` |
+| `_set_tray_overlay_enabled(enabled)` | メインウィンドウ非表示中のオーバーレイ表示可否を保存し、表示状態を同期 | トレイメニュー |
+| `_quit_application()` | プレイ中セッションを記録し、状態保存・オーバーレイ終了・トレイアイコン非表示後にアプリ終了 | トレイメニュー `終了` |
+| `should_show_window_on_startup()` | 起動直後にメインウィンドウを表示するかを返す | `main()` 関数 |
 | `_warmup_dependencies()` | UI/表示/loop/bootstrap 依存を事前生成 | `__init__()` 内部 |
 | `_start_background_timers()` | 監視/UI更新タイマーを開始 | `__init__()` 内部 |
 | `_run_initial_refresh()` | 起動直後の初回スキャン/UI更新を実行 | `__init__()` 内部 |
-| `closeEvent(event)` | 終了時の記録・状態保存をオーケストレーション | Qt イベント |
+| `closeEvent(event)` | 通常の × ボタンではウィンドウを非表示にしてトレイへ戻す。完全終了時のみ記録・状態保存を実行 | Qt イベント |
 | `_record_playing_games_before_close()` | 終了時に記録対象ゲームを記録 | `closeEvent()` 内部 |
 | `_iter_recordable_games()` | 記録対象ゲームのみ抽出 | `_record_playing_games_before_close()` 内部 |
 | `_start_timer(interval, callback)` | タイマーを作成して開始 | `__init__()` 内部 |
@@ -557,13 +612,13 @@ GUI版メインウィンドウ。
 | `_load_today_game_minutes()` | スプレッドシートから今日のゲーム別時間を集計 | `_init_components()`, `_scan_games()` |
 | `_update_today_games_list()` | 今日プレイしたゲーム一覧をUIに反映。**日跨ぎセッションは0:00以降のみ、5分未満は除外** | `_ui_tick()` 内部 |
 | `_load_today_completed_seconds()` | 起動時に今日分の完了時間をロード | `_init_components()` 内部 |
-| `_save_window_state()` | ウィンドウ位置・サイズ・モードを保存 | `closeEvent()`, `_cycle_display_mode()` |
-| `_is_overtime_alert_enabled()` | 時間超過防止アラートの有効状態を返す | `_save_window_state()`, `_update_overtime_alert()`, オーバーレイ判定 |
+| `_save_window_state()` | ウィンドウ位置・サイズ・モード、起動時表示設定、トレイ用オーバーレイ設定/位置を保存 | `closeEvent()`, `_cycle_display_mode()`, トレイ設定変更 |
+| `_is_overtime_alert_enabled()` | 時間超過防止アラートの有効状態を返す | `_save_window_state()`, `_update_overtime_alert()` |
 | `_set_overtime_alert_enabled(enabled)` | 時間超過防止アラートの有効状態を更新 | `_on_overtime_alert_toggled()` |
 | `_get_overtime_alert_tracker()` | アラート閾値跨ぎ判定用トラッカーを取得（必要時生成） | `_prime_overtime_alert_progress()`, `_update_overtime_alert()` |
 | `_get_overtime_alert_toggle()` | レイアウト上のアラートトグルウィジェット参照を取得 | `_initialize_overtime_alert_toggle()` |
 | `_initialize_overtime_alert_toggle()` | トグル初期状態を反映し、`toggled` シグナルを接続 | `_init_components()` |
-| `_on_overtime_alert_toggled(checked)` | トグル変更時に有効状態を更新し、進捗再初期化とオーバーレイ同期を実行 | `QPushButton.toggled` |
+| `_on_overtime_alert_toggled(checked)` | トグル変更時に有効状態を更新し、通知進捗を再初期化 | `QPushButton.toggled` |
 | `_prime_overtime_alert_progress(total_seconds)` | 現在値を基準に通知進捗を初期化（遡及通知防止） | 日付変更時, `_on_overtime_alert_toggled()` |
 | `_emit_overtime_alert(threshold_minutes)` | 閾値到達アラートを通知（`QApplication.beep()` + ログ） | `_update_overtime_alert()` |
 | `_update_overtime_alert(total_seconds)` | 閾値跨ぎを検知して未通知閾値のみアラート通知 | `_ui_tick()` |
@@ -581,14 +636,74 @@ GUI版メインウィンドウ。
 
 #### `MainWindow` 内部コントローラー
 
+`src/app/controllers/` は MainWindow controller 群の公開 import 面として機能する。実装ファイルは既存の `main_*.py` / `*_controller.py` に残し、`main.py` やテストは `src.app.controllers` 経由で参照する。
+
+`GameSessionState` (`session_state.py`) はスキャン由来の mutable state (`games`, `active_games_cache`, `inactive_games_cache`, `latest_window_titles`) を保持する。既存の呼び出し互換性のため `MainWindow` には同名プロパティを残し、controller からの一括更新は `update_scan_result()` に集約する。
+
+`GameAlertState` (`alert_state.py`) は時間超過防止アラートの有効フラグと閾値到達トラッカーを保持する。既存の呼び出し互換性のため `MainWindow` には `overtime_alert_enabled` / `_overtime_alert_tracker` のプロパティを残し、controller からは従来通り `_is_overtime_alert_enabled()` と `_get_overtime_alert_tracker()` 経由で参照する。
+
+`WindowDisplayState` (`display_state.py`) は表示モード、モード別サイズ、起動時ウィンドウ表示、トレイ用オーバーレイ設定/位置を保持する。既存の呼び出し互換性のため `MainWindow` には `display_mode` / `mode_sizes` / `startup_window_visible` / `tray_overlay_enabled` / `overlay_position` のプロパティを残す。
+
+`DialogRefState` (`dialog_state.py`) は再利用するダイアログ参照と、レポート/手入力ボタンの接続済みフラグを保持する。既存の呼び出し互換性のため `MainWindow` には `_report_dialog` / `_game_catalog_dialog` / `_manual_record_dialog` / `_settings_dialog` / `_report_button_connected` / `_manual_record_button_connected` のプロパティを残す。
+
+`WindowTitleState` (`window_title_state.py`) は現在ウィンドウタイトル一覧のクリック/右クリックシグナル接続済みフラグを保持する。既存の呼び出し互換性のため `MainWindow` には `_window_title_copy_connected` / `_window_title_context_menu_connected` のプロパティを残す。
+
+`AppLifecycleState` (`lifecycle_state.py`) は完全終了中フラグと起動直後のウィンドウ表示強制フラグを保持する。既存の呼び出し互換性のため `MainWindow` には `_is_quitting` / `_force_startup_window_visible` のプロパティを残す。
+
+`TrayActionState` (`tray_state.py`) はトレイメニューの表示/非表示、起動時表示、オーバーレイ action 参照を保持する。既存の呼び出し互換性のため `MainWindow` には `_tray_*_action` のプロパティを残す。
+
+`TimerState` (`timer_state.py`) は scan/ui 更新用 `QTimer` 参照を保持する。既存の呼び出し互換性のため `MainWindow` には `_scan_timer` / `_ui_timer` のプロパティを残す。
+
+`OverlayVisibilityLogState` (`overlay_state.py`) はオーバーレイ表示可否ログの直近状態と最終ログ時刻を保持する。
+
 | クラス | 役割 | 主要メソッド |
 |--------|------|--------------|
-| `MainWindowUiController` | `active/session/today/windows` のUI更新を担当 | `update_session_times()`, `update_today_totals()`, `update_today_games_list()` |
-| `MainWindowDisplayController` | `min/mid/max` 表示モードの可視性・サイズ制約・ジオメトリ適用を担当 | `apply_display_mode()`, `apply_mode_geometry()`, `next_display_mode()` |
-| `MainWindowStateController` | ウィンドウ状態の読み書きとリサイズ記録を担当 | `load_all()`, `save()`, `record_resize()` |
-| `MainWindowLoopController` | タイマー生成と `scan_tick/ui_tick` 実行フローを担当 | `start_timer()`, `run_scan_tick()`, `run_ui_tick()` |
-| `MainWindowBootstrapper` | 初期化依存構築と初期統計ロードを担当（失敗時は `MainWindowBootstrapError`） | `bootstrap()` |
-| `MainWindowOverlayController` | オーバーレイの初期化・表示条件判定・可視同期を担当 | `initialize_overlay()`, `should_show_overlay()`, `sync_overlay()` |
+| `GameSessionState` (`session_state.py`) | ゲーム一覧、active/inactive キャッシュ、最新ウィンドウタイトルの実行時状態を保持 | `update_scan_result()` |
+| `GameAlertState` (`alert_state.py`) | 時間超過防止アラートの有効状態と閾値到達トラッカーを保持 | `create()` |
+| `WindowDisplayState` (`display_state.py`) | 表示モード、モード別サイズ、起動時表示、トレイ用オーバーレイ設定/位置を保持 | `create()` |
+| `DialogRefState` (`dialog_state.py`) | 再利用するダイアログ参照とダイアログボタン接続フラグを保持 | dataclass |
+| `WindowTitleState` (`window_title_state.py`) | ウィンドウタイトル一覧のクリック/右クリック接続フラグを保持 | dataclass |
+| `AppLifecycleState` (`lifecycle_state.py`) | 完全終了中フラグと起動直後のウィンドウ表示強制フラグを保持 | dataclass |
+| `TrayActionState` (`tray_state.py`) | トレイメニュー action 参照を保持 | dataclass |
+| `TimerState` (`timer_state.py`) | scan/ui 更新用 `QTimer` 参照を保持 | dataclass |
+| `OverlayVisibilityLogState` (`overlay_state.py`) | オーバーレイ表示ログの直近状態を保持 | dataclass |
+| `MainWindowUiController` (`controllers/ui.py`) | `active/session/today/windows` のUI更新を担当 | `update_session_times()`, `update_today_totals()`, `update_today_games_list()` |
+| `MainWindowDisplayController` (`controllers/display.py`) | `min/mid/max` 表示モードの可視性・サイズ制約・ジオメトリ適用を担当 | `apply_display_mode()`, `apply_mode_geometry()`, `next_display_mode()` |
+| `MainWindowStateController` (`controllers/window_state.py`) | ウィンドウ状態、起動時表示設定、トレイ用オーバーレイ設定/位置の読み書きとリサイズ記録を担当 | `load_all()`, `load_startup_window_visible()`, `load_tray_overlay_enabled()`, `load_overlay_position()`, `save()`, `record_resize()` |
+| `MainWindowLoopController` (`controllers/loop.py`) | タイマー生成と `scan_tick/ui_tick` 実行フローを担当 | `start_timer()`, `run_scan_tick()`, `run_ui_tick()` |
+| `MainWindowScanController` (`controllers/scan.py`) | ゲーム状態スキャン、スキャン結果のキャッシュ/UI反映、今日統計ロードを担当 | `scan_games()`, `apply_scan_result()`, `update_scan_status()`, `load_today_game_minutes()` |
+| `MainWindowOvertimeAlertController` / `OvertimeAlertTracker` (`controllers/overtime_alert.py`) | 時間超過アラートの進捗管理、トグル接続、閾値到達通知を担当 | `initialize_toggle()`, `on_toggled()`, `update_alert()`, `prime_progress()` |
+| `MainWindowBootstrapper` (`controllers/bootstrap.py`) | 初期化依存構築と初期統計ロードを担当（失敗時は `MainWindowBootstrapError`） | `bootstrap()` |
+| `BootstrapDependencies` (`controllers/bootstrap.py`) | Bootstrapper が生成する依存クラス群をまとめ、長い個別クラス注入を避ける | `MainWindowBootstrapper.__init__()` |
+| `MainWindowDialogController` (`controllers/dialog.py`) | レポート、手入力、設定、ゲーム管理ダイアログの生成/再利用と保存後リフレッシュを担当 | `open_report_dialog()`, `open_manual_record_dialog()`, `save_manual_record()`, `open_game_catalog_dialog()` |
+| `MainWindowTrayController` (`controllers/tray.py`) | タスクトレイアイコン/メニュー、ウィンドウ表示切替、起動時表示設定、完全終了を担当 | `initialize_tray_icon()`, `build_tray_menu()`, `show_main_window_from_tray()`, `quit_application()` |
+| `MainWindowContextMenuController` (`controllers/context_menu.py`) | メインウィンドウ右クリックメニューの生成と選択処理を担当 | `show_context_menu()`, `add_display_mode_menu()`, `handle_context_menu_selection()` |
+| `MainWindowTitleController` (`controllers/window_title.py`) | 現在のウィンドウタイトル一覧のコピー、右クリックからのゲーム管理追加を担当 | `initialize_window_title_copy()`, `show_window_title_context_menu()`, `copy_text_to_clipboard()` |
+| `Win32CoverDetector` (`cover_detector.py`) | `today_time_display` が他プロセスのウィンドウに覆われているかを Win32 座標で判定 | `get_today_display_cover_state()`, `find_covering_foreign_window_at_point()`, `to_native_point()` |
+| `MainWindowOverlayController` (`controllers/overlay.py`) | 今日のプレイ時間オーバーレイの初期化、表示条件判定、位置/可視同期、ドラッグ後の保存を担当 | `initialize_overlay()`, `should_show_overlay()`, `sync_overlay()`, `sync_overlay_geometry()`, `sync_overlay_visibility()` |
+| `TodayTimeOverlayWindow` (`overlay_window.py`) | 今日のプレイ時間オーバーレイの描画、ドラッグハンドル、Win32 native event によるクリック透過/ドラッグ処理を担当 | `set_today_text()`, `set_overlay_geometry()`, `start_handle_drag()`, `continue_drag_from_global_cursor()` |
+
+---
+
+#### `ReportTabState`
+
+`ReportTabState` (`report_tab_state.py`) は `ReportDialog` のタブ更新状態とレポートキャッシュを保持する。`ReportDialog` には互換用の `_loaded_tabs` / `_dirty_tabs` / `_last_summary` などのプロパティを残すが、controller 側の更新は `ReportTabState` に寄せる。
+
+`ReportGraphUnitState` (`report_graph_unit_state.py`) はグラフ表示単位（分/時間）、単位トグル更新中フラグ、分/時間ボタン参照を保持する。`ReportGraphUnitController` はこの state を直接受け取り、単位状態の更新を owner private 属性に依存しない。
+
+`ReportLogOperationState` (`report_log_operation_state.py`) はログ編集/削除の非同期実行に使う executor、future、polling timer、完了 callback を保持する。`ReportLogOperationController` はこの state を直接受け取り、非同期リソースの所有を `ReportDialog` から切り離す。
+
+`ReportTitleFilterState` (`report_title_filter_state.py`) はタイトルフィルタ表の更新中フラグと初期化済みフラグを保持する。`ReportTitleFilterController` はこの state を直接受け取り、タイトルフィルタの UI 操作状態を owner private 属性に依存しない。
+
+`ReportTrendSelectionState` (`report_trend_selection_state.py`) は推移グラフの選択範囲インデックスを保持する。`ReportTrendSelectionController` はこの state を直接受け取り、選択範囲の更新を owner private 属性に依存しない。
+
+| フィールド/メソッド | 説明 |
+|--------------------|------|
+| `loaded_tabs` / `dirty_tabs` | 遅延ロード済みタブと再読み込み対象タブ |
+| `title_filter_dirty` | タイトルフィルタ用サマリーの再取得要否 |
+| `last_summary` / `title_filter_summary` / `last_trend_series` | 再描画用の集計キャッシュ |
+| `mark_tab_dirty()` / `mark_tab_clean()` / `mark_all_dirty()` | タブ更新状態の変更 |
+| `reset_cached_report_data()` | ログ変更時に集計キャッシュを破棄 |
 
 ---
 
@@ -738,6 +853,40 @@ SQLite で小さな実行時設定を保存する。DB ファイルは `data/set
 
 ---
 
+### sqlite_base_store.py
+
+SQLite store 共通の接続・トランザクション管理とスキーマバージョン記録を提供する。
+各 store は `SQLiteBaseStore` を継承し、`_ensure_schema(conn)` で現行スキーマを作成する。スキーマ世代を持つ store は `SCHEMA_VERSION` と `_migrate(conn, from_version, to_version)` を実装する。
+
+| クラス/メソッド | 説明 |
+|----------------|------|
+| `SQLiteBaseStore(db_path)` | DB パスを保持する基底クラス |
+| `SCHEMA_VERSION` | store ごとの現行スキーマバージョン。`PRAGMA user_version` に記録する |
+| `_connect()` | 親ディレクトリ作成、SQLite 接続、`row_factory` 設定、接続設定、排他トランザクション内でのスキーマ初期化とバージョン更新を行う |
+| `_connection()` | commit/close 付きのコンテキストマネージャ |
+| `_configure_connection(conn)` | store ごとの追加設定フック。`SettingsStore` はここで `PRAGMA foreign_keys = ON` を設定する |
+| `_ensure_schema(conn)` | store ごとの現行スキーマ作成処理 |
+| `_migrate_schema_version(conn)` | `PRAGMA user_version` を読み、必要なら `_migrate()` を呼んで `SCHEMA_VERSION` へ更新する |
+| `_migrate(conn, from_version, to_version)` | store ごとの後方互換マイグレーションフック |
+
+`user_version=0` の既存 DB は初期導入済みスキーマとして扱う。`PlayLogStore` は現行の後付け列追加と device_id 補完をこの migration パスで吸収し、完了後に `user_version=3` を記録する。`GameCatalogStore` と `SettingsStore` は `SCHEMA_VERSION=1` を記録する。
+
+---
+
+### settings_repository.py
+
+#### `SettingsConfigRepository`
+ランタイム設定の保存元は SQLite (`SettingsStore`) とし、`config/config.ini` は初回移行・明示 import/export 用として扱う境界を担当する。`ConfigLoader` はこの repository から `ConfigParser` を受け取り、必須項目検証と typed dataclass 化に集中する。
+
+---
+
+### log_config.py
+
+#### `LoggingConfigState` / `configure_logging()`
+アプリ起動時の root logger 初期化、ログファイル解決、RotatingFileHandler 設定を担当する。`src/app/main.py` には互換 wrapper の `configure_logging()` を残し、logging の mutable state は `infra/log_config.py` 側へ集約する。
+
+---
+
 ### gspread_service.py
 
 #### `GspreadService`
@@ -758,7 +907,7 @@ Google Spreadsheet操作を抽象化するサービスクラス。
 ### log_handler.py
 
 #### `LogHandler`
-プレイログの読み書きを担当する。ローカル SQLite を主保存先とし、Google スプレッドシートはバックアップと初回取り込み元として扱う。起動時にローカルDBの全レコードをメモリにキャッシュし、UI更新時のDB/API呼び出しを避ける。
+プレイログの読み書き窓口を担当する。ローカル SQLite を主保存先とし、Google スプレッドシートはバックアップと初回取り込み元として扱う。起動時にローカルDBの全レコードをメモリにキャッシュし、UI更新時のDB/API呼び出しを避ける。集計処理は `PlayLogAnalytics`、スプレッドシート同期・バックアップ処理は `PlayLogBackupMixin` に委譲する。
 
 | メソッド | 説明 | 呼び出し元 |
 |----------|------|------------|
@@ -772,6 +921,61 @@ Google Spreadsheet操作を抽象化するサービスクラス。
 | `update_record(record_id, values)` | 指定ログをローカルDBで更新し、バックアップ有効時はスプレッドシートの既存行を更新または追記する | `ReportDialog._start_log_edit()` |
 | `delete_record(record_id)` | 指定ログをローカルDBから削除し、バックアップ有効時はスプレッドシートの既存行を削除する。未反映の削除は次回同期で再試行する | `ReportDialog._start_log_delete()` |
 | `sync_with_spreadsheet()` | 手動同期用。スプレッドシート側のプレイログを1回取得し、取り込みと未バックアップ送信判定に使ってキャッシュを更新する。取得失敗時は送信せず次回再試行に残す。戻り値には取得件数、取込件数、取込スキップ件数、未送信件数、バックアップ件数、失敗件数、上書き/別ID採番件数、エラー原因を含める | `ReportDialog._sync_from_spreadsheet()` |
+
+---
+
+### play_log_analytics.py
+
+#### `PlayLogAnalytics`
+`LogHandler.records` 相当のキャッシュ済みレコードを受け取り、今日統計・期間レポート・推移グラフ用データを計算する。DB/APIへはアクセスせず、`core.reporting` の集計関数を呼び出す薄いサービスとして扱う。
+
+| メソッド | 説明 | 呼び出し元 |
+|----------|------|------------|
+| `get_today_stats()` | 今日のゲーム別プレイ時間と合計秒数をキャッシュから計算 | `LogHandler.get_today_stats()` |
+| `get_report_stats(start, end, title_filter)` | 期間・タイトル条件に応じたレポートサマリーを計算 | `LogHandler.get_report_stats()` |
+| `get_trend_stats(period, start, end, title_filter)` | 日別/月別などの推移データを計算 | `LogHandler.get_trend_stats()` |
+| `get_trend_stats_by_title(period, start, end, title_filter)` | タイトル別の推移系列を計算 | `LogHandler.get_trend_stats_by_title()` |
+
+---
+
+### play_log_backup.py
+
+#### `PlayLogBackupMixin`
+Google スプレッドシート接続、既存バックアップ行の取得、未バックアップ行の送信、編集・削除済みレコードの反映を担当する `LogHandler` 用 mixin。ローカルDBへの保存・キャッシュ更新は `LogHandler` 側に残し、外部バックアップに関する副作用をこの module に集約する。
+
+---
+
+### report_charts.py / report_graph_unit.py / report_log_operations.py / report_log_table.py / report_summary_table.py / report_sync_messages.py / report_tab_refresh.py / report_title_filter.py / report_trend_selection.py / report_date_ranges.py
+
+#### `ReportChartBuilder`
+レポート画面の棒グラフ、円グラフ、推移折れ線グラフを生成する。QtCharts の import 可否、空データ時の空チャート、タイトルごとの色決定、グラフ単位（分/時間）の換算を `ReportDialog` から分離する。`ReportDialog` 側には `_populate_chart()` / `_build_line_chart()` などの互換 wrapper を残す。
+
+#### `ReportGraphUnitController`
+グラフ単位（分/時間）のトグル生成、選択状態同期、単位変更時のチャート再描画と未表示タブ dirty 管理を担当する。`ReportDialog` 側には `_set_graph_unit()` / `_seconds_to_graph_value()` などの互換 wrapper を残す。
+
+#### `ReportLogOperationController`
+ログ編集・削除の非同期実行、完了 polling、ボタン無効化/復帰、成功/失敗メッセージを管理する。`ReportDialog` 側には `_start_log_edit()` / `_finish_log_delete()` などの互換 wrapper を残す。
+
+#### `ReportLogTableController`
+ログタブの生ログテーブル生成、選択行の検出、編集フォームへの反映を担当する。`ReportDialog` 側には `_populate_log_table()` / `_log_table_text()` などの互換 wrapper を残す。
+
+#### `ReportSummaryTableController`
+ゲーム別タブの集計ラベルと集計テーブルを生成する。`ReportDialog` 側には `_populate_table()` などの互換 wrapper を残す。
+
+#### `report_sync_messages.sync_result_message()`
+スプレッドシート同期結果の件数・失敗理由を1行ステータスメッセージに整形する。`ReportDialog._sync_result_message()` はこの関数へ委譲する。
+
+#### `ReportTabRefreshController`
+`ReportDialog` の表示中タブだけを更新する遅延ロード、dirty フラグ、タイトルフィルタ更新状態を管理する。`ReportDialog` は `_refresh_tab()` などの公開済み内部メソッドを維持しつつ、この controller へ委譲する。
+
+#### `ReportTitleFilterController`
+推移タブのタイトル別表示で使うタイトル選択テーブル、全選択/全解除ボタン、タイトル一覧用サマリーキャッシュを管理する。`ReportDialog` は `_selected_titles()` / `_sync_title_filter()` などの既存内部メソッドを維持しつつ、この controller へ委譲する。
+
+#### `ReportTrendSelectionController`
+推移グラフのドラッグ範囲から対象 index を計算し、選択範囲だけの集計テーブルとサマリーを更新する。選択解除時のチャート zoom reset も担当する。
+
+#### `report_date_ranges.date_range_for_period()`
+レポート期間プリセット（今週・今月・直近日数など）から開始日・終了日を計算する。ダイアログ本体から分離し、日付計算だけを単体で扱えるようにする。
 
 ---
 
@@ -836,6 +1040,8 @@ Google Spreadsheet操作を抽象化するサービスクラス。
 - **[src/ui/game_catalog_dialog.py](../src/ui/game_catalog_dialog.py)**
   - ゲーム名、ウィンドウタイトル、フレンドプレイ、ブラウザゲーム設定を追加・編集・削除する。
   - 保存先は `data/game_catalog.sqlite3`。
+  - 画面を開いた時は、ローカルの有効なゲーム定義をスプレッドシートへ送信してから、スプレッドシート側の定義を `id` 基準で取り込む。
+  - 画面を閉じる時は、ローカルの有効なゲーム定義をスプレッドシートへ送信する。接続や認証に失敗した場合はステータス表示に留め、ローカル編集は継続する。
   - `スプシから取得` でゲーム情報シートを手動取得し、ローカルDBへ反映する。
   - `スプシへ送信` で有効なローカルゲーム定義をゲーム情報シートへ反映する。既存の `id` は更新し、シートにない `id` は追記する。ローカルで削除済みのゲームは自動ではシートから削除しない。
 
@@ -872,7 +1078,7 @@ Google Spreadsheet操作を抽象化するサービスクラス。
   - `.gitignore` で除外管理。
 
 ## 自動検出フロー
-1. 起動時に `data/game_catalog.sqlite3` から `game_title/window_title/play_with_friends/is_browser_game` をメモリに保持。ローカルDBが空の場合のみ、ゲーム情報シートから初回取り込みする。
+1. 起動時に `data/game_catalog.sqlite3` から `game_title/window_title/play_with_friends/is_browser_game` をメモリに保持。ローカルDBが空の場合のみ、ゲーム情報シートから初回取り込みする。ゲーム管理画面を開閉した場合は、ローカルDBとゲーム情報シートの同期をベストエフォートで実行する。
 2. 1秒間隔（`POLL_INTERVAL_SECONDS = 1`）で以下を実行：
    - 全ウィンドウのタイトルを取得（`pygetwindow.getAllWindows()`）。
    - フォアグラウンド（最前面）ウィンドウのタイトルを取得（`pygetwindow.getActiveWindow()`）。
@@ -1030,12 +1236,32 @@ def matches_window(self, window_title: str, browsers: Sequence[str]) -> bool:
 - 設定エリア（最下部）
   - `時間超過防止アラート` トグル
 
+## タスクトレイ常駐とオーバーレイ
+
+### タスクトレイ
+- アプリ本体はタスクトレイ常駐を基本とする。
+- メインウィンドウは補助UIとして表示/非表示を切り替える。
+- メインウィンドウの × ボタンではアプリを終了せず、ウィンドウを非表示にしてトレイ常駐へ戻る。この操作ではプレイ中セッションを終了しない。
+- 完全終了はタスクトレイメニューの `終了` から行う。終了時はプレイ中セッションを記録し、状態を保存してからアプリを閉じる。
+- トレイメニューの `ウィンドウを表示` / `ウィンドウを非表示` は現在状態に応じて片方だけ表示する。
+- トレイメニューの `起動時` で `ウィンドウを表示` / `ウィンドウを非表示` を選び、`startup_window_visible` として保存する。
+
+### 今日のプレイ時間オーバーレイ
+- 表示内容はメインウィンドウの `today_time_display` と同じ今日のプレイ時間。
+- メインウィンドウ非表示中は、`tray_overlay_enabled == True` かつプレイ中ゲームがある場合に表示する。
+- メインウィンドウ表示中は、プレイ中ゲームがあり、`today_time_display` が自プロセス外ウィンドウに覆われている場合に表示する。この場合、`tray_overlay_enabled` は参照しない。
+- オーバーレイ本体はクリック透過にし、左端の細いドラッグハンドルだけが入力を受け取る。
+- ドラッグ中は UI tick による追従同期を止める。
+- メインウィンドウ非表示中にドラッグした位置は `overlay_position` として保存する。
+- メインウィンドウ表示中にドラッグした場合は、ドラッグ完了後に `today_time_display` がドラッグ後の位置に合うようメインウィンドウを移動する。
+- メインウィンドウをトレイから表示する時は、保存済み `overlay_position` に `today_time_display` が合うようメインウィンドウを移動する。
+
 ## 1時間アラート（時間超過防止）
 
 ### 目的
 - プレイ時間を1日1時間（60分）の目安で管理するため、段階的にアラートを鳴らす。
 - 「時間超過防止アラート」を無効化したいときは、トグルで即時OFFできるようにする。
-- トグルがOFFの間は、オーバーレイの時間表示を完全に無効化する。
+- トグルがOFFの間は、アラート音だけを無効化する。今日のプレイ時間オーバーレイは別設定で制御する。
 
 ### 仕様（ユーザー向け）
 - 追加UI: `時間超過防止アラート` トグル（ON/OFF）
@@ -1050,7 +1276,7 @@ def matches_window(self, window_title: str, browsers: Sequence[str]) -> bool:
   - 各閾値に到達した瞬間に1回のみ鳴る（同一日で再通知しない）
 - トグルOFF時:
   - アラート音を鳴らさない
-  - オーバーレイ時間表示を非表示にする（表示中なら即時で閉じる/隠す）
+  - 今日のプレイ時間オーバーレイの表示可否には影響しない
 
 ### 判定ルール（内部仕様）
 - アラート判定に使う「今日のプレイ時間」は、既存の `today_time_display` と同じ計算値を使用する。
@@ -1066,20 +1292,19 @@ def matches_window(self, window_title: str, browsers: Sequence[str]) -> bool:
   - 通知可否は `時間超過防止アラート` トグル状態のみで決定する。
 
 ### オーバーレイ連携
-- 既存のオーバーレイ表示条件に以下を追加:
-  - `時間超過防止アラート == ON` のときのみオーバーレイ表示判定を実行
-- `時間超過防止アラート == OFF` の間は、オーバーレイ表示判定をスキップし常時非表示。
+- 今日のプレイ時間オーバーレイは、プレイ中ゲームの有無、メインウィンドウの表示状態、被覆判定、トレイメニューの `オーバーレイ表示` に基づいて制御する。
+- `時間超過防止アラート` トグルはアラート音だけを制御し、オーバーレイ表示条件には使わない。
 
 ### 永続化
 - トグル状態は `data/settings.sqlite3` に保存・復元する。
-  - 追加キー（案）: `overtime_alert_enabled: bool`
+  - キー: `overtime_alert_enabled: bool`
   - 旧形式ファイル（キーなし）読み込み時は `True` 扱い
 
 ### 受け入れ条件
 1. トグルONで、45/50/55/58/60分到達時に各1回だけアラートが鳴る。
 2. 同一閾値は同日中に重複して鳴らない。
 3. `mid/min` モードでも、`時間超過防止アラート` トグルがウィンドウ最下部に表示される。
-4. トグルOFF直後にオーバーレイが非表示になり、以後表示されない。
+4. トグルOFF後も、オーバーレイ表示条件を満たす場合は今日のプレイ時間オーバーレイを表示できる。
 5. トグルOFF中はアラートが鳴らない。
 6. 日付変更で閾値通知状態がリセットされる。
 7. アプリ再起動後もトグル状態が復元される。
@@ -1199,15 +1424,16 @@ game_time_tracker.bat
   - ローカルDBへ自動保存し、Google スプレッドシートへバックアップ
 
 ## 開発
-- テスト: `python -m unittest`（`tests/` 配下を検出）
+- テスト: `python -m pytest -q`（`tests/` 配下を検出）
   - `tests/test_stubs.py` - 共通テストスタブ（PySide6/gspread/pygetwindowのフェイク、FakeLogHandler）
-  - `tests/test_main.py` - MainWindow/GUI関連テスト
+  - `tests/test_main_*.py` - MainWindow/GUI関連テスト（起動、表示、スキャン、イベント、オーバーレイ、手入力など機能別に分割）
+  - `tests/helpers/main_test_imports.py` - MainWindow系テストの共通 import とスタブ設定
   - `tests/test_models.py` - models.pyのテスト
-  - `tests/test_services.py` - services.pyのテスト
+  - `tests/test_services.py` - domain.py / adapters.py のテスト
   - `tests/test_time_utils.py` - time_utils.pyのテスト
   - `tests/test_config.py` - config_loader.pyのテスト
   - `tests/test_log_handler.py` - log_handler.py/gspread_service.pyのテスト
   - `tests/test_window_state.py` - window_state.pyのテスト
   - `tests/test_gui.py` - DailyStatsTracker/format_hmsのテスト
-- ポーリング間隔・最小記録時間: `src/app/main.py` の `POLL_INTERVAL_SECONDS` と `src/core/services_domain.py` の `MIN_PLAY_MINUTES` で調整。
+- ポーリング間隔・最小記録時間: `src/app/main.py` の `POLL_INTERVAL_SECONDS` と `src/core/domain.py` の `MIN_PLAY_MINUTES` で調整。
 - 対応ブラウザ・除外ウィンドウ: `config/config.ini` の `[WINDOW_SCAN]` または `config_loader.DEFAULT_BROWSERS/DEFAULT_EXCLUDED_TITLES` で設定。

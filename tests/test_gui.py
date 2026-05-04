@@ -1,7 +1,7 @@
 """GUIモジュールのテスト（PySide6を必要としないユニットテスト）."""
 
 from src.core.time_utils import format_hms
-from src.core.services import DailyStatsTracker
+from src.core.domain import DailyStatsTracker
 import unittest
 from datetime import date
 
