@@ -1,0 +1,1 @@
+"""MainWindow compatibility method installers."""

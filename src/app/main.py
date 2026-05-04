@@ -52,12 +52,18 @@ from src.app.main_constants import (
     POLL_INTERVAL_SECONDS,
     UI_REFRESH_INTERVAL_SECONDS,
 )
-from src.app.main_action_methods import install_main_window_action_methods
-from src.app.main_controller_methods import install_main_window_controller_methods
-from src.app.main_scan_actions import install_main_window_scan_methods
-from src.app.main_state_accessors import install_main_window_state_accessors
-from src.app.main_tray_title_actions import install_main_window_tray_title_actions
-from src.app.main_win32 import install_main_window_win32_methods
+from src.app.main_window.action_methods import install_main_window_action_methods
+from src.app.main_window.controller_methods import (
+    install_main_window_controller_methods,
+)
+from src.app.main_window.scan_methods import install_main_window_scan_methods
+from src.app.main_window.state_descriptors import (
+    install_main_window_state_accessors,
+)
+from src.app.main_window.tray_title_methods import (
+    install_main_window_tray_title_actions,
+)
+from src.app.main_window.win32_methods import install_main_window_win32_methods
 from src.app.session_state import GameSessionState
 from src.app.timer_state import TimerState
 from src.app.tray_state import TrayActionState
