@@ -3,7 +3,6 @@
 import configparser
 import json
 import logging
-import sqlite3
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -17,34 +16,27 @@ class SettingsStore(SQLiteBaseStore):
     """Persist application settings and small state documents in SQLite."""
 
     SCHEMA_VERSION = 1
+    CONNECTION_PRAGMAS = ("PRAGMA foreign_keys = ON",)
+    SCHEMA_STATEMENTS = (
+        """
+        CREATE TABLE IF NOT EXISTS settings (
+            section TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY (section, key)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS json_documents (
+            name TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+    )
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
         super().__init__(db_path or default_settings_db_file())
-
-    def _configure_connection(self, conn: sqlite3.Connection) -> None:
-        conn.execute("PRAGMA foreign_keys = ON")
-
-    @staticmethod
-    def _ensure_schema(conn: sqlite3.Connection) -> None:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS settings (
-                section TEXT NOT NULL,
-                key TEXT NOT NULL,
-                value TEXT NOT NULL,
-                PRIMARY KEY (section, key)
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS json_documents (
-                name TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
 
     def save_config(self, config: configparser.ConfigParser) -> None:
         """Save INI-style config sections into SQLite."""

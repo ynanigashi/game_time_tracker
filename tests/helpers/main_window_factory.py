@@ -58,35 +58,37 @@ def create_mock_main_window(
     """Create a MainWindow test double without running MainWindow.__init__."""
     with patch.object(main.MainWindow, "__init__", lambda self: None):
         window = main.MainWindow()
+    window._initialize_collaborators()
+    state = window._state_access
 
-    window.games = []
+    state.games = []
     window.browsers = list(browsers or ["Chrome"])
-    window.active_games_cache = []
-    window.inactive_games_cache = []
+    state.active_games_cache = []
+    state.inactive_games_cache = []
     if include_latest_window_titles:
-        window.latest_window_titles = []
+        state.latest_window_titles = []
 
     if display_mode is not None:
-        window.display_mode = display_mode
+        state.display_mode = display_mode
     if mode_sizes is not None:
-        window.mode_sizes = dict(mode_sizes)
+        state.mode_sizes = dict(mode_sizes)
     elif display_mode is not None:
-        window.mode_sizes = dict(DEFAULT_MODE_SIZES)
+        state.mode_sizes = dict(DEFAULT_MODE_SIZES)
 
     window.daily_stats = domain.DailyStatsTracker()
     window.overlay_window = None
     window.tray_icon = None
     window.tray_menu = None
-    window._is_quitting = False
-    window.startup_window_visible = False
-    window.tray_overlay_enabled = False
-    window.overlay_position = None
-    window._overtime_alert_tracker = main.OvertimeAlertTracker(
+    state._is_quitting = False
+    state.startup_window_visible = False
+    state.tray_overlay_enabled = False
+    state.overlay_position = None
+    state._overtime_alert_tracker = main.OvertimeAlertTracker(
         thresholds_minutes=main.OVERTIME_ALERT_THRESHOLDS_MINUTES,
         alerted_threshold_minutes=set(),
     )
-    window._overtime_alert_toggle_connected = False
-    window.overtime_alert_enabled = True
+    state._overtime_alert_toggle_connected = False
+    state.overtime_alert_enabled = True
     window.recorder = services.SessionRecorder(
         log_handler=FakeLogHandler(),
         min_play_minutes=5,

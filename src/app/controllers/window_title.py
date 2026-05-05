@@ -18,7 +18,6 @@ class MainWindowTitleController:
 
     def __init__(
         self,
-        owner: "MainWindow",
         *,
         qmenu_cls: Callable[..., object],
         state: WindowTitleState,
@@ -28,7 +27,6 @@ class MainWindowTitleController:
         open_game_catalog_dialog: Callable[..., None],
         set_status: Callable[[str], None],
     ) -> None:
-        self.owner = owner
         self.qmenu_cls = qmenu_cls
         self.state = state
         self.get_window_list_widget_callback = get_window_list_widget

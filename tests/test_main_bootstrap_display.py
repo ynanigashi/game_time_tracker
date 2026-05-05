@@ -29,7 +29,7 @@ class TestMainWindowDisplayModeAndState(unittest.TestCase):
         """_set_statusはタイトルを更新."""
         window = self._create_mock_main_window()
 
-        window._set_status("テストメッセージ")
+        window._actions._set_status("テストメッセージ")
 
         self.assertIn("テストメッセージ", window._window_title)
         self.assertIn(main.BASE_TITLE, window._window_title)
@@ -38,7 +38,7 @@ class TestMainWindowDisplayModeAndState(unittest.TestCase):
         """_set_statusは新しいタイトルをexcluded_titlesに追加."""
         window = self._create_mock_main_window()
 
-        window._set_status("テストメッセージ")
+        window._actions._set_status("テストメッセージ")
 
         expected_title = f"{main.BASE_TITLE} - テストメッセージ"
         self.assertIn(expected_title, window.scanner.excluded_titles)
@@ -46,45 +46,45 @@ class TestMainWindowDisplayModeAndState(unittest.TestCase):
     def test_cycle_display_mode_changes_mode(self):
         """_cycle_display_modeはモードを循環."""
         window = self._create_mock_main_window()
-        window._apply_display_mode = MagicMock()
-        window._save_window_state = MagicMock()
+        window._actions._apply_display_mode = MagicMock()
+        window._actions._save_window_state = MagicMock()
         # DISPLAY_MODES = ("max", "mid", "min") なので max -> mid
-        window.display_mode = 'max'
+        window._state_access.display_mode = 'max'
 
-        window._cycle_display_mode()
+        window._actions._cycle_display_mode()
 
-        self.assertEqual(window.display_mode, 'mid')
-        window._apply_display_mode.assert_called_once()
-        window._save_window_state.assert_called_once()
+        self.assertEqual(window._state_access.display_mode, 'mid')
+        window._actions._apply_display_mode.assert_called_once()
+        window._actions._save_window_state.assert_called_once()
 
     def test_cycle_display_mode_wraps_around(self):
         """_cycle_display_modeはminからmaxに循環."""
         window = self._create_mock_main_window()
-        window._apply_display_mode = MagicMock()
-        window._save_window_state = MagicMock()
+        window._actions._apply_display_mode = MagicMock()
+        window._actions._save_window_state = MagicMock()
         # DISPLAY_MODES = ("max", "mid", "min") なので min -> max
-        window.display_mode = 'min'
+        window._state_access.display_mode = 'min'
 
-        window._cycle_display_mode()
+        window._actions._cycle_display_mode()
 
-        self.assertEqual(window.display_mode, 'max')
+        self.assertEqual(window._state_access.display_mode, 'max')
 
     def test_apply_mode_geometry_sets_size(self):
         """_apply_mode_geometryはモードに応じたサイズを設定."""
         window = self._create_mock_main_window()
-        window.display_mode = 'mid'
+        window._state_access.display_mode = 'mid'
 
-        window._apply_mode_geometry()
+        window._actions._apply_mode_geometry()
 
         window.resize.assert_called_once_with(300, 200)
 
     def test_apply_mode_geometry_clamps_min_mode_size(self):
         """minモードのサイズは安全値以上にクランプされる."""
         window = self._create_mock_main_window()
-        window.display_mode = 'min'
-        window.mode_sizes['min'] = (200, 60)
+        window._state_access.display_mode = 'min'
+        window._state_access.mode_sizes['min'] = (200, 60)
 
-        window._apply_mode_geometry()
+        window._actions._apply_mode_geometry()
 
         window.resize.assert_called_once_with(
             main.MIN_MODE_SAFE_WIDTH, main.MIN_MODE_SAFE_HEIGHT)
@@ -107,43 +107,43 @@ class TestMainWindowDisplayModeAndState(unittest.TestCase):
             mode_sizes[display_mode] = (int(geom.width()), int(geom.height()))
 
         mock_state_controller.save.side_effect = save_side_effect
-        window._get_state_controller = MagicMock(return_value=mock_state_controller)
+        window._controllers._get_state_controller = MagicMock(return_value=mock_state_controller)
 
-        window._save_window_state()
+        window._actions._save_window_state()
 
-        self.assertEqual(window.mode_sizes['mid'], (350, 250))
+        self.assertEqual(window._state_access.mode_sizes['mid'], (350, 250))
         mock_state_controller.save.assert_called_once()
         self.assertTrue(mock_state_controller.save.call_args.args[3])
 
     def test_on_overtime_alert_toggled_off_syncs_overlay_immediately(self):
         """トグルOFF時に状態更新し、オーバーレイ同期を即時実行する."""
         window = self._create_mock_main_window()
-        window.active_games_cache = []
-        window.inactive_games_cache = []
-        window._sync_overlay = MagicMock()
+        window._state_access.active_games_cache = []
+        window._state_access.inactive_games_cache = []
+        window._actions._sync_overlay = MagicMock()
         mock_ui_controller = MagicMock()
         mock_ui_controller.calculate_today_total_seconds.return_value = 1800.0
-        window._get_ui_controller = MagicMock(return_value=mock_ui_controller)
+        window._controllers._get_ui_controller = MagicMock(return_value=mock_ui_controller)
 
-        window._on_overtime_alert_toggled(False)
+        window._actions._on_overtime_alert_toggled(False)
 
-        self.assertFalse(window.overtime_alert_enabled)
-        tracker = window._get_overtime_alert_tracker()
+        self.assertFalse(window._state_access.overtime_alert_enabled)
+        tracker = window._actions._get_overtime_alert_tracker()
         self.assertTrue(tracker.initialized)
         self.assertEqual(tracker.last_checked_seconds, 1800.0)
-        window._sync_overlay.assert_called_once()
+        window._actions._sync_overlay.assert_called_once()
 
     def test_apply_display_mode_hides_widgets_in_min_mode(self):
         """_apply_display_modeはminモードでウィジェットを非表示."""
         window = self._create_mock_main_window()
-        window.display_mode = 'min'
-        window._set_widget_visibility = MagicMock()
-        window._set_widget_with_height = MagicMock()
+        window._state_access.display_mode = 'min'
+        window._actions._set_widget_visibility = MagicMock()
+        window._actions._set_widget_with_height = MagicMock()
 
-        window._apply_display_mode()
+        window._actions._apply_display_mode()
 
         # session_labelはis_expanded=Falseで非表示
-        calls = [call for call in window._set_widget_visibility.call_args_list]
+        calls = [call for call in window._actions._set_widget_visibility.call_args_list]
         # minモードではsession_labelがFalseで呼ばれる
         session_label_calls = [c for c in calls if c[0][0] == window.w.session_label]
         if session_label_calls:
@@ -186,9 +186,9 @@ class TestInitComponentsDirect(unittest.TestCase):
     def test_init_components_success(self):
         """_init_componentsの正常系."""
         window = self._create_mock_main_window()
-        window._set_status = self._mock_set_status(window)
-        window._apply_display_mode = MagicMock()
-        window._apply_mode_geometry = MagicMock()
+        window._actions._set_status = self._mock_set_status(window)
+        window._actions._apply_display_mode = MagicMock()
+        window._actions._apply_mode_geometry = MagicMock()
 
         mock_config = MagicMock()
         mock_config.window_scan.browsers = ['Chrome']
@@ -202,16 +202,16 @@ class TestInitComponentsDirect(unittest.TestCase):
                 MockGameInfoLoader.return_value.load.return_value = mock_games
                 with patch('src.app.main.LogHandler') as MockLogHandler:
                     MockLogHandler.return_value = FakeLogHandler()
-                    window._init_components()
+                    window._actions._init_components()
 
         self.assertFalse(window._disabled)
-        self.assertEqual(len(window.games), 1)
+        self.assertEqual(len(window._state_access.games), 1)
 
     def test_init_components_empty_games_opens_game_catalog(self):
         """_init_componentsはゲームが空の場合ゲーム管理を開く."""
         window = self._create_mock_main_window()
-        window._set_status = self._mock_set_status(window)
-        window._open_game_catalog_dialog = MagicMock()
+        window._actions._set_status = self._mock_set_status(window)
+        window._actions._open_game_catalog_dialog = MagicMock()
 
         mock_config = MagicMock()
 
@@ -219,17 +219,17 @@ class TestInitComponentsDirect(unittest.TestCase):
             MockConfigLoader.return_value.load.return_value = mock_config
             with patch('src.app.main.GameInfoLoader') as MockGameInfoLoader:
                 MockGameInfoLoader.return_value.load.return_value = []
-                window._init_components()
+                window._actions._init_components()
 
         self.assertFalse(window._disabled)
         self.assertIn('ゲーム情報が未登録', window._status)
-        window._open_game_catalog_dialog.assert_called_once()
+        window._actions._open_game_catalog_dialog.assert_called_once()
 
     def test_init_components_loghandler_file_not_found_opens_settings(self):
         """_init_componentsはLogHandlerのFileNotFoundErrorで設定画面を開く."""
         window = self._create_mock_main_window()
-        window._set_status = self._mock_set_status(window)
-        window._open_settings_dialog = MagicMock()
+        window._actions._set_status = self._mock_set_status(window)
+        window._actions._open_settings_dialog = MagicMock()
 
         mock_config = MagicMock()
         mock_config.window_scan.browsers = []
@@ -244,17 +244,17 @@ class TestInitComponentsDirect(unittest.TestCase):
                     'src.app.main.LogHandler',
                     side_effect=FileNotFoundError("service_account.json"),
                 ), patch('src.app.main.QMessageBox.warning') as mock_warning:
-                    window._init_components()
+                    window._actions._init_components()
 
         self.assertFalse(window._disabled)
         self.assertIn('認証情報', window._status)
         mock_warning.assert_called_once()
-        window._open_settings_dialog.assert_called_once()
+        window._actions._open_settings_dialog.assert_called_once()
 
     def test_init_components_spreadsheet_not_found_disables(self):
         """_init_componentsはSpreadsheetNotFoundで無効化."""
         window = self._create_mock_main_window()
-        window._set_status = self._mock_set_status(window)
+        window._actions._set_status = self._mock_set_status(window)
 
         mock_config = MagicMock()
         mock_config.window_scan.browsers = []
@@ -269,7 +269,7 @@ class TestInitComponentsDirect(unittest.TestCase):
                     'src.app.main.LogHandler',
                     side_effect=fake_gspread.exceptions.SpreadsheetNotFound(),
                 ):
-                    window._init_components()
+                    window._actions._init_components()
 
         self.assertTrue(window._disabled)
         self.assertIn('ログハンドラー初期化エラー', window._status)
@@ -277,7 +277,7 @@ class TestInitComponentsDirect(unittest.TestCase):
     def test_init_components_api_error_disables(self):
         """_init_componentsはAPIErrorで無効化."""
         window = self._create_mock_main_window()
-        window._set_status = self._mock_set_status(window)
+        window._actions._set_status = self._mock_set_status(window)
 
         mock_config = MagicMock()
         mock_config.window_scan.browsers = []
@@ -295,7 +295,7 @@ class TestInitComponentsDirect(unittest.TestCase):
                     'src.app.main.LogHandler',
                     side_effect=fake_gspread.exceptions.APIError(mock_response),
                 ):
-                    window._init_components()
+                    window._actions._init_components()
 
         self.assertTrue(window._disabled)
         self.assertIn('ログハンドラー初期化エラー', window._status)
@@ -303,7 +303,7 @@ class TestInitComponentsDirect(unittest.TestCase):
     def test_init_components_generic_exception_disables(self):
         """_init_componentsは汎用Exceptionで無効化."""
         window = self._create_mock_main_window()
-        window._set_status = self._mock_set_status(window)
+        window._actions._set_status = self._mock_set_status(window)
 
         mock_config = MagicMock()
         mock_config.window_scan.browsers = []
@@ -327,7 +327,7 @@ class TestInitComponentsDirect(unittest.TestCase):
                         'src.app.main.LogHandler',
                         side_effect=CustomNonGspreadError("Custom error"),
                     ):
-                        window._init_components()
+                        window._actions._init_components()
 
             self.assertTrue(window._disabled)
             self.assertIn('初期化エラー', window._status)
@@ -338,8 +338,8 @@ class TestInitComponentsDirect(unittest.TestCase):
 
     def test_init_components_missing_settings_opens_settings_dialog(self):
         window = self._create_mock_main_window()
-        window._set_status = self._mock_set_status(window)
-        window._open_settings_dialog = MagicMock()
+        window._actions._set_status = self._mock_set_status(window)
+        window._actions._open_settings_dialog = MagicMock()
         window._get_bootstrapper = MagicMock()
         window._get_bootstrapper.return_value.bootstrap.side_effect = (
             MainWindowBootstrapError(
@@ -348,16 +348,16 @@ class TestInitComponentsDirect(unittest.TestCase):
             )
         )
 
-        window._init_components()
+        window._actions._init_components()
 
         self.assertFalse(window._disabled)
         self.assertIn("設定が未作成", window._status)
-        window._open_settings_dialog.assert_called_once()
+        window._actions._open_settings_dialog.assert_called_once()
 
     def test_init_components_missing_games_opens_game_catalog_dialog(self):
         window = self._create_mock_main_window()
-        window._set_status = self._mock_set_status(window)
-        window._open_game_catalog_dialog = MagicMock()
+        window._actions._set_status = self._mock_set_status(window)
+        window._actions._open_game_catalog_dialog = MagicMock()
         window._get_bootstrapper = MagicMock()
         window._get_bootstrapper.return_value.bootstrap.side_effect = (
             MainWindowBootstrapError(
@@ -366,11 +366,11 @@ class TestInitComponentsDirect(unittest.TestCase):
             )
         )
 
-        window._init_components()
+        window._actions._init_components()
 
         self.assertFalse(window._disabled)
         self.assertIn("ゲーム情報が未登録", window._status)
-        window._open_game_catalog_dialog.assert_called_once()
+        window._actions._open_game_catalog_dialog.assert_called_once()
 
 class TestBuildMainLayout(unittest.TestCase):
     """gui_layout.build_main_layoutのテスト."""
@@ -454,9 +454,10 @@ class TestApplyDisplayModeMaxMid(unittest.TestCase):
         """モックされたMainWindowを作成."""
         with patch.object(main.MainWindow, '__init__', lambda self: None):
             window = main.MainWindow()
+        window._initialize_collaborators()
 
-        window.display_mode = 'mid'
-        window.mode_sizes = {'min': (300, 80), 'mid': (300, 200), 'max': (300, 400)}
+        window._state_access.display_mode = 'mid'
+        window._state_access.mode_sizes = {'min': (300, 80), 'mid': (300, 200), 'max': (300, 400)}
 
         # ウィジェットモック
         window.w = MagicMock()
@@ -477,16 +478,16 @@ class TestApplyDisplayModeMaxMid(unittest.TestCase):
         window.w.report_button = MagicMock()
         window.w.manual_record_button = MagicMock()
 
-        window._apply_mode_geometry = MagicMock()
+        window._actions._apply_mode_geometry = MagicMock()
 
         return window
 
     def test_max_mode_shows_window_list(self):
         """maxモードでwindow_listが表示される."""
         window = self._create_mock_main_window()
-        window.display_mode = 'max'
+        window._state_access.display_mode = 'max'
 
-        window._apply_display_mode()
+        window._actions._apply_display_mode()
 
         # window_listが表示される
         window.w.window_list.setVisible.assert_called_with(True)
@@ -495,9 +496,9 @@ class TestApplyDisplayModeMaxMid(unittest.TestCase):
     def test_mid_mode_hides_window_list(self):
         """midモードでwindow_listが非表示."""
         window = self._create_mock_main_window()
-        window.display_mode = 'mid'
+        window._state_access.display_mode = 'mid'
 
-        window._apply_display_mode()
+        window._actions._apply_display_mode()
 
         # window_listが非表示
         window.w.window_list.setVisible.assert_called_with(False)
@@ -506,9 +507,9 @@ class TestApplyDisplayModeMaxMid(unittest.TestCase):
     def test_mid_mode_shows_session_and_active(self):
         """midモードでsessionとactiveが表示される."""
         window = self._create_mock_main_window()
-        window.display_mode = 'mid'
+        window._state_access.display_mode = 'mid'
 
-        window._apply_display_mode()
+        window._actions._apply_display_mode()
 
         # session関連が表示
         window.w.session_label.setVisible.assert_called_with(True)
@@ -523,9 +524,9 @@ class TestApplyDisplayModeMaxMid(unittest.TestCase):
     def test_max_mode_shows_all_widgets(self):
         """maxモードで全ウィジェットが表示される."""
         window = self._create_mock_main_window()
-        window.display_mode = 'max'
+        window._state_access.display_mode = 'max'
 
-        window._apply_display_mode()
+        window._actions._apply_display_mode()
 
         # 全ウィジェットが表示
         window.w.today_label.setVisible.assert_called_with(True)
@@ -537,9 +538,9 @@ class TestApplyDisplayModeMaxMid(unittest.TestCase):
     def test_min_mode_hides_session_active_games(self):
         """minモードでsession/active/gamesが非表示."""
         window = self._create_mock_main_window()
-        window.display_mode = 'min'
+        window._state_access.display_mode = 'min'
 
-        window._apply_display_mode()
+        window._actions._apply_display_mode()
 
         # session関連が非表示
         window.w.session_label.setVisible.assert_called_with(False)
@@ -556,9 +557,9 @@ class TestApplyDisplayModeMaxMid(unittest.TestCase):
     def test_min_mode_keeps_overtime_toggle_visible(self):
         """minモードでも時間超過防止アラートトグルは表示される."""
         window = self._create_mock_main_window()
-        window.display_mode = 'min'
+        window._state_access.display_mode = 'min'
 
-        window._apply_display_mode()
+        window._actions._apply_display_mode()
 
         window.w.overtime_alert_toggle.setVisible.assert_called_with(True)
 
@@ -567,12 +568,12 @@ class TestApplyDisplayModeMaxMid(unittest.TestCase):
         window = self._create_mock_main_window()
 
         for mode in ['min', 'mid', 'max']:
-            window.display_mode = mode
-            window._apply_mode_geometry.reset_mock()
+            window._state_access.display_mode = mode
+            window._actions._apply_mode_geometry.reset_mock()
 
-            window._apply_display_mode()
+            window._actions._apply_display_mode()
 
-            window._apply_mode_geometry.assert_called_once()
+            window._actions._apply_mode_geometry.assert_called_once()
 
 class TestSetWidgetVisibility(unittest.TestCase):
     """_set_widget_visibilityの単体テスト."""
@@ -586,7 +587,7 @@ class TestSetWidgetVisibility(unittest.TestCase):
         window = self._create_mock_main_window()
         mock_widget = MagicMock()
 
-        window._set_widget_visibility(mock_widget, True)
+        window._actions._set_widget_visibility(mock_widget, True)
 
         mock_widget.setVisible.assert_called_once_with(True)
 
@@ -595,7 +596,7 @@ class TestSetWidgetVisibility(unittest.TestCase):
         window = self._create_mock_main_window()
         mock_widget = MagicMock()
 
-        window._set_widget_visibility(mock_widget, False)
+        window._actions._set_widget_visibility(mock_widget, False)
 
         mock_widget.setVisible.assert_called_once_with(False)
 
@@ -611,7 +612,7 @@ class TestSetWidgetWithHeight(unittest.TestCase):
         window = self._create_mock_main_window()
         mock_widget = MagicMock()
 
-        window._set_widget_with_height(mock_widget, True, min_height=50, max_height=200)
+        window._actions._set_widget_with_height(mock_widget, True, min_height=50, max_height=200)
 
         mock_widget.setVisible.assert_called_once_with(True)
         mock_widget.setMinimumHeight.assert_called_once_with(50)
@@ -622,7 +623,7 @@ class TestSetWidgetWithHeight(unittest.TestCase):
         window = self._create_mock_main_window()
         mock_widget = MagicMock()
 
-        window._set_widget_with_height(mock_widget, False, min_height=0, max_height=0)
+        window._actions._set_widget_with_height(mock_widget, False, min_height=0, max_height=0)
 
         mock_widget.setVisible.assert_called_once_with(False)
         mock_widget.setMinimumHeight.assert_called_once_with(0)
@@ -635,4 +636,4 @@ class TestSetWidgetWithHeight(unittest.TestCase):
 
         # 位置引数で渡すとエラー
         with self.assertRaises(TypeError):
-            window._set_widget_with_height(mock_widget, True, 50, 200)
+            window._actions._set_widget_with_height(mock_widget, True, 50, 200)

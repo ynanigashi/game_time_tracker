@@ -51,7 +51,7 @@ class MainWindowStateController:
     def _load_raw_state(self) -> Dict[str, object]:
         data = self.settings_store.load_window_state()
         if data is None:
-            return WindowState._load_data(self.state_file)
+            return WindowState.load_data(self.state_file)
         return data
 
     def load_startup_window_visible(self) -> bool:

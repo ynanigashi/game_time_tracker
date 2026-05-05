@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Callable, Dict, Optional, Sequence
 
-from PySide6.QtWidgets import QMenu
+from PySide6.QtWidgets import QMenu, QWidget
 
 
 class MainWindowContextMenuController:
@@ -12,9 +12,10 @@ class MainWindowContextMenuController:
 
     def __init__(
         self,
-        owner: "MainWindow",
         *,
+        parent_widget: Optional[QWidget],
         display_modes: Sequence[str],
+        display_mode_provider: Callable[[], str],
         set_display_mode: Callable[[str], None],
         open_manual_record_dialog: Callable[[], None],
         open_report_dialog: Callable[[], None],
@@ -22,8 +23,9 @@ class MainWindowContextMenuController:
         open_settings_dialog: Callable[[], None],
         quit_application: Callable[[], None],
     ) -> None:
-        self.owner = owner
+        self.parent_widget = parent_widget
         self.display_modes = display_modes
+        self.display_mode_provider = display_mode_provider
         self.set_display_mode = set_display_mode
         self.open_manual_record_dialog = open_manual_record_dialog
         self.open_report_dialog = open_report_dialog
@@ -32,7 +34,7 @@ class MainWindowContextMenuController:
         self.quit_application = quit_application
 
     def show_context_menu(self, event: object) -> None:
-        menu = QMenu(self.owner)
+        menu = QMenu(self.parent_widget)
         mode_actions = self.add_display_mode_menu(menu)
         manual_record_action = menu.addAction("\u624b\u5165\u529b\u3067\u8a18\u9332")
         report_action = menu.addAction("\u30ec\u30dd\u30fc\u30c8")
@@ -60,7 +62,7 @@ class MainWindowContextMenuController:
     def add_display_mode_menu(self, menu: QMenu) -> Dict[str, object]:
         size_menu = menu.addMenu("\u30b5\u30a4\u30ba")
         mode_actions: Dict[str, object] = {}
-        current_mode = getattr(self.owner, "display_mode", "")
+        current_mode = self.display_mode_provider()
         for mode in self.display_modes:
             action = size_menu.addAction(mode)
             set_checkable = getattr(action, "setCheckable", None)

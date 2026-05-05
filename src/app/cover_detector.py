@@ -67,7 +67,10 @@ class Win32CoverDetector:
         )
 
     def _owner_override(self, name: str) -> Optional[Callable]:
-        override = getattr(self.owner, "__dict__", {}).get(name)
+        win32_ops = getattr(self.owner, "__dict__", {}).get("_win32_ops")
+        override = getattr(win32_ops, "__dict__", {}).get(name) if win32_ops else None
+        if override is None:
+            override = getattr(self.owner, "__dict__", {}).get(name)
         return override if callable(override) else None
 
     def is_own_window(self, hwnd: int) -> bool:

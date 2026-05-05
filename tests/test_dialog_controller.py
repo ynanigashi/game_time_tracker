@@ -26,17 +26,22 @@ class MainWindowDialogControllerTest(unittest.TestCase):
             def activateWindow(self):
                 pass
 
-        owner = SimpleNamespace(
-            recorder=SimpleNamespace(log_handler=object()),
-        )
+        log_handler = object()
         state = DialogRefState()
         controller = MainWindowDialogController(
-            owner,
+            parent_widget=SimpleNamespace(),
             report_dialog_cls=Dialog,
             manual_record_dialog_cls=Dialog,
             game_catalog_dialog_cls=Dialog,
             settings_dialog_cls=Dialog,
             state=state,
+            has_recorder=lambda: True,
+            log_handler_provider=lambda: log_handler,
+            record_with_times=lambda _game, _start, _end: 0.0,
+            games_provider=lambda: [],
+            get_today_stats=lambda: ({}, 0.0),
+            set_today_stats=lambda _minutes, _seconds: None,
+            set_disabled=lambda _disabled: None,
             get_report_button=lambda: None,
             get_manual_record_button=lambda: None,
             open_report_dialog_callback=lambda: None,

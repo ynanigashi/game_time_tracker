@@ -89,9 +89,9 @@ class OverlayDragHandleWindow(QWidget):
 
     def _configure_window(self) -> None:
         flags = (
-            TodayTimeOverlayWindow._window_flag("Tool")
-            | TodayTimeOverlayWindow._window_flag("FramelessWindowHint")
-            | TodayTimeOverlayWindow._window_flag("WindowStaysOnTopHint")
+            TodayTimeOverlayWindow.window_flag("Tool")
+            | TodayTimeOverlayWindow.window_flag("FramelessWindowHint")
+            | TodayTimeOverlayWindow.window_flag("WindowStaysOnTopHint")
         )
         self.setWindowFlags(flags)
         self.setWindowOpacity(0.88)
@@ -102,10 +102,10 @@ class OverlayDragHandleWindow(QWidget):
             "  border-bottom-left-radius: 8px;"
             "}"
         )
-        attribute = TodayTimeOverlayWindow._widget_attribute("WA_ShowWithoutActivating")
+        attribute = TodayTimeOverlayWindow.widget_attribute("WA_ShowWithoutActivating")
         if attribute is not None:
             self.setAttribute(cast(Any, attribute), True)
-        cursor_shape = TodayTimeOverlayWindow._drag_cursor_shape(active=False)
+        cursor_shape = TodayTimeOverlayWindow.drag_cursor_shape(active=False)
         if cursor_shape is not None:
             self.setCursor(cursor_shape)
 
@@ -161,30 +161,30 @@ class TodayTimeOverlayWindow(QWidget):
         self.resize(OVERLAY_FALLBACK_WIDTH, OVERLAY_FALLBACK_HEIGHT)
 
     @staticmethod
-    def _window_flag(flag_name: str) -> Any:
+    def window_flag(flag_name: str) -> Any:
         window_type = getattr(Qt, "WindowType", None)
         if window_type is not None and hasattr(window_type, flag_name):
             return getattr(window_type, flag_name)
         return getattr(Qt, flag_name, 0)
 
     @staticmethod
-    def _widget_attribute(attribute_name: str) -> Optional[object]:
+    def widget_attribute(attribute_name: str) -> Optional[object]:
         widget_attribute = getattr(Qt, "WidgetAttribute", None)
         if widget_attribute is not None and hasattr(widget_attribute, attribute_name):
             return getattr(widget_attribute, attribute_name)
         return getattr(Qt, attribute_name, None)
 
     def _set_widget_attribute(self, attribute_name: str, enabled: bool = True) -> None:
-        attribute = self._widget_attribute(attribute_name)
+        attribute = self.widget_attribute(attribute_name)
         if attribute is not None:
             self.setAttribute(cast(Any, attribute), enabled)
 
     def _configure_window(self) -> None:
         flags = (
-            self._window_flag("Tool")
-            | self._window_flag("FramelessWindowHint")
-            | self._window_flag("WindowStaysOnTopHint")
-            | self._window_flag("WindowTransparentForInput")
+            self.window_flag("Tool")
+            | self.window_flag("FramelessWindowHint")
+            | self.window_flag("WindowStaysOnTopHint")
+            | self.window_flag("WindowTransparentForInput")
         )
         self.setWindowFlags(flags)
         self.setWindowOpacity(0.88)
@@ -510,20 +510,20 @@ class TodayTimeOverlayWindow(QWidget):
             self._set_handle_cursor(active=False)
             return
 
-        cursor_shape = self._drag_cursor_shape(active=active)
+        cursor_shape = self.drag_cursor_shape(active=active)
         if cursor_shape is not None:
             self.setCursor(cursor_shape)
             self._drag_handle.setCursor(cursor_shape)
             self._drag_handle_window.setCursor(cursor_shape)
 
     def _set_handle_cursor(self, *, active: bool) -> None:
-        cursor_shape = self._drag_cursor_shape(active=active)
+        cursor_shape = self.drag_cursor_shape(active=active)
         if cursor_shape is not None:
             self._drag_handle.setCursor(cursor_shape)
             self._drag_handle_window.setCursor(cursor_shape)
 
     @staticmethod
-    def _drag_cursor_shape(*, active: bool) -> Optional[object]:
+    def drag_cursor_shape(*, active: bool) -> Optional[object]:
         cursor_enum = getattr(Qt, "CursorShape", None)
         cursor_name = "ClosedHandCursor" if active else "OpenHandCursor"
         cursor_shape = (
