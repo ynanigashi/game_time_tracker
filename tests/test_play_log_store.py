@@ -3,6 +3,7 @@ import unittest
 import sqlite3
 from pathlib import Path
 
+from src.infra.play_log_models import PlayLogRecord, PlayLogWrite
 from src.infra.play_log_store import PlayLogStore
 
 
@@ -26,6 +27,24 @@ class TestPlayLogStore(unittest.TestCase):
         loaded = self.store.load_records()
         self.assertEqual(loaded, [saved])
         self.assertEqual(self.store.max_index(), 1)
+
+    def test_typed_save_and_load_record_roundtrip(self):
+        saved = self.store.save_record_model(
+            PlayLogWrite(
+                index=1,
+                start_time="2026/04/26 10:00:00",
+                end_time="2026/04/26 10:30:00",
+                title="Game",
+                play_with_friends=True,
+            ),
+            backed_up=False,
+        )
+
+        self.assertIsInstance(saved, PlayLogRecord)
+        self.assertEqual(saved.index, 1)
+        self.assertTrue(saved.play_with_friends)
+        self.assertEqual(self.store.load_record_models(), [saved])
+        self.assertEqual(self.store.load_records(), [saved.to_dict()])
 
     def test_import_records_skips_invalid_rows(self):
         imported = self.store.import_records(
@@ -95,8 +114,10 @@ class TestPlayLogStore(unittest.TestCase):
         )
 
         pending = self.store.load_pending_backup_records()
+        pending_models = self.store.load_pending_backup_record_models()
 
         self.assertEqual([record["index"] for record in pending], [1])
+        self.assertEqual([record.record.index for record in pending_models], [1])
 
         self.store.mark_backed_up(pending[0]["record_id"])
         self.assertEqual(self.store.load_pending_backup_records(), [])

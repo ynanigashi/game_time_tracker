@@ -18,6 +18,7 @@ from src.infra.config_loader import (
 from src.infra.gspread_service import GspreadService
 from src.infra.play_log_backup import PlayLogBackupMixin, _PlayLogBackupResult
 from src.infra.play_log_analytics import PlayLogAnalytics
+from src.infra.play_log_models import PlayLogWrite
 from src.infra.play_log_store import PlayLogStore
 
 logger = logging.getLogger(__name__)
@@ -93,7 +94,9 @@ class LogHandler(PlayLogBackupMixin):
         if remote_records is None:
             imported = 0
             import_skipped = 0
-            pending_count = len(self.play_log_store.load_pending_backup_records())
+            pending_count = len(
+                self.play_log_store.load_pending_backup_record_models()
+            )
             backup_result = _PlayLogBackupResult(
                 backed_up=0,
                 pending_count=pending_count,
@@ -191,12 +194,15 @@ class LogHandler(PlayLogBackupMixin):
     def save_record(self, values: List[Any]) -> bool:
         """Save a play record locally and back it up to the spreadsheet."""
         try:
-            record = self.play_log_store.save_record(values, backed_up=False)
+            record = self.play_log_store.save_record_model(
+                PlayLogWrite.from_values(values),
+                backed_up=False,
+            )
         except Exception as exc:
             logger.error("failed to save play record locally: %s", exc)
             return False
 
-        self.records.append(record)
+        self.records.append(record.to_dict())
         if self.gspread_service is None:
             return True
 
@@ -206,9 +212,9 @@ class LogHandler(PlayLogBackupMixin):
     def update_record(self, record_id: str, values: List[Any]) -> PlayLogEditResult:
         """Update one play record locally and in the spreadsheet backup."""
         try:
-            record = self.play_log_store.update_record(
+            record = self.play_log_store.update_record_model(
                 record_id,
-                values,
+                PlayLogWrite.from_values(values),
                 backed_up=False,
                 sync_action="update",
             )
@@ -234,14 +240,14 @@ class LogHandler(PlayLogBackupMixin):
         return PlayLogEditResult(
             local_updated=True,
             spreadsheet_updated=spreadsheet_updated,
-            record=record,
+            record=record.to_dict(),
             error_message=error_message,
         )
 
     def delete_record(self, record_id: str) -> PlayLogDeleteResult:
         """Delete one play record locally and from the spreadsheet backup."""
         try:
-            record = self.play_log_store.delete_record(record_id)
+            record = self.play_log_store.delete_record_model(record_id)
         except Exception as exc:
             logger.error("failed to delete play record locally: %s", exc)
             return PlayLogDeleteResult(

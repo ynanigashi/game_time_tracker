@@ -11,6 +11,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
+from src.infra.play_log_models import (
+    PendingPlayLogRecord,
+    PlayLogRecord,
+    PlayLogWrite,
+    deserialize_play_log_bool,
+    serialize_play_log_bool,
+)
 from src.infra.runtime_paths import default_play_log_db_file
 from src.infra.sqlite_base_store import SQLiteBaseStore
 
@@ -63,8 +70,6 @@ class PlayLogStore(SQLiteBaseStore):
             ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0
         """,
     }
-    _INDEX_KEYS = ("index", "record_index", "No", "no")
-    _FRIENDS_KEYS = ("play_with_friends", "with_friends")
 
     def __init__(
         self,
@@ -155,59 +160,40 @@ class PlayLogStore(SQLiteBaseStore):
 
     @staticmethod
     def _serialize_bool(value: Any) -> str:
-        if isinstance(value, bool):
-            return "TRUE" if value else "FALSE"
-        return "TRUE" if str(value).upper() == "TRUE" else "FALSE"
+        return serialize_play_log_bool(value)
 
     @staticmethod
     def _deserialize_bool(value: Any) -> bool:
-        return str(value).upper() == "TRUE"
+        return deserialize_play_log_bool(value)
+
+    @classmethod
+    def _row_to_record_model(cls, row: sqlite3.Row) -> PlayLogRecord:
+        return PlayLogRecord(
+            record_id=str(row["record_id"]),
+            device_id=str(row["device_id"]),
+            index=int(row["record_index"]),
+            start_time=str(row["start_time"]),
+            end_time=str(row["end_time"]),
+            title=str(row["title"]),
+            play_with_friends=cls._deserialize_bool(row["play_with_friends"]),
+        )
+
+    @classmethod
+    def _row_to_pending_record_model(cls, row: sqlite3.Row) -> PendingPlayLogRecord:
+        return PendingPlayLogRecord(
+            record=cls._row_to_record_model(row),
+            sync_action=str(row["sync_action"]),
+        )
 
     @classmethod
     def _row_to_record(cls, row: sqlite3.Row) -> Dict[str, Any]:
-        return {
-            "record_id": row["record_id"],
-            "device_id": row["device_id"],
-            "index": row["record_index"],
-            "start_time": row["start_time"],
-            "end_time": row["end_time"],
-            "title": row["title"],
-            "play_with_friends": cls._deserialize_bool(row["play_with_friends"]),
-        }
+        return cls._row_to_record_model(row).to_dict()
 
     @classmethod
     def _row_to_pending_record(cls, row: sqlite3.Row) -> Dict[str, Any]:
-        return {
-            **cls._row_to_record(row),
-            "_sync_action": row["sync_action"],
-        }
+        return cls._row_to_pending_record_model(row).to_dict()
 
-    @staticmethod
-    def _first_present(
-        record: Dict[str, Any],
-        keys: tuple[str, ...],
-        default: Any = "",
-    ) -> Any:
-        for key in keys:
-            value = record.get(key)
-            if value not in (None, ""):
-                return value
-        return default
-
-    def _record_index_from(self, record: Dict[str, Any]) -> int:
-        index = self._first_present(record, self._INDEX_KEYS)
-        if index in (None, ""):
-            raise ValueError("play record index is required")
-        return int(index)
-
-    def _record_id_from(self, record: Dict[str, Any]) -> str:
-        record_id = str(record.get("record_id") or record.get("id") or "").strip()
-        if record_id:
-            return record_id
-        record_index = self._record_index_from(record)
-        return f"sheet:{record_index}"
-
-    def load_records(self) -> List[Dict[str, Any]]:
+    def load_record_models(self) -> List[PlayLogRecord]:
         with self._connection() as conn:
             rows = conn.execute(
                 """
@@ -218,7 +204,10 @@ class PlayLogStore(SQLiteBaseStore):
                 ORDER BY record_index
                 """
             ).fetchall()
-        return [self._row_to_record(row) for row in rows]
+        return [self._row_to_record_model(row) for row in rows]
+
+    def load_records(self) -> List[Dict[str, Any]]:
+        return [record.to_dict() for record in self.load_record_models()]
 
     def max_index(self) -> int:
         with self._connection() as conn:
@@ -227,24 +216,17 @@ class PlayLogStore(SQLiteBaseStore):
             ).fetchone()
         return int(row[0]) if row is not None else 0
 
-    def save_record(
+    def save_record_model(
         self,
-        values: List[Any],
+        write: PlayLogWrite,
         *,
         backed_up: bool = False,
-    ) -> Dict[str, Any]:
-        if len(values) < 5:
-            raise ValueError("play record requires index, start, end, title, friends")
-
-        record = {
-            "record_id": str(uuid4()),
-            "device_id": self.device_id,
-            "index": int(values[0]),
-            "start_time": str(values[1]),
-            "end_time": str(values[2]),
-            "title": str(values[3]),
-            "play_with_friends": self._serialize_bool(values[4]),
-        }
+    ) -> PlayLogRecord:
+        record = PlayLogRecord.from_write(
+            write,
+            record_id=str(uuid4()),
+            device_id=self.device_id,
+        )
         with self._connection() as conn:
             conn.execute(
                 """
@@ -272,21 +254,29 @@ class PlayLogStore(SQLiteBaseStore):
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
-                    record["record_id"],
-                    record["device_id"],
-                    record["index"],
-                    record["start_time"],
-                    record["end_time"],
-                    record["title"],
-                    record["play_with_friends"],
+                    record.record_id,
+                    record.device_id,
+                    record.index,
+                    record.start_time,
+                    record.end_time,
+                    record.title,
+                    self._serialize_bool(record.play_with_friends),
                     1 if backed_up else 0,
                     "append",
                 ),
             )
-        return {
-            **record,
-            "play_with_friends": self._deserialize_bool(record["play_with_friends"]),
-        }
+        return record
+
+    def save_record(
+        self,
+        values: List[Any],
+        *,
+        backed_up: bool = False,
+    ) -> Dict[str, Any]:
+        return self.save_record_model(
+            PlayLogWrite.from_values(values),
+            backed_up=backed_up,
+        ).to_dict()
 
     def import_records(self, records: List[Dict[str, Any]], *, backed_up: bool) -> int:
         return self.import_records_detailed(records, backed_up=backed_up).imported
@@ -315,24 +305,13 @@ class PlayLogStore(SQLiteBaseStore):
                 imported += 1
         return PlayLogImportResult(imported=imported, skipped=skipped)
 
-    def _normalize_imported_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        record_id = self._record_id_from(record)
-        return {
-            "record_id": record_id,
-            "device_id": str(record.get("device_id") or "unknown-device"),
-            "index": self._record_index_from(record),
-            "start_time": str(record["start_time"]),
-            "end_time": str(record["end_time"]),
-            "title": str(record["title"]),
-            "play_with_friends": self._serialize_bool(
-                self._first_present(record, self._FRIENDS_KEYS, False)
-            ),
-        }
+    def _normalize_imported_record(self, record: Dict[str, Any]) -> PlayLogRecord:
+        return PlayLogRecord.from_mapping(record)
 
     @staticmethod
     def _upsert_imported_record(
         conn: sqlite3.Connection,
-        normalized: Dict[str, Any],
+        normalized: PlayLogRecord,
         *,
         backed_up: bool,
     ) -> None:
@@ -363,17 +342,28 @@ class PlayLogStore(SQLiteBaseStore):
                 updated_at = CURRENT_TIMESTAMP
             """,
             (
-                normalized["record_id"],
-                normalized["device_id"],
-                normalized["index"],
-                normalized["start_time"],
-                normalized["end_time"],
-                normalized["title"],
-                normalized["play_with_friends"],
+                normalized.record_id,
+                normalized.device_id,
+                normalized.index,
+                normalized.start_time,
+                normalized.end_time,
+                normalized.title,
+                serialize_play_log_bool(normalized.play_with_friends),
                 1 if backed_up else 0,
                 "append",
             ),
         )
+
+    def save_imported_record_model(
+        self,
+        record: Dict[str, Any],
+        *,
+        backed_up: bool,
+    ) -> PlayLogRecord:
+        normalized = self._normalize_imported_record(record)
+        with self._connection() as conn:
+            self._upsert_imported_record(conn, normalized, backed_up=backed_up)
+        return normalized
 
     def save_imported_record(
         self,
@@ -381,15 +371,10 @@ class PlayLogStore(SQLiteBaseStore):
         *,
         backed_up: bool,
     ) -> Dict[str, Any]:
-        normalized = self._normalize_imported_record(record)
-        with self._connection() as conn:
-            self._upsert_imported_record(conn, normalized, backed_up=backed_up)
-        return {
-            **normalized,
-            "play_with_friends": self._deserialize_bool(
-                normalized["play_with_friends"]
-            ),
-        }
+        return self.save_imported_record_model(
+            record,
+            backed_up=backed_up,
+        ).to_dict()
 
     def mark_backed_up(self, record_id: str) -> None:
         with self._connection() as conn:
@@ -404,7 +389,7 @@ class PlayLogStore(SQLiteBaseStore):
                 (record_id,),
             )
 
-    def reissue_record_id(self, record_id: str) -> Dict[str, Any]:
+    def reissue_record_id_model(self, record_id: str) -> PlayLogRecord:
         new_record_id = str(uuid4())
         with self._connection() as conn:
             conn.execute(
@@ -429,9 +414,12 @@ class PlayLogStore(SQLiteBaseStore):
             ).fetchone()
         if row is None:
             raise ValueError(f"play record not found: {record_id}")
-        return self._row_to_record(row)
+        return self._row_to_record_model(row)
 
-    def load_pending_backup_records(self) -> List[Dict[str, Any]]:
+    def reissue_record_id(self, record_id: str) -> Dict[str, Any]:
+        return self.reissue_record_id_model(record_id).to_dict()
+
+    def load_pending_backup_record_models(self) -> List[PendingPlayLogRecord]:
         with self._connection() as conn:
             rows = conn.execute(
                 """
@@ -442,22 +430,25 @@ class PlayLogStore(SQLiteBaseStore):
                 ORDER BY record_index
                 """
             ).fetchall()
-        return [self._row_to_pending_record(row) for row in rows]
+        return [self._row_to_pending_record_model(row) for row in rows]
 
-    def update_record(
+    def load_pending_backup_records(self) -> List[Dict[str, Any]]:
+        return [
+            record.to_dict()
+            for record in self.load_pending_backup_record_models()
+        ]
+
+    def update_record_model(
         self,
         record_id: str,
-        values: List[Any],
+        write: PlayLogWrite,
         *,
         backed_up: bool = False,
         sync_action: str = "update",
-    ) -> Dict[str, Any]:
-        if len(values) < 5:
-            raise ValueError("play record requires index, start, end, title, friends")
+    ) -> PlayLogRecord:
         if sync_action not in {"append", "update"}:
             raise ValueError(f"unknown play log sync action: {sync_action}")
 
-        serialized_friends = self._serialize_bool(values[4])
         with self._connection() as conn:
             conn.execute(
                 """
@@ -473,11 +464,11 @@ class PlayLogStore(SQLiteBaseStore):
                 WHERE record_id = ?
                 """,
                 (
-                    int(values[0]),
-                    str(values[1]),
-                    str(values[2]),
-                    str(values[3]),
-                    serialized_friends,
+                    write.index,
+                    write.start_time,
+                    write.end_time,
+                    write.title,
+                    write.serialized_friends(),
                     1 if backed_up else 0,
                     "append" if backed_up else sync_action,
                     record_id,
@@ -494,9 +485,24 @@ class PlayLogStore(SQLiteBaseStore):
             ).fetchone()
         if row is None:
             raise ValueError(f"play record not found: {record_id}")
-        return self._row_to_record(row)
+        return self._row_to_record_model(row)
 
-    def delete_record(self, record_id: str) -> Dict[str, Any]:
+    def update_record(
+        self,
+        record_id: str,
+        values: List[Any],
+        *,
+        backed_up: bool = False,
+        sync_action: str = "update",
+    ) -> Dict[str, Any]:
+        return self.update_record_model(
+            record_id,
+            PlayLogWrite.from_values(values),
+            backed_up=backed_up,
+            sync_action=sync_action,
+        ).to_dict()
+
+    def delete_record_model(self, record_id: str) -> PlayLogRecord:
         with self._connection() as conn:
             row = conn.execute(
                 """
@@ -510,7 +516,7 @@ class PlayLogStore(SQLiteBaseStore):
             if row is None:
                 raise ValueError(f"play record not found: {record_id}")
 
-            record = self._row_to_record(row)
+            record = self._row_to_record_model(row)
             if int(row["backed_up"]) == 0 and str(row["sync_action"]) == "append":
                 conn.execute(
                     "DELETE FROM play_records WHERE record_id = ?",
@@ -530,3 +536,6 @@ class PlayLogStore(SQLiteBaseStore):
                 (record_id,),
             )
         return record
+
+    def delete_record(self, record_id: str) -> Dict[str, Any]:
+        return self.delete_record_model(record_id).to_dict()

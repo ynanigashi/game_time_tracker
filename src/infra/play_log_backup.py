@@ -12,6 +12,7 @@ from src.infra.config_loader import (
     PLAY_LOG_SYNC_CONFLICT_OVERWRITE,
 )
 from src.infra.gspread_service import GspreadService
+from src.infra.play_log_models import PlayLogRecord, remote_play_log_record_id
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +67,8 @@ class PlayLogBackupMixin:
         records: List[Dict[str, Any]],
     ) -> Tuple[int, int]:
         pending_ids = {
-            str(record["record_id"])
-            for record in self.play_log_store.load_pending_backup_records()
+            record.record_id
+            for record in self.play_log_store.load_pending_backup_record_models()
         }
         records_to_import = [
             record
@@ -89,7 +90,7 @@ class PlayLogBackupMixin:
 
     @staticmethod
     def _remote_record_id(record: Dict[str, Any]) -> str:
-        return str(record.get("record_id") or record.get("id") or "").strip()
+        return remote_play_log_record_id(record)
 
     @classmethod
     def _remote_record_ids(cls, records: List[Dict[str, Any]]) -> set[str]:
@@ -100,26 +101,12 @@ class PlayLogBackupMixin:
         }
 
     @staticmethod
-    def _record_to_values(record: Dict[str, Any]) -> List[Any]:
-        return [
-            record["record_id"],
-            record.get("device_id", ""),
-            record["index"],
-            record["start_time"],
-            record["end_time"],
-            record["title"],
-            record.get("play_with_friends", False),
-        ]
+    def _record_to_values(record: PlayLogRecord) -> List[Any]:
+        return record.to_backup_values()
 
     @staticmethod
-    def _record_to_legacy_values(record: Dict[str, Any]) -> List[Any]:
-        return [
-            record["index"],
-            record["start_time"],
-            record["end_time"],
-            record["title"],
-            record.get("play_with_friends", False),
-        ]
+    def _record_to_legacy_values(record: PlayLogRecord) -> List[Any]:
+        return record.to_legacy_backup_values()
 
     @staticmethod
     def _uses_legacy_backup_schema(records: List[Dict[str, Any]]) -> bool:
@@ -131,7 +118,7 @@ class PlayLogBackupMixin:
     @classmethod
     def _record_to_backup_values(
         cls,
-        record: Dict[str, Any],
+        record: PlayLogRecord,
         *,
         legacy_schema: bool,
     ) -> List[Any]:
@@ -145,7 +132,7 @@ class PlayLogBackupMixin:
     ) -> _PlayLogBackupResult:
         if self.gspread_service is None:
             return _PlayLogBackupResult(backed_up=0, pending_count=0)
-        pending_records = self.play_log_store.load_pending_backup_records()
+        pending_records = self.play_log_store.load_pending_backup_record_models()
         pending_count = len(pending_records)
         if not pending_records:
             return _PlayLogBackupResult(backed_up=0, pending_count=0)
@@ -155,9 +142,10 @@ class PlayLogBackupMixin:
         backed_up = 0
         overwritten = 0
         reissued = 0
-        for record in pending_records:
-            record_id = str(record["record_id"])
-            sync_action = str(record.get("_sync_action") or "append")
+        for pending_record in pending_records:
+            record = pending_record.record
+            record_id = record.record_id
+            sync_action = pending_record.sync_action or "append"
             if sync_action == "delete":
                 try:
                     success = self._delete_backup_record(
@@ -258,8 +246,8 @@ class PlayLogBackupMixin:
                     overwritten += 1
                     continue
                 if self.sync_conflict_policy == PLAY_LOG_SYNC_CONFLICT_NEW_ID:
-                    record = self.play_log_store.reissue_record_id(record_id)
-                    record_id = str(record["record_id"])
+                    record = self.play_log_store.reissue_record_id_model(record_id)
+                    record_id = record.record_id
                     reissued += 1
             try:
                 values = self._record_to_backup_values(
@@ -280,7 +268,7 @@ class PlayLogBackupMixin:
             if not success:
                 logger.warning(
                     "failed to back up pending play record: %s",
-                    record.get("index"),
+                    record.index,
                 )
                 return _PlayLogBackupResult(
                     backed_up=backed_up,
@@ -288,9 +276,9 @@ class PlayLogBackupMixin:
                     failed=pending_count - backed_up,
                     overwritten=overwritten,
                     reissued=reissued,
-                    error_message=f"未バックアップログの送信に失敗: No.{record.get('index')}",
+                    error_message=f"未バックアップログの送信に失敗: No.{record.index}",
                 )
-            self.play_log_store.mark_backed_up(str(record["record_id"]))
+            self.play_log_store.mark_backed_up(record.record_id)
             remote_record_ids.add(record_id)
             backed_up += 1
         return _PlayLogBackupResult(
@@ -302,7 +290,7 @@ class PlayLogBackupMixin:
 
     def _update_backup_record(
         self,
-        record: Dict[str, Any],
+        record: PlayLogRecord,
         *,
         legacy_schema: bool,
     ) -> bool:
@@ -311,17 +299,17 @@ class PlayLogBackupMixin:
         if legacy_schema:
             return self.gspread_service.update_row_by_key(
                 "No",
-                str(record["index"]),
+                str(record.index),
                 self._record_to_legacy_values(record),
             )
         return self.gspread_service.update_row_by_record_id(
-            str(record["record_id"]),
+            record.record_id,
             self._record_to_values(record),
         )
 
     def _delete_backup_record(
         self,
-        record: Dict[str, Any],
+        record: PlayLogRecord,
         *,
         legacy_schema: bool,
     ) -> bool:
@@ -330,13 +318,13 @@ class PlayLogBackupMixin:
         if legacy_schema:
             return self.gspread_service.delete_row_by_key(
                 "No",
-                str(record["index"]),
+                str(record.index),
             )
-        return self.gspread_service.delete_row_by_record_id(str(record["record_id"]))
+        return self.gspread_service.delete_row_by_record_id(record.record_id)
 
     def _write_edited_record_to_backup(
         self,
-        record: Dict[str, Any],
+        record: PlayLogRecord,
     ) -> Tuple[bool, str]:
         if self.gspread_service is None:
             return False, ""
@@ -360,7 +348,7 @@ class PlayLogBackupMixin:
             logger.warning("failed to update play record backup: %s", exc)
             return False, str(exc)
 
-    def _append_new_record_to_backup(self, record: Dict[str, Any]) -> Tuple[bool, str]:
+    def _append_new_record_to_backup(self, record: PlayLogRecord) -> Tuple[bool, str]:
         """Append a newly saved record without re-reading the whole spreadsheet."""
         if self.gspread_service is None:
             return False, ""
@@ -371,7 +359,7 @@ class PlayLogBackupMixin:
             )
             appended = self.gspread_service.append_row(values)
             if appended:
-                self.play_log_store.mark_backed_up(str(record["record_id"]))
+                self.play_log_store.mark_backed_up(record.record_id)
                 return True, ""
             return False, "spreadsheet row append failed"
         except Exception as exc:
